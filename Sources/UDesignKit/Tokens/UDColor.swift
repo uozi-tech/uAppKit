@@ -1,0 +1,246 @@
+import SwiftUI
+#if canImport(AppKit)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
+
+/// uTerm DesignKit 色彩 token —— Claude Design 交付包 `Components.html` 的设计系统。
+///
+/// 与 `AppTheme.Palette`（系统语义色）和 `WS`（工作区**固定深色**）并存：`UD` 携带
+/// 设计稿的**两套精确值（深 + 浅）**，通过动态 `NSColor` 随系统外观自动切换。
+/// DesignKit 组件只读 `UD` token + 普通值输入，不依赖任何 domain model。
+///
+/// 命名空间用扁平静态属性（对齐 `WS` 的用法），并按需挂 `UD.Radius` / `UD.Space`
+/// / `UD.Shadow` / 排版子组（见 `UDMetrics.swift` / `UDTypography.swift`）。
+/// 标 `nonisolated` 让 token 能在任意上下文读取；`Color` 是 `Sendable`。
+public enum UD {
+    // MARK: - 动态色构造
+
+    /// 一个外观无关的 sRGB 颜色描述（`Sendable`，可安全被动态 provider 闭包捕获）。
+    public struct ColorSpec: Sendable, Equatable {
+        public let r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat
+
+        public nonisolated init(r: CGFloat, g: CGFloat, b: CGFloat, a: CGFloat) {
+            self.r = r
+            self.g = g
+            self.b = b
+            self.a = a
+        }
+
+        #if canImport(AppKit)
+        public nonisolated func nsColor() -> NSColor {
+            NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+        }
+        #elseif canImport(UIKit)
+        public nonisolated func uiColor() -> UIColor {
+            UIColor(red: r, green: g, blue: b, alpha: a)
+        }
+        #endif
+        public nonisolated func color() -> Color {
+            Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+        }
+        /// `0xRRGGBB` + alpha。
+        public nonisolated static func hex(_ h: UInt32, _ a: CGFloat = 1) -> ColorSpec {
+            ColorSpec(r: CGFloat((h >> 16) & 0xFF) / 255,
+                      g: CGFloat((h >> 8) & 0xFF) / 255,
+                      b: CGFloat(h & 0xFF) / 255, a: a)
+        }
+        /// 白色叠加（深色面上的描边 / 文本透明度）。
+        public nonisolated static func white(_ a: CGFloat) -> ColorSpec { ColorSpec(r: 1, g: 1, b: 1, a: a) }
+        /// 黑色叠加（浅色面上的描边 / 文本 / 细填充透明度）。
+        /// v2「填充即边界」：日间中性叠加一律纯黑基——旧石板蓝 slate(15,23,42) /
+        /// 墨蓝 ink(20,24,33) 已废除（设计稿 v2 全局禁蓝调灰）。
+        public nonisolated static func black(_ a: CGFloat) -> ColorSpec { ColorSpec(r: 0, g: 0, b: 0, a: a) }
+    }
+
+    /// 把 (深, 浅) 两个 spec 合成一个随系统外观切换的动态 `Color`。
+    public nonisolated static func dyn(_ dark: ColorSpec, _ light: ColorSpec) -> Color {
+        #if canImport(AppKit)
+        return Color(nsColor: dynNS(dark, light))
+        #elseif canImport(UIKit)
+        return Color(uiColor: UIColor { traits in
+            let isDark = traits.userInterfaceStyle == .dark
+            return (isDark ? dark : light).uiColor()
+        })
+        #else
+        return dark.color()
+        #endif
+    }
+
+    #if canImport(AppKit)
+    /// `dyn` 的 `NSColor` 版 —— 供 AppKit 视图（SQL 编辑器的 NSTextView / 行号栏等）
+    /// 直接消费，同样随系统外观切换。
+    public nonisolated static func dynNS(_ dark: ColorSpec, _ light: ColorSpec) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return (isDark ? dark : light).nsColor()
+        }
+    }
+    #endif
+
+    // MARK: - 表面 Surfaces（uTable.dc.html v2 --u-bg / --u-panel / --u-panelHi / --u-card）
+    // v2 日间：画布与 panel（标题栏 / 侧栏 / 工具栏）全部纯白 #FFFFFF，仅靠 hairline 分区；
+    // panelHi 收敛为近中性灰 #F2F2F3；中性叠加一律纯黑基（禁蓝调 slate）。
+    // 深色：骨架不变。
+    public nonisolated static let bg         = dyn(.hex(0x101012), .hex(0xFFFFFF))
+    public nonisolated static let panel      = dyn(.hex(0x17171A), .hex(0xFFFFFF))
+    public nonisolated static let panelHi    = dyn(.hex(0x1C1C20), .hex(0xF2F2F3))
+    public nonisolated static let panelHover = dyn(.hex(0x202026), .black(0.05))
+    /// 窗口外页底（设计稿 v2 --u-page-bg，仅日间与画布区分）。
+    public nonisolated static let pageBg     = dyn(.hex(0x101012), .hex(0xF4F4F5))
+    /// 卡片面（侧栏 / AI 助手面板 / 状态栏 / 连接卡）——设计稿 --u-card。
+    public nonisolated static let card       = dyn(.hex(0x1B1B1F), .hex(0xFFFFFF))
+    /// 浮层实体面（下拉 / 菜单 / popover）。浅色用纯白面板。
+    public nonisolated static let overlay    = dyn(.hex(0x1B1B1F), .hex(0xFFFFFF))
+    /// 模态实体面（指标卡 / 菜单栏面板）。
+    public nonisolated static let overlayHi  = dyn(.hex(0x202024), .hex(0xFFFFFF))
+
+    // MARK: - 描边 Stroke（uTable.dc.html v2 --u-border：深=白叠加 / 浅=纯黑叠加）
+    // v2 描边只允许四处：分区 hairline / 浮层 / 白底列表容器 / 状态描边（聚焦环·错误·拖放·同步中）。
+    public nonisolated static let border     = dyn(.white(0.07), .black(0.09))
+    public nonisolated static let borderHi   = dyn(.white(0.10), .black(0.13))
+
+    // MARK: - 文本 Text（uTable.dc.html v2 --u-text*：深=白叠加 / 浅=纯黑基叠加）
+    // text2 正文层 · text3 次要信息层 · text4 仅装饰 / 结构层（分隔线 / 行号 / 禁用图标）。
+    // v2 清单：日间 ramp = 黑 60% / 46% / 32%。
+    public nonisolated static let text       = dyn(.hex(0xEDEDEE), .hex(0x171718))
+    public nonisolated static let text2      = dyn(.white(0.46), .black(0.60))   // 正文层
+    public nonisolated static let text3      = dyn(.white(0.28), .black(0.46))   // 次要信息层
+    public nonisolated static let text4      = dyn(.white(0.18), .black(0.32))   // 仅装饰 / 结构层
+
+    // MARK: - 强调 Accent（可切换；见 AccentColor / AccentState。getter 同步读 selected →
+    // SwiftUI body 求值期访问被 Observation 追踪 → 切色全局自动重渲染。默认蓝 = 原手调值。）
+    @MainActor public static var accent: Color {
+        let a = AccentState.shared.selected
+        return dyn(a.accentSpec(dark: true), a.accentSpec(dark: false))
+    }
+    @MainActor public static var accentInk: Color {
+        let a = AccentState.shared.selected
+        return dyn(a.inkSpec(dark: true), a.inkSpec(dark: false))
+    }
+    @MainActor public static var accentSoft: Color {
+        let a = AccentState.shared.selected
+        return dyn(a.softSpec(dark: true), a.softSpec(dark: false))
+    }
+    @MainActor public static var accentPressed: Color {
+        let a = AccentState.shared.selected
+        return dyn(a.pressedSpec(dark: true), a.pressedSpec(dark: false))
+    }
+
+    // v2「填充即边界」accent tint 阶（两主题通用）：
+    // 选中 / 主操作底 14% · hover 22% · 禁用底 7%。不再使用 accent 30–55% 描边。
+    @MainActor public static var accentTint: Color { tint(0.14) }
+    @MainActor public static var accentTintHover: Color { tint(0.22) }
+    @MainActor public static var accentTintDisabled: Color { tint(0.07) }
+    @MainActor private static func tint(_ alpha: CGFloat) -> Color {
+        let a = AccentState.shared.selected
+        return dyn(a.accentSpec(dark: true).withAlpha(alpha),
+                   a.accentSpec(dark: false).withAlpha(alpha))
+    }
+
+    /// Nonisolated default accent (fixed blue, still dark/light dynamic) for use
+    /// as a **default parameter / stored-property value** in nonisolated inits.
+    /// uTable builds in Swift 5 mode, where default-argument expressions are
+    /// nonisolated and can't reference the `@MainActor` `accent` getter. uTable
+    /// ships no accent switcher, so the resolved value equals `accent` at runtime.
+    /// Explicit callers may still pass the dynamic `UD.accent`.
+    public nonisolated static let accentDefault = dyn(AccentColor.blue.accentSpec(dark: true),
+                                               AccentColor.blue.accentSpec(dark: false))
+
+    /// AI 介入固定紫（设计稿 `#a78bfa`，§6）。与连接强调色刻意区分；深浅同值。
+    /// 快捷命令「AI 介入」徽标 / 开关 / 闪标 / 图标染色专用。
+    public nonisolated static let aiAccent = ColorSpec.hex(0xA78BFA).color()
+
+    // 备选强调色（设计稿固定 macOS 系统色，深浅同值）。
+    public nonisolated static let accentViolet = ColorSpec.hex(0xBF5AF2).color()   // 雾紫
+    public nonisolated static let accentSage   = ColorSpec.hex(0x30D158).color()   // 鼠尾草
+    public nonisolated static let accentGold   = ColorSpec.hex(0xFFD60A).color()   // 黯金
+    public nonisolated static let accentRose   = ColorSpec.hex(0xFF5A5A).color()   // 藕薇
+
+    // MARK: - 语义状态 Semantic（设计稿 --u-status-*）
+    // 暗夜：iOS 鲜艳系统色（保持原样）。日间：低饱和、年轻化——白底上仍清晰可辨，
+    // 由设计稿 oklch 值转 sRGB（绿 0.70/0.13/156、黄 0.78/0.115/82、橙 0.72/0.125/56、
+    // 红 0.64/0.15/24、蓝 0.67/0.115/242）。状态点 / 徽章 / danger 态等全经此 token。
+    public nonisolated static let success = dyn(.hex(0x30D158), .hex(0x4EB67C))   // 已连接
+    public nonisolated static let warning = dyn(.hex(0xFFD60A), .hex(0xDCB05B))   // 连接中
+    public nonisolated static let caution = dyn(.hex(0xFF9F0A), .hex(0xE08E52))   // 断开
+    public nonisolated static let danger  = dyn(.hex(0xFF5A5A), .hex(0xD8625E))   // 失败 / 危险
+    public nonisolated static let info    = dyn(.hex(0x64D2FF), .hex(0x4D9DD6))   // 信息
+
+    // MARK: - 文件夹 / 图标色 Folder & Icon（设计稿 --u-folder-1/2 · --u-icon-teal）
+    // 暗夜保持原样（鲜艳双色蓝 + 青）；日间文件夹换 macOS Finder 风格鲜亮饱和蓝
+    // （旧低饱和雾霾蓝看起来发灰），符号链接转向箭头仍柔青。
+    public nonisolated static let folder1    = dyn(.hex(0x5B8FD6), .hex(0x2B86E6))   // 文件夹背片（深蓝）
+    public nonisolated static let folder2    = dyn(.hex(0x79A9E8), .hex(0x4CA7F8))   // 文件夹前片（亮蓝，主填充）
+    public nonisolated static let folderArrow = dyn(.hex(0x0E2742), .hex(0xFFFFFF))  // 文件夹「返回上级」箭头
+    public nonisolated static let iconTeal   = dyn(.hex(0x2DD4BF), .hex(0x0FB6AC))   // 符号链接转向箭头（日间 = oklch(0.70 0.12 188)）
+
+    // MARK: - 文档图标色 Doc（设计稿 --u-doc-bg/line/fold/detail）
+    // 暗夜：白叠加纸面（半透叠在深底）。日间：纯白纸 + 1pt 暖中性灰描边 + 暖白右上折角 +
+    // 暖灰内文线——取代旧「灰色纸片」（doc.fill 填 text4），且不发蓝（与暖中性白底统一）。
+    public nonisolated static let docBg     = dyn(.white(0.09), .hex(0xFFFFFF))   // 纸张填充
+    public nonisolated static let docLine   = dyn(.white(0.26), .hex(0xC9C7C4))   // 描边（纸 + 折角共用）
+    public nonisolated static let docFold   = dyn(.white(0.16), .hex(0xEEEDEA))   // 右上折角
+    public nonisolated static let docDetail = dyn(.white(0.32), .hex(0xA8A6A3))   // 内部文本线
+
+    // MARK: - 代码区 Code（设计稿 --u-term-bg · --u-syn-*，2026-07 评审 §4）
+    // 代码面板随主题，不再强制深色：termBg 深 #0A0A0C / 浅 #F6F8FA（GitHub 风浅代码底）。
+    // 语法高亮双套：深 = VSCode Dark 系，浅 = GitHub Light 系。spec 常量供
+    // SwiftUI（`dyn`）与 AppKit（`dynNS`，SQL 编辑器 NSTextView）两侧共用。
+    public enum CodeSpec {
+        public nonisolated static let bg:      (dark: ColorSpec, light: ColorSpec) = (.hex(0x08080A), .hex(0xFFFFFF))
+        public nonisolated static let kw:      (dark: ColorSpec, light: ColorSpec) = (.hex(0xC586C0), .hex(0x8250DF))
+        public nonisolated static let fn:      (dark: ColorSpec, light: ColorSpec) = (.hex(0x9CDCFE), .hex(0x0550AE))
+        public nonisolated static let str:     (dark: ColorSpec, light: ColorSpec) = (.hex(0xCE9178), .hex(0xA8410B))
+        public nonisolated static let num:     (dark: ColorSpec, light: ColorSpec) = (.hex(0xB5CEA8), .hex(0x0A7D2C))
+        public nonisolated static let comment: (dark: ColorSpec, light: ColorSpec) = (.hex(0x6A9955), .hex(0x6A737D))
+        public nonisolated static let op:      (dark: ColorSpec, light: ColorSpec) = (.hex(0xD4D4D4), .hex(0x3B3B40))
+    }
+    public nonisolated static let termBg     = dyn(CodeSpec.bg.dark, CodeSpec.bg.light)
+    public nonisolated static let synKw      = dyn(CodeSpec.kw.dark, CodeSpec.kw.light)
+    public nonisolated static let synFn      = dyn(CodeSpec.fn.dark, CodeSpec.fn.light)
+    public nonisolated static let synStr     = dyn(CodeSpec.str.dark, CodeSpec.str.light)
+    public nonisolated static let synNum     = dyn(CodeSpec.num.dark, CodeSpec.num.light)
+    public nonisolated static let synComment = dyn(CodeSpec.comment.dark, CodeSpec.comment.light)
+    public nonisolated static let synOp      = dyn(CodeSpec.op.dark, CodeSpec.op.light)
+
+    // MARK: - 输入底 Input（设计稿 v2 --u-input-bg：输入框改淡灰填充、无边）
+    // 暗夜：白叠加 6%（DesignKit 清单 3.5%→6%）。日间：黑叠加 5%（边界由填充承担）。
+    public nonisolated static let inputBg     = dyn(.white(0.06),  .black(0.05))
+    public nonisolated static let inputBgSoft = dyn(.white(0.045), .black(0.04))
+
+    // MARK: - 行态 Row / Tab（uTable.dc.html v2 --u-row-hover / --u-row-sel / --u-tab-active）
+    // rowHover = 中性 hover（日 黑4%）。导航类选中态（列表行 / pill / ⌘K 行 / 底部导航）
+    // = accent 14% 填充 + accent 文字图标（清单 §4「驾驶舱」样式），无 accent 描边；
+    // uTable 无强调色切换器，故用 nonisolated `accentDefault` 派生（运行时等价 `accent`）。
+    public nonisolated static let rowHover    = dyn(.white(0.035), .black(0.04))
+    public nonisolated static let rowSelected = dyn(AccentColor.blue.accentSpec(dark: true).withAlpha(0.14),
+                                             AccentColor.blue.accentSpec(dark: false).withAlpha(0.14))
+    /// 激活 Tab 底（日间 黑 5.5%；暗夜保持与编辑器正文同底的无缝拼接 = bg 深色）。
+    public nonisolated static let tabActive   = dyn(.hex(0x101012), .black(0.055))
+
+    // MARK: - 自适应灰阶 uw-*（uTable.dc.html v2 --uw-*：深=白叠加 / 浅=黑叠加）
+    // v2 整体加深一档（变量名保留旧 α）：灰底控件的边界全靠填充，禁再叠描边。
+    public nonisolated static let uw02 = dyn(.white(0.035), .black(0.045))   // hover / 斑马行
+    public nonisolated static let uw03 = dyn(.white(0.045), .black(0.055))   // chip / 胶囊
+    public nonisolated static let uw04 = dyn(.white(0.055), .black(0.065))   // 控件底（次按钮 / 输入框级）
+    public nonisolated static let uw05 = dyn(.white(0.065), .black(0.075))   // 进度轨道
+    public nonisolated static let uw06 = dyn(.white(0.075), .black(0.085))   // 控件 hover 加深档
+    public nonisolated static let uw08 = dyn(.white(0.10),  .black(0.11))    // 未选中 checkbox
+    public nonisolated static let uw10 = dyn(.white(0.12),  .black(0.13))    // Switch 关态轨道
+
+    // 旧 fill 系列 → v2 uw ramp 的别名（渐进迁移；新代码请直接用 uw*）。
+    public nonisolated static let fillFaint = uw03   // 卡片 / 气泡静态底
+    public nonisolated static let fillSoft  = uw05   // 选中段 / 代码片
+    public nonisolated static let fillMed   = uw08   // 进度槽等功能轨道
+
+    // MARK: - 遥测分类色 Telemetry（状态栏 / 指标卡，深浅各一套）
+    public nonisolated static let mPlatform = dyn(.hex(0x409CFF), .hex(0x007AFF))   // 平台
+    public nonisolated static let mEndpoint = dyn(.hex(0x9AA7B5), .hex(0x6B7681))   // endpoint / 时间戳
+    public nonisolated static let mUptime   = dyn(.hex(0x30D158), .hex(0x34C759))   // 运行时长
+    public nonisolated static let mLoad     = dyn(.hex(0xFF5F7E), .hex(0xFF3B30))   // 负载
+    public nonisolated static let mCPU      = dyn(.hex(0x3FD6C0), .hex(0x1FC0A8))   // CPU
+    public nonisolated static let mMem      = dyn(.hex(0xFFD60A), .hex(0xFFAA00))   // 内存
+    public nonisolated static let mDisk     = dyn(.hex(0xFF9F0A), .hex(0xFF8A00))   // 磁盘
+}
