@@ -2,7 +2,7 @@ import SwiftUI
 
 /// uTerm DesignKit 折叠区头 —— 可展开分区/分组的标题行。
 ///
-/// 前导「chevron.right」随 `isExpanded` 旋转 90°，可选前导 SF 图标 + 标题 + 可选计数，
+/// 前导「chevron.right」随 `isExpanded` 旋转 90°，可选前导 SF 图标 + 标题，可选计数靠行尾，
 /// 整行 30 高、hover 提 `UD.rowHover`、点击切换 `isExpanded`。用于「已保存查询」等
 /// 可折叠分区头。**注意**：带特殊手势（chevron 独立点击 vs 整行打开）或行内展开的
 /// 数据树行（schema `row`）属核心导航复合交互，仍应保留 bespoke，不套此组件。
@@ -41,10 +41,10 @@ public struct UDDisclosureHeader: View {
                 Text(label)
                     .font(UD.font(12.5, weight: .medium))
                     .foregroundStyle(UD.text2)
+                Spacer(minLength: 4)
                 if let count {
                     Text("\(count)").font(UD.mono(10)).foregroundStyle(UD.text4)
                 }
-                Spacer(minLength: 4)
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
