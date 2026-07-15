@@ -3,8 +3,9 @@ import SwiftUI
 /// uTerm DesignKit 按钮族 —— 设计稿 v2「填充即边界」Buttons 组。
 ///
 /// `UDButton` 是 SwiftUI `Button` 的包装，五种风格（primary / secondary / ghost /
-/// danger / link），前四种统一 32 高、14 横向内边距、`UD.Radius.md` 圆角、`UD.control`
-/// 字体；`link` 为紧凑透明文字链（无底、无固定高、11.5pt）。
+/// danger / link），前四种默认 32 高（可为局部操作区显式调整）、14 横向内边距、
+/// `UD.Radius.md` 圆角、`UD.control` 字体；`link` 为紧凑透明文字链
+/// （无底、无固定高、11.5pt）。
 /// 通过自定义 `ButtonStyle` 读 hover（`.onHover`）+ `configuration.isPressed`。
 ///
 /// v2 约定：**有填充就没有描边**（透明 1pt 描边占位防聚焦跳动）；两主题同构——
@@ -24,6 +25,8 @@ public struct UDButton: View {
     var systemImage: String? = nil
     /// 按钮内尾部的键位提示（如 "esc"、"⌘↵"）；nil 不显示。随按钮文本色自适应。
     var trailingHint: String? = nil
+    /// 非 link 按钮的视觉高度；默认保持设计系统的紧凑 32pt。
+    var height: CGFloat = 32
     /// 进行中：前置迷你转子、按钮不可点。文案由调用方切换（传「创建中…」）。
     var isLoading: Bool = false
     let action: () -> Void
@@ -33,6 +36,7 @@ public struct UDButton: View {
         style: Style = .primary,
         systemImage: String? = nil,
         trailingHint: String? = nil,
+        height: CGFloat = 32,
         isLoading: Bool = false,
         action: @escaping () -> Void
     ) {
@@ -40,6 +44,7 @@ public struct UDButton: View {
         self.style = style
         self.systemImage = systemImage
         self.trailingHint = trailingHint
+        self.height = height
         self.isLoading = isLoading
         self.action = action
     }
@@ -67,7 +72,7 @@ public struct UDButton: View {
                 }
             }
         }
-        .buttonStyle(UDButtonStyle(style: style))
+        .buttonStyle(UDButtonStyle(style: style, height: height))
         .allowsHitTesting(!isLoading)
     }
 }
@@ -93,6 +98,7 @@ private struct UDButtonKbd: View {
 
 private struct UDButtonStyle: ButtonStyle {
     let style: UDButton.Style
+    let height: CGFloat
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
@@ -110,7 +116,7 @@ private struct UDButtonStyle: ButtonStyle {
                 configuration.label
                     .font(UD.control)
                     .foregroundStyle(c.text)
-                    .frame(height: 32)
+                    .frame(height: height)
                     .padding(.horizontal, 14)
                     .background(
                         RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
