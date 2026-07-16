@@ -23,6 +23,8 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
     var anchor: Anchor = .leading
     /// 浮层与触发器之间的竖向间隙。
     var gap: CGFloat = 6
+    /// 浮层是否成为 key window（内含搜索框等 TextField 时传 true，见 `.anchoredPanel`）。
+    var becomesKey = false
     /// 触发器（参数 = 当前是否展开，便于旋转 chevron）。
     @ViewBuilder var trigger: (Bool) -> Trigger
     /// 浮层内容（通常是 `UDMenu`，其选项 `action` 自带业务动作；收起由本组件经 dismiss 统一处理）。
@@ -35,11 +37,13 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
     public init(
         anchor: Anchor = .leading,
         gap: CGFloat = 6,
+        becomesKey: Bool = false,
         @ViewBuilder trigger: @escaping (Bool) -> Trigger,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.anchor = anchor
         self.gap = gap
+        self.becomesKey = becomesKey
         self.trigger = trigger
         self.content = content
     }
@@ -60,7 +64,8 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
                 open = true
             }
             .anchoredPanel(isPresented: presented, gap: gap,
-                           alignment: anchor == .leading ? .leading : .trailing) { dismiss in
+                           alignment: anchor == .leading ? .leading : .trailing,
+                           becomesKey: becomesKey) { dismiss in
                 content().environment(\.udMenuDismiss, dismiss)
             }
     }

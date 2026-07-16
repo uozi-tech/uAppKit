@@ -25,13 +25,17 @@ private let anchoredPanelShadowInset: CGFloat = 24
 public enum UDPanelAlignment { case leading, trailing }
 
 public extension View {
+    /// - Parameter becomesKey: 呈现后把面板设为 key window（无边框窗默认不可成 key）——
+    ///   面板内含 TextField（如连接菜单的搜索框）需要键盘焦点时传 `true`；纯点选菜单保持
+    ///   默认 `false`，避免抢走主窗口按键。
     func anchoredPanel<PanelContent: View>(
         isPresented: Binding<Bool>,
         gap: CGFloat = 6,
         alignment: UDPanelAlignment = .leading,
+        becomesKey: Bool = false,
         @ViewBuilder content: @escaping (_ dismiss: @escaping () -> Void) -> PanelContent
     ) -> some View {
-        background(AnchoredPanelPresenter(isPresented: isPresented, gap: gap, alignment: alignment, content: content))
+        background(AnchoredPanelPresenter(isPresented: isPresented, gap: gap, alignment: alignment, becomesKey: becomesKey, content: content))
     }
 }
 
@@ -39,6 +43,7 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
     @Binding var isPresented: Bool
     let gap: CGFloat
     let alignment: UDPanelAlignment
+    let becomesKey: Bool
     @ViewBuilder let content: (_ dismiss: @escaping () -> Void) -> PanelContent
 
     func makeNSView(context: Context) -> NSView { NSView() }
@@ -48,13 +53,23 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         coord.anchor = nsView
         coord.gap = gap
         coord.alignment = alignment
+        coord.becomesKey = becomesKey
         coord.appearance = nsView.effectiveAppearance
         // dismiss 走 binding：置 false → SwiftUI 重求值 → 下一次 updateNSView 收起。
         let dismiss: () -> Void = { isPresented = false }
         coord.onRequestDismiss = dismiss
         // 内容外套透明边 + 自带 md 落影（窗口零绘制，避免双重背景 / 阴影被裁）。
-        coord.buildContent = {
-            AnyView(content(dismiss).udShadow(.md).padding(anchoredPanelShadowInset))
+        // onGeometryChange 盯内容实际尺寸：展开后内容变高/变矮（如搜索过滤）时面板跟着
+        // 改 frame——否则 NSHostingView 定格在呈现时的 fittingSize，缩小的内容会被垂直居中。
+        coord.buildContent = { [weak coord] in
+            AnyView(
+                content(dismiss)
+                    .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
+                        coord?.contentSizeChanged(size)
+                    }
+                    .udShadow(.md)
+                    .padding(anchoredPanelShadowInset)
+            )
         }
         coord.setPresented(isPresented)
     }
@@ -70,6 +85,7 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         weak var anchor: NSView?
         var gap: CGFloat = 6
         var alignment: UDPanelAlignment = .leading
+        var becomesKey = false
         var appearance: NSAppearance?
         var buildContent: (() -> AnyView)?
         /// presenter 注入的「置 binding=false」。走 binding 而非直接拆窗口，避免同一事件里重入。
@@ -92,11 +108,17 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             let hosting = NSHostingView(rootView: build())
             hosting.setFrameSize(hosting.fittingSize)
 
-            let panel = NSPanel(
-                contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered, defer: false
-            )
+            let panel: NSPanel = becomesKey
+                ? UDKeyableBorderlessPanel(
+                    contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
+                    styleMask: [.borderless, .nonactivatingPanel],
+                    backing: .buffered, defer: false
+                )
+                : NSPanel(
+                    contentRect: NSRect(origin: .zero, size: hosting.fittingSize),
+                    styleMask: [.borderless, .nonactivatingPanel],
+                    backing: .buffered, defer: false
+                )
             panel.isOpaque = false
             panel.backgroundColor = .clear
             panel.hasShadow = false         // 落影走内容 udShadow —— 窗口投影会造成「双重背景」
@@ -111,7 +133,38 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             parent.addChildWindow(panel, ordered: .above)   // 随父窗口移动自动跟手
             reposition()
             panel.orderFront(nil)
+            if becomesKey {
+                panel.makeKey()                 // 面板内 TextField 需要键盘焦点
+                // 自动聚焦第一个可编辑 TextField：裸 NSHostingView 里 SwiftUI 的
+                // @FocusState 不可靠（实测面板 firstResponder 停在窗口自身），
+                // 直接 AppKit 层找字段做 firstResponder。下一拍执行 —— hosting
+                // 子视图要等首次布局才实体化。
+                DispatchQueue.main.async { [weak self] in self?.focusFirstTextField() }
+            }
             installDismissMonitor()
+        }
+
+        /// 深度优先找 hosting 里第一个可编辑 NSTextField 并夺焦（搜索框自动聚焦）。
+        private func focusFirstTextField() {
+            guard let panel, let content = panel.contentView else { return }
+            func findField(_ v: NSView) -> NSTextField? {
+                if let tf = v as? NSTextField, tf.isEditable { return tf }
+                for sub in v.subviews { if let f = findField(sub) { return f } }
+                return nil
+            }
+            if let tf = findField(content) { panel.makeFirstResponder(tf) }
+        }
+
+        /// 内容尺寸变化（搜索过滤增删行等）→ 面板窗口跟着改 frame，顶边保持贴锚点。
+        /// 内容 ideal 尺寸不依赖容器尺寸（定宽卡片），不会与 setContentSize 形成回环。
+        func contentSizeChanged(_ size: CGSize) {
+            guard let panel else { return }
+            let inset = anchoredPanelShadowInset
+            let target = NSSize(width: size.width + inset * 2, height: size.height + inset * 2)
+            guard abs(panel.frame.width - target.width) > 0.5
+                || abs(panel.frame.height - target.height) > 0.5 else { return }
+            panel.setContentSize(target)
+            reposition()
         }
 
         private func reposition() {
@@ -162,4 +215,10 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             }
         }
     }
+}
+
+/// 无边框 NSWindow 默认 `canBecomeKey == false`——面板里放 TextField（搜索框）时用本子类
+/// 放行成 key，`.nonactivatingPanel` 语义保留（成 key 不激活 app、不抢别家前台）。
+private final class UDKeyableBorderlessPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
