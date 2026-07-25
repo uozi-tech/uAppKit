@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// uTerm DesignKit 标签页 —— 编辑器 / 终端 Tab + 标签栏容器（设计稿 `Components.html` Tabs）。
 ///
@@ -109,16 +110,19 @@ public struct UDPreviewTab: View {
         .overlay(activeTopBorder, alignment: .top)
         .overlay(activeSideBorders)
         .contentShape(Rectangle())
-        .gesture(
-            TapGesture(count: 2)
-                .exclusively(before: TapGesture(count: 1))
-                .onEnded { gesture in
-                    switch gesture {
-                    case .first: onDoubleTap()
-                    case .second: onSelect()
-                    }
-                }
-        )
+        // 双击识别用单击手势 + `NSApp.currentEvent.clickCount`，不能挂
+        // `TapGesture(count: 2).exclusively(before: TapGesture(count: 1))`：
+        // macOS 上父级多击手势会扣住落在内层关闭按钮上的点击做消歧，
+        // `onClose` 收不到、tab 关不掉（uTerm 预览标签实测）。
+        // 语义：单击立即选中；双击第二下按 clickCount 追发 onDoubleTap
+        // （第一下已 onSelect，与 VS Code 预览 tab 转正行为一致）。
+        .onTapGesture {
+            if let event = NSApp.currentEvent, event.clickCount >= 2 {
+                onDoubleTap()
+            } else {
+                onSelect()
+            }
+        }
         .onHover { hovered = $0 }
     }
 
