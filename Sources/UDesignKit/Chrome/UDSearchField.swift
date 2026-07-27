@@ -32,6 +32,10 @@ public struct UDSearchField: View {
                 .foregroundStyle(UD.text)
                 .textFieldStyle(.plain)
                 .focused($focused)
+                // AppKit 的 text field 比 SwiftUI 给的槽位每边宽 2pt，聚焦滚动后首字会画进
+                // 放大镜 / ⌘K 芯片两侧的 8pt 间隙。裁回槽位；槽位只有一行文字高，纵向
+                // 撑到整行控件高（32 / 2 = 16 > 一行文字），别削 CJK / emoji 的字形。
+                .clipShape(UDInputContentClip(horizontalInset: 0, verticalOutset: 16))
 
             if showsHotkeyChip {
                 Text("⌘ K")

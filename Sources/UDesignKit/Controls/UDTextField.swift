@@ -8,6 +8,9 @@ import SwiftUI
 /// 标签 11 用 `UD.text3`，错误文案 10.5 用 `UD.danger`。聚焦 / 错误态各叠一圈
 /// 3px 焦点环。
 public struct UDTextField: View {
+    /// 内容框水平内边距。文本裁剪边界与它同源，改一处即可。
+    public static let horizontalPadding: CGFloat = 11
+
     var label: String? = nil
     var placeholder: String
     @Binding var text: String
@@ -51,8 +54,12 @@ public struct UDTextField: View {
                 .foregroundStyle(UD.text)
                 .focused($focused)
                 .disabled(!isEnabled)
-                .padding(.horizontal, 11)
+                .padding(.horizontal, Self.horizontalPadding)
                 .frame(height: 34)
+                // AppKit 把 text field（以及聚焦时接管绘制的 field editor clip view）排得比
+                // SwiftUI 内容框每边宽 2 ~ 4.5pt。文本一超出宽度，闲置态的末字、聚焦态滚出去的
+                // 首字就画进内边距里、糊到圆角描边上（长密码尤其明显）。按内容框横向裁掉。
+                .clipShape(UDInputContentClip(horizontalInset: Self.horizontalPadding))
                 .background(
                     RoundedRectangle(cornerRadius: UD.Radius.md)
                         .fill(fieldBackground)
@@ -110,6 +117,31 @@ public struct UDTextField: View {
         if hasError { return UD.danger.opacity(0.12) }
         if focused { return UD.accent.opacity(0.13) }
         return Color.clear
+    }
+}
+
+/// 输入框文本裁剪形状：横向裁到内容框（矩形内缩 `horizontalInset`），纵向只放不收。
+///
+/// SwiftUI 的 `TextField` / `SecureField` 底下是 AppKit 的 `NSTextField`。它被排在比
+/// SwiftUI 内容框每边宽 2pt 的位置，聚焦后接管绘制的 field editor clip view 还要再外扩
+/// 约 2.5pt —— 于是长文本会画进水平内边距、糊在圆角描边上（`UDTextField`），
+/// 或者糊进图标 / 快捷键芯片之间的间隙（`UDSearchField`）。
+///
+/// 纵向绝不能一起裁：整体 `.clipped()` 会把裁剪盒收成单行文字高（13pt 字号下 16pt，
+/// 而 CJK + emoji 的字形实测已占 15.5pt），余量太薄，换个字体 / 语言就会削掉字形。
+/// 套在只有一行文字高的视图上时用 `verticalOutset` 把裁剪盒撑到整行控件高。
+public struct UDInputContentClip: Shape {
+    public var horizontalInset: CGFloat
+    /// 纵向外扩量：裁剪盒上下各放宽这么多，`0` = 按视图自身高度。
+    public var verticalOutset: CGFloat
+
+    public init(horizontalInset: CGFloat, verticalOutset: CGFloat = 0) {
+        self.horizontalInset = horizontalInset
+        self.verticalOutset = verticalOutset
+    }
+
+    public nonisolated func path(in rect: CGRect) -> Path {
+        Path(rect.insetBy(dx: horizontalInset, dy: -verticalOutset))
     }
 }
 
