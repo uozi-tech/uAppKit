@@ -1,6 +1,18 @@
 import AppKit
 import SwiftUI
 
+public extension View {
+    /// 点输入框以外的地方就退出编辑态。
+    ///
+    /// macOS 上 `TextField` 一旦拿到 field editor，就只有另一个响应者来抢才会松手
+    /// —— 点空白处、点行、点卡片都不算，光标和聚焦描边会一直挂着。`UDTextField`
+    /// / `UDTextArea` / `UDSearchField` 早就在内部挂了这个监听，本修饰符把同一套
+    /// 逻辑开放给外面自绘的输入框（数据表设计器的单元格输入就是一例）。
+    func udDismissFocusOnOutsideClick(_ isFocused: FocusState<Bool>.Binding) -> some View {
+        overlay(UDInputFocusDismissMonitor(isFocused: isFocused))
+    }
+}
+
 enum UDInputFocusDismissal {
     static func shouldDismissFocus(eventWindow: NSWindow?,
                                    inputWindow: NSWindow?,
