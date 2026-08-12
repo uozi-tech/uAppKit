@@ -177,6 +177,12 @@ public extension UIconGlyph {
     static let setPlugins = UIconGlyph(18, [
         .path("M6 2.5v3M12 2.5v3M4.5 5.5h9v2.2a4.5 4.5 0 01-4.5 4.5 4.5 4.5 0 01-4.5-4.5V5.5zM9 12.2v3.3", w: 1.3, cap: .round, join: .round),
     ])
+    /// 命令行与技能：终端窗口 + `>_` 提示符。与 `setEditor` 同一只圆角窗，
+    /// 内部换成提示符与光标下划线，成套感保持一致。
+    static let setCLI = UIconGlyph(18, [
+        .rect(2.5, 3, 13, 12, r: 2.5, sw: 1.3),
+        .path("M5.5 7.2l2 1.8-2 1.8M9.8 11h3", w: 1.3, cap: .round, join: .round),
+    ])
     static let setShortcuts = UIconGlyph(18, [
         .rect(2, 4.5, 14, 9, r: 2, sw: 1.3),
         .path("M5 7.5h.01M8 7.5h.01M11 7.5h.01M5.5 10.5h7", w: 1.3, cap: .round),
