@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// # UIcon — uTable 自绘图标引擎（design ↔ 实现对齐 · 路线 C）
@@ -18,7 +19,7 @@ public enum UIconEngine {}
 // MARK: - Glyph model（1:1 对应设计稿的 SVG 元素）
 
 /// 一个图标：`box` 是（正方形）viewBox 边长，`elements` 是其中的绘制元素。
-public struct UIconGlyph: Equatable, Sendable {
+public struct UIconGlyph: Hashable, Sendable {
     let box: CGFloat
     let elements: [UIconElement]
 
@@ -30,8 +31,8 @@ public struct UIconGlyph: Equatable, Sendable {
 
 /// 单个绘制元素。`filled == true` 走填充（SVG `fill="currentColor"`），否则按
 /// `width` 描边（SVG `stroke`）。`cap` / `join` 对应 stroke-linecap / linejoin。
-public struct UIconElement: Equatable, Sendable {
-    public enum Kind: Equatable, Sendable {
+public struct UIconElement: Hashable, Sendable {
+    public enum Kind: Hashable, Sendable {
         case path(String)                       // <path d="…">
         case rect(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat, r: CGFloat)
         case circle(cx: CGFloat, cy: CGFloat, r: CGFloat)
@@ -74,19 +75,8 @@ public struct UIconShape: Shape {
         let dx = rect.minX + (rect.width - side) / 2
         let dy = rect.minY + (rect.height - side) / 2
         let transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
-
-        var out = Path()
-        for el in glyph.elements {
-            let raw = UIconEngine.subpath(for: el.kind)
-            if el.filled {
-                out.addPath(raw, transform: transform)
-            } else {
-                // 在原生 viewBox 坐标系内描边（宽度随后随整体缩放，保持比例）。
-                let stroked = raw.strokedPath(StrokeStyle(lineWidth: el.width, lineCap: el.cap, lineJoin: el.join))
-                out.addPath(stroked, transform: transform)
-            }
-        }
-        return out
+        // 轮廓只在 viewBox 坐标系里算一次（见 `UIconEngine.outline`），这里只做缩放。
+        return UIconEngine.outline(for: glyph).applying(transform)
     }
 }
 
@@ -135,6 +125,40 @@ public struct UIconRefView: View {
         }
     }
 }
+
+// MARK: - 轮廓缓存
+
+public extension UIconEngine {
+    /// 字形在 viewBox 坐标系里的最终轮廓（描边已转成可填充路径），**按字形缓存**。
+    ///
+    /// `Shape.path(in:)` 每次布局、每次重绘都会被调用，而这里的两步都不便宜：
+    /// `d` 字符串要走一遍迷你 SVG 解析器，描边还要 `strokedPath` 求轮廓。字形是
+    /// 编译期常量、数量有限（一个应用几十个图标），所以直接全量缓存，`path(in:)`
+    /// 只剩一次仿射变换。
+    static func outline(for glyph: UIconGlyph) -> Path {
+        outlineCacheLock.lock()
+        defer { outlineCacheLock.unlock() }
+        if let cached = outlineCache[glyph] { return cached }
+        var out = Path()
+        for el in glyph.elements {
+            let raw = subpath(for: el.kind)
+            if el.filled {
+                out.addPath(raw)
+            } else {
+                // 在原生 viewBox 坐标系内描边（宽度随后随整体缩放，保持比例）。
+                out.addPath(raw.strokedPath(
+                    StrokeStyle(lineWidth: el.width, lineCap: el.cap, lineJoin: el.join)
+                ))
+            }
+        }
+        outlineCache[glyph] = out
+        return out
+    }
+}
+
+/// `path(in:)` 可能在非主线程被调用（SwiftUI 渲染），缓存加锁。
+private let outlineCacheLock = NSLock()
+nonisolated(unsafe) private var outlineCache: [UIconGlyph: Path] = [:]
 
 // MARK: - 元素 → Path
 
