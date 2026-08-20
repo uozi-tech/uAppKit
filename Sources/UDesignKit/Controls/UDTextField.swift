@@ -6,7 +6,7 @@ import SwiftUI
 /// 经由 `@Environment(\.isEnabled)` 响应 `.disabled()`。视觉状态优先级
 /// 错误 > 聚焦 > 禁用 > 闲置。字段高 34，水平内边距 11，圆角 `UD.Radius.md`；
 /// 标签 11 用 `UD.text3`，错误文案 10.5 用 `UD.danger`。聚焦 / 错误态各叠一圈
-/// 3px 焦点环。
+/// 3px 焦点环。`isSecure` + `revealable` 时尾部多一个眼睛钮，点一下在掩码与原文之间切。
 public struct UDTextField: View {
     /// 内容框水平内边距。文本裁剪边界与它同源，改一处即可。
     public static let horizontalPadding: CGFloat = 11
@@ -18,9 +18,12 @@ public struct UDTextField: View {
     var autoFocus: Bool = false
     var monospaced: Bool = false
     var isSecure: Bool = false
+    var revealable: Bool = false
 
     @Environment(\.isEnabled) private var isEnabled
     @FocusState private var focused: Bool
+    @State private var revealed = false
+    @State private var revealHovering = false
 
     public init(label: String? = nil,
          placeholder: String,
@@ -28,7 +31,8 @@ public struct UDTextField: View {
          errorMessage: String? = nil,
          autoFocus: Bool = false,
          monospaced: Bool = false,
-         isSecure: Bool = false) {
+         isSecure: Bool = false,
+         revealable: Bool = false) {
         self.label = label
         self.placeholder = placeholder
         self._text = text
@@ -36,6 +40,7 @@ public struct UDTextField: View {
         self.autoFocus = autoFocus
         self.monospaced = monospaced
         self.isSecure = isSecure
+        self.revealable = revealable
     }
 
     private var hasError: Bool { errorMessage != nil }
@@ -48,40 +53,48 @@ public struct UDTextField: View {
                     .foregroundStyle(UD.text3)
             }
 
-            field
-                .textFieldStyle(.plain)
-                .font(monospaced ? UD.mono(13) : UD.body)
-                .foregroundStyle(UD.text)
-                .focused($focused)
-                .disabled(!isEnabled)
-                .padding(.horizontal, Self.horizontalPadding)
-                .frame(height: 34)
-                // AppKit 把 text field（以及聚焦时接管绘制的 field editor clip view）排得比
-                // SwiftUI 内容框每边宽 2 ~ 4.5pt。文本一超出宽度，闲置态的末字、聚焦态滚出去的
-                // 首字就画进内边距里、糊到圆角描边上（长密码尤其明显）。按内容框横向裁掉。
-                .clipShape(UDInputContentClip(horizontalInset: Self.horizontalPadding))
-                .background(
-                    RoundedRectangle(cornerRadius: UD.Radius.md)
-                        .fill(fieldBackground)
-                )
-                .overlay(
-                    // v2：闲置无描边（透明占位防聚焦切换跳动）；仅聚焦 accent / 错误红。
-                    RoundedRectangle(cornerRadius: UD.Radius.md)
-                        .strokeBorder(borderColor, lineWidth: 1)
-                )
-                .overlay(
-                    // 聚焦 / 错误焦点环：3pt 柔环（强调色 13% / 错误 12%），不用粗发光。
-                    RoundedRectangle(cornerRadius: UD.Radius.md)
-                        .stroke(ringColor, lineWidth: 3)
-                )
-                .overlay(
-                    UDInputFocusDismissMonitor(isFocused: $focused)
-                )
-                .opacity(isEnabled ? 1 : 0.55)
-                .onAppear { focused = autoFocus }
-                .onChange(of: autoFocus) { _, newValue in
-                    focused = newValue
+            HStack(spacing: UD.Space.sm) { // 8
+                field
+                    .textFieldStyle(.plain)
+                    .font(monospaced ? UD.mono(13) : UD.body)
+                    .foregroundStyle(UD.text)
+                    .focused($focused)
+                    // AppKit 把 text field（以及聚焦时接管绘制的 field editor clip view）排得比
+                    // SwiftUI 内容框每边宽 2 ~ 4.5pt。文本一超出宽度，闲置态的末字、聚焦态滚出去的
+                    // 首字就画进内边距里、糊到圆角描边上（长密码尤其明显），有显隐钮时还会糊进
+                    // 两者之间的间隙。按槽位横向裁掉；槽位只有一行文字高，纵向撑到整行控件高
+                    // （34 / 2 = 17 > 一行文字），别削 CJK / emoji 的字形。
+                    .clipShape(UDInputContentClip(horizontalInset: 0, verticalOutset: 17))
+
+                if showsRevealToggle {
+                    revealToggle
                 }
+            }
+            .disabled(!isEnabled)
+            .padding(.horizontal, Self.horizontalPadding)
+            .frame(height: 34)
+            .background(
+                RoundedRectangle(cornerRadius: UD.Radius.md)
+                    .fill(fieldBackground)
+            )
+            .overlay(
+                // v2：闲置无描边（透明占位防聚焦切换跳动）；仅聚焦 accent / 错误红。
+                RoundedRectangle(cornerRadius: UD.Radius.md)
+                    .strokeBorder(borderColor, lineWidth: 1)
+            )
+            .overlay(
+                // 聚焦 / 错误焦点环：3pt 柔环（强调色 13% / 错误 12%），不用粗发光。
+                RoundedRectangle(cornerRadius: UD.Radius.md)
+                    .stroke(ringColor, lineWidth: 3)
+            )
+            .overlay(
+                UDInputFocusDismissMonitor(isFocused: $focused)
+            )
+            .opacity(isEnabled ? 1 : 0.55)
+            .onAppear { focused = autoFocus }
+            .onChange(of: autoFocus) { _, newValue in
+                focused = newValue
+            }
 
             if let errorMessage {
                 Text(errorMessage)
@@ -93,10 +106,42 @@ public struct UDTextField: View {
 
     @ViewBuilder
     private var field: some View {
-        if isSecure {
+        if isSecure, !revealed {
             SecureField(placeholder, text: $text)
         } else {
             TextField(placeholder, text: $text)
+        }
+    }
+
+    /// 只有密码框显式要了才画眼睛钮 —— 普通输入框没有「原文」一说。
+    private var showsRevealToggle: Bool { isSecure && revealable }
+
+    /// 尾部「查看原文 / 隐藏」眼睛钮。
+    private var revealToggle: some View {
+        Button(action: toggleReveal) {
+            Image(systemName: revealed ? "eye" : "eye.slash")
+                .font(.system(size: 12))
+                .foregroundStyle(revealHovering ? UD.text2 : UD.text3)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { revealHovering = $0 }
+        .help(revealed ? "隐藏" : "查看原文")
+        .accessibilityLabel(revealed ? "隐藏原文" : "查看原文")
+    }
+
+    /// 掩码 ⇄ 明文。`SecureField` 和 `TextField` 是两个不同的 AppKit 视图，换一个必然
+    /// 把 field editor 交出去 —— 原来在编辑就等这拍界面更新落地后把焦点还回去，
+    /// 光标和聚焦描边不掉。
+    @MainActor
+    private func toggleReveal() {
+        let wasFocused = focused
+        revealed.toggle()
+        guard wasFocused else { return }
+        Task {
+            await Task.yield()
+            focused = true
         }
     }
 
@@ -151,6 +196,7 @@ public struct UDInputContentClip: Shape {
         @State private var filled = "root@203.0.113.10"
         @State private var errored = "47.113"
         @State private var disabled = "root@203.0.113.10"
+        @State private var secret = "hunter2-correct-horse"
 
         var body: some View {
             HStack(alignment: .top, spacing: UD.Space.xxl) {
@@ -164,6 +210,9 @@ public struct UDInputContentClip: Shape {
                 UDTextField(label: "主机", placeholder: "user@host", text: $disabled)
                     .frame(width: 240)
                     .disabled(true)
+                UDTextField(label: "密码", placeholder: "••••••••", text: $secret,
+                            isSecure: true, revealable: true)
+                    .frame(width: 240)
             }
             .padding(UD.Space.xxxl)
             .background(UD.bg)
