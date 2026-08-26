@@ -36,10 +36,6 @@ public extension UIconGlyph {
         .path("M9 9V2.5M6 5.5l3-3 3 3", w: 1.3, cap: .round, join: .round),
         .path("M3.5 12v1.5a1 1 0 001 1h9a1 1 0 001-1V12", w: 1.3, cap: .round),
     ])
-    static let navSettings = UIconGlyph(20, [
-        .circle(10, 10, 2.6, sw: 1.3),
-        .path("M10 1.8v2.1M10 16.1v2.1M18.2 10h-2.1M3.9 10H1.8M15.8 4.2l-1.5 1.5M5.7 14.3l-1.5 1.5M15.8 15.8l-1.5-1.5M5.7 5.7L4.2 4.2", w: 1.3, cap: .round),
-    ])
 
     // MARK: 对象类型（schema tree · tabs · 新建菜单）
 
