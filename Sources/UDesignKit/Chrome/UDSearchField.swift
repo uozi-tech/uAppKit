@@ -8,12 +8,20 @@ import SwiftUI
 /// 否则横向撑满。
 public struct UDSearchField: View {
     @Binding var text: String
+    var placeholder: String = "搜索"
     var width: CGFloat? = nil
     var autoFocus: Bool = false
     var showsHotkeyChip: Bool = true
 
-    public init(text: Binding<String>, width: CGFloat? = nil, autoFocus: Bool = false, showsHotkeyChip: Bool = true) {
+    public init(
+        text: Binding<String>,
+        placeholder: String = "搜索",
+        width: CGFloat? = nil,
+        autoFocus: Bool = false,
+        showsHotkeyChip: Bool = true
+    ) {
         self._text = text
+        self.placeholder = placeholder
         self.width = width
         self.autoFocus = autoFocus
         self.showsHotkeyChip = showsHotkeyChip
@@ -27,7 +35,7 @@ public struct UDSearchField: View {
                 .font(.system(size: 13))
                 .foregroundStyle(focused ? UD.text2 : UD.text3)
 
-            TextField("搜索", text: $text)
+            TextField(placeholder, text: $text)
                 .font(UD.body)
                 .foregroundStyle(UD.text)
                 .textFieldStyle(.plain)
