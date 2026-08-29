@@ -12,19 +12,22 @@ public struct UDSearchField: View {
     var width: CGFloat? = nil
     var autoFocus: Bool = false
     var showsHotkeyChip: Bool = true
+    var showsFocusRing: Bool = true
 
     public init(
         text: Binding<String>,
         placeholder: String = "搜索",
         width: CGFloat? = nil,
         autoFocus: Bool = false,
-        showsHotkeyChip: Bool = true
+        showsHotkeyChip: Bool = true,
+        showsFocusRing: Bool = true
     ) {
         self._text = text
         self.placeholder = placeholder
         self.width = width
         self.autoFocus = autoFocus
         self.showsHotkeyChip = showsHotkeyChip
+        self.showsFocusRing = showsFocusRing
     }
 
     @FocusState private var focused: Bool
@@ -70,12 +73,12 @@ public struct UDSearchField: View {
         .overlay(
             // v2：闲置无描边（透明占位防跳动）；聚焦 = accent 描边。
             RoundedRectangle(cornerRadius: UD.Radius.md)
-                .strokeBorder(focused ? UD.accent : .clear, lineWidth: 1)
+                .strokeBorder(showsFocusRing && focused ? UD.accent : .clear, lineWidth: 1)
         )
         .overlay(
             // 聚焦焦点环：3pt 柔环（强调色 13%），不用粗发光。
             RoundedRectangle(cornerRadius: UD.Radius.md)
-                .stroke(UD.accent.opacity(focused ? 0.13 : 0), lineWidth: 3)
+                .stroke(UD.accent.opacity(showsFocusRing && focused ? 0.13 : 0), lineWidth: 3)
         )
         .overlay(
             UDInputFocusDismissMonitor(isFocused: $focused)
