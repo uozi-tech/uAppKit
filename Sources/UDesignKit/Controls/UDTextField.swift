@@ -1,3 +1,5 @@
+// AppKit 专属组件：iOS 目标（uTermMobile 只消费 Tokens 层）整文件跳过。
+#if os(macOS)
 import SwiftUI
 
 /// uTerm DesignKit 文本输入框 —— 可带标签 / 错误提示的单行输入。
@@ -220,3 +222,4 @@ public struct UDInputContentClip: Shape {
     }
     return PreviewWrapper()
 }
+#endif

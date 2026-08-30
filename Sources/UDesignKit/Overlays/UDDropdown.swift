@@ -1,3 +1,5 @@
+// AppKit 专属组件：iOS 目标（uTermMobile 只消费 Tokens 层）整文件跳过。
+#if os(macOS)
 import SwiftUI
 
 /// DesignKit 下拉触发器：自绘触发按钮 + 贴在其下方的 `UDMenu` 浮层 —— 替代原生 SwiftUI
@@ -70,3 +72,4 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
             }
     }
 }
+#endif

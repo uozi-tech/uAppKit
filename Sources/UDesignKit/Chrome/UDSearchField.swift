@@ -1,3 +1,5 @@
+// AppKit 专属组件：iOS 目标（uTermMobile 只消费 Tokens 层）整文件跳过。
+#if os(macOS)
 import SwiftUI
 
 /// uTerm DesignKit 搜索框 —— 带前导放大镜与尾部 `⌘K` 提示芯片的输入框。
@@ -109,3 +111,4 @@ public struct UDSearchField: View {
     }
     return PreviewWrapper()
 }
+#endif

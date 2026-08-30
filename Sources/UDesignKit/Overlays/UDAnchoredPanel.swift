@@ -1,3 +1,5 @@
+// AppKit 专属组件：iOS 目标（uTermMobile 只消费 Tokens 层）整文件跳过。
+#if os(macOS)
 import SwiftUI
 import AppKit
 
@@ -222,3 +224,4 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
 private final class UDKeyableBorderlessPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
+#endif

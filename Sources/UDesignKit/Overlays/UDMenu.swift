@@ -1,3 +1,5 @@
+// AppKit 专属组件：iOS 目标（uTermMobile 只消费 Tokens 层）整文件跳过。
+#if os(macOS)
 import SwiftUI
 
 /// uTerm DesignKit 实体浮层菜单 —— 下拉 / 上下文菜单 / 列表（设计稿 `Components.html` Menu）。
@@ -223,3 +225,4 @@ public struct UDMenuItem: Identifiable {
     .padding(40)
     .background(UD.bg)
 }
+#endif
