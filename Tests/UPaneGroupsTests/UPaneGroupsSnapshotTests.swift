@@ -166,3 +166,54 @@ final class UPaneGroupsSnapshotTests: XCTestCase {
         XCTAssertEqual(model.activeGroupID, model.root.firstLeafID)
     }
 }
+
+// MARK: - 条件 Equatable
+
+/// 快照要能直接进 `.onChange(of:)`。这些用例钉住的是**合成的** `==` 覆盖到每个字段 ——
+/// 消费方（uTerm）原先手写 `==`，漏字段就等于那一类改动静默不再写盘。
+final class UPaneGroupsSnapshotEquatableTests: XCTestCase {
+    private typealias Snap = UPaneGroupsSnapshot<String>
+
+    private func twoGroupSnapshot(fraction: Double) -> Snap {
+        Snap(root: .split(direction: .horizontal, fraction: fraction,
+                          first: .leaf(groupIndex: 0), second: .leaf(groupIndex: 1)),
+             groups: [Snap.Group(tabs: ["a"], activeIndex: 0),
+                      Snap.Group(tabs: ["b", "c"], activeIndex: 1)],
+             activeGroupIndex: 0)
+    }
+
+    /// 真实回归场景：只拖分隔条。除了组树里的 `fraction`，没有任何别的字段会动 ——
+    /// 手写 `==` 漏掉组树时，这类改动永远存不下来。
+    func testFractionOnlyChangeIsNotEqual() {
+        XCTAssertNotEqual(twoGroupSnapshot(fraction: 0.5), twoGroupSnapshot(fraction: 0.62))
+    }
+
+    func testIdenticalSnapshotsAreEqual() {
+        XCTAssertEqual(twoGroupSnapshot(fraction: 0.5), twoGroupSnapshot(fraction: 0.5))
+    }
+
+    func testEachFieldParticipatesInEquality() {
+        let base = twoGroupSnapshot(fraction: 0.5)
+
+        var activeGroup = base
+        activeGroup.activeGroupIndex = 1
+        XCTAssertNotEqual(base, activeGroup, "activeGroupIndex 必须参与比较")
+
+        var tabs = base
+        tabs.groups[1].tabs = ["b", "c", "d"]
+        XCTAssertNotEqual(base, tabs, "组内标签必须参与比较")
+
+        var activeIndex = base
+        activeIndex.groups[1].activeIndex = 0
+        XCTAssertNotEqual(base, activeIndex, "组内 activeIndex 必须参与比较")
+
+        var direction = base
+        direction.root = .split(direction: .vertical, fraction: 0.5,
+                                first: .leaf(groupIndex: 0), second: .leaf(groupIndex: 1))
+        XCTAssertNotEqual(base, direction, "分屏方向必须参与比较")
+
+        var shape = base
+        shape.root = .leaf(groupIndex: 0)
+        XCTAssertNotEqual(base, shape, "组树形状必须参与比较")
+    }
+}

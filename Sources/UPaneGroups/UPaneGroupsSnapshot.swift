@@ -39,6 +39,19 @@ public struct UPaneGroupsSnapshot<P: Codable & Sendable>: Codable, Sendable {
     }
 }
 
+// MARK: - Equatable
+
+/// 条件遵循 `Equatable`，让消费方能直接 `.onChange(of:)` 整个快照。
+///
+/// 没有它的时候，uTerm 把快照塞进自己的 `WorkspaceSnapshot` 就合成不出 `==`，只能
+/// 手写一份逐字段比较 —— 而它的自动保存正是 `.onChange(of: autosaveStructureSnapshot())`，
+/// 于是「谁给快照加了字段却忘了同步手写的 `==`」会变成**静默不再写盘**：比如只拖分隔条
+/// 改 `fraction`，除了组树没有别的字段会动，漏掉就等于那类改动永远存不下来。
+/// 合成出来的 `==` 不会漏字段，加字段自动跟上。
+extension UPaneGroupsSnapshot: Equatable where P: Equatable {}
+extension UPaneGroupsSnapshot.Group: Equatable where P: Equatable {}
+extension UPaneGroupsSnapshot.Node: Equatable where P: Equatable {}
+
 extension UPaneGroupsModel {
     /// 降维成可存盘的快照。
     ///
