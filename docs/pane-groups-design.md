@@ -850,7 +850,18 @@ collapse、moveTab 五种 zone、组内唯一标签拖本组边缘的克隆分�
    | 主线程花在 draw 里 | 113 ms/s | **315 ms/s** |
    | feed 字节 | 142 KB/s | 142 KB/s（相同） |
 
-   **结论：隐藏但挂载的终端在全速重绘，`.opacity(0)` 一点绘制都不省** —— CoreAnimation
+   > ⚠️ **这一轮的绝对数字全部来自 Debug 构建，结论待 Release 复核**（2026-09-01 发现）。
+   > 后来那轮 VT 解析实测查明：同一份语料同一套测法，**Debug 224.8 ms/MB vs Release
+   > 23.9 ms/MB，差 9.4×**（Debug 走 `-Onone`，Release 走 `-O` + wholemodule）。而这轮
+   > 保活实验跑的是 `Build/Products/Debug/uTerm.app`（见 `scratchpad/run2.sh`）。
+   > `sample` 归因显示热点叶子是 `buildAttributedString` / `getAttributes`，都是 SwiftTerm
+   > 自己的 Swift 代码，会显著吃到 `-O` 的红利；但绘制还要过 CoreText / CoreGraphics
+   > 那些本来就优化过的系统库，**加速比不能按 9.4× 外推，必须实测**。
+   > 若 Release 下额外开销降到 ~23 ms/s 量级，终端区就未必需要放弃拍平挂载。
+   > **在 Release 复核完成前，不要据此把 `KeepAlive` 默认档定死。**
+   > 结构性事实不受影响：挂载 N 个终端就有 N 份重绘，`.opacity(0)` 不省绘制。
+
+   **结论（Debug 数据）：隐藏但挂载的终端在全速重绘，`.opacity(0)` 一点绘制都不省** —— CoreAnimation
    照样叫 `drawInContext:`，透明度是合成阶段的事。**所以终端区不能照搬拍平挂载**，
    `UPaneGroupsPolicy.KeepAlive` 默认应取 `.activeTabPerGroup`。代价是终端区拿不到
    「切标签零重建」，但 `TerminalHostView` 本来就复用 `TerminalSession` 持有的 NSView，
