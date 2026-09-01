@@ -838,9 +838,29 @@ collapse、moveTab 五种 zone、组内唯一标签拖本组边缘的克隆分�
 1. ~~**泛型 `@Observable` class 是否被宏支持。**~~ **已确认可行**（2026-09-01 实测）：
    Swift 6 语言模式下泛型 `@Observable final class` 正常编译，`withObservationTracking`
    对泛型属性也会触发回调；载荷用带关联值的枚举（与 `UTab.Kind` 同形状）验的。
-2. **保活的 SwiftTerm 视图在隐藏状态下的开销。** §3.1 / §4.4(d)。
-   建议做法：先在现有 uTerm 上做个临时实验 —— 把非活动标签的 `TabContentView`
-   也挂上、只 `.opacity(0)`，开 6 个跑 `top` 的终端，看 CPU 与掉帧。
+2. ~~**保活的 SwiftTerm 视图在隐藏状态下的开销。**~~ **已实测**（2026-09-01）。
+   做法：同一进程内每 30s 交替翻转挂载策略做配对测量（抵消机器负载漂移），6 个终端
+   各 24 KB/s 输出、只 1 个活动，在 vendored SwiftTerm 里插绘制计数器 + `sample` 归因。
+   必须加 `-NSAppSleepDisabled YES`，否则 App Nap 会把进程挂起、数据全废。
+
+   | | 基线（只挂活动标签） | 拍平挂载（全挂 + opacity 0） |
+   |---|---|---|
+   | draw 调用 | 34/s（1 个终端） | **202/s（6 个各 33.7/s）** |
+   | 单次重绘面积 | 204 278 pt² | **204 278 pt²（逐位相同）** |
+   | 主线程花在 draw 里 | 113 ms/s | **315 ms/s** |
+   | feed 字节 | 142 KB/s | 142 KB/s（相同） |
+
+   **结论：隐藏但挂载的终端在全速重绘，`.opacity(0)` 一点绘制都不省** —— CoreAnimation
+   照样叫 `drawInContext:`，透明度是合成阶段的事。**所以终端区不能照搬拍平挂载**，
+   `UPaneGroupsPolicy.KeepAlive` 默认应取 `.activeTabPerGroup`。代价是终端区拿不到
+   「切标签零重建」，但 `TerminalHostView` 本来就复用 `TerminalSession` 持有的 NSView，
+   重挂只是 attach/detach，scrollback 不丢。
+
+   两条附带发现：**静止的终端确实不干活**（空载两组 draw 均为 0），代价严格正比于后台
+   标签的输出量，不是固定开销；**解析（feed）与挂载与否无关** —— `TerminalSession`
+   无条件 `terminalView.feed()`，所以 uTerm 今天的后台标签**已经**在全速解析 VT，
+   keep-alive 档位只能省掉绘制那一半，要省解析得在 `TerminalSession` 层另做暂停机制
+   （与本次改造无关的独立优化项）。
 3. **uTerm 的 `PaneView` / `PreviewPanelView` 是否真的有「resize 后左右投放区
    失灵」的 bug。** §3.4 第一条。这是按 uTable 的注释推断的，未在 uTerm 上实测
    复现。若确实存在，可以作为一个独立的小修先落地。
