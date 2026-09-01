@@ -1,3 +1,7 @@
+// macOS 专用：整份文件用平台条件包住，这样这个 target 即使被拉进 iOS 的
+// 构建图也只是空目标，而不是因为 import AppKit 直接编译失败。
+#if os(macOS)
+
 import AppKit
 import SwiftUI
 import XCTest
@@ -121,3 +125,5 @@ final class PointerDownProbeViewTests: XCTestCase {
         XCTAssertFalse(probe.isObserving, "离开窗口必须摘掉监视器")
     }
 }
+
+#endif
