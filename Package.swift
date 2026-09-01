@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "UAppKitBridge", targets: ["UAppKitBridge"]),
         .library(name: "AgentKit", targets: ["AgentKit"]),
         .library(name: "USSHKit", targets: ["USSHKit"]),
+        .library(name: "UPaneTree", targets: ["UPaneTree"]),
     ],
     dependencies: [
         // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
@@ -35,6 +36,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "UDesignKit"),
+        // 分屏二叉树。原先 uTable / uTerm 各有一份逐字相同的实现，只有文档
+        // 措辞不同；两边改一处就得手工同步到另一处。纯值类型、无平台依赖，
+        // 天然属于共享包。
+        .target(name: "UPaneTree"),
         // macOS 专用（AppKit 事件桥）。源码整体用 `#if os(macOS)` 包住，
         // 这样即使被拉进 iOS 的构建图也只是空目标，不会编译失败。
         .target(name: "UAppKitBridge"),
@@ -62,6 +67,7 @@ let package = Package(
             ]
         ),
         .testTarget(name: "UAppKitBridgeTests", dependencies: ["UAppKitBridge"]),
+        .testTarget(name: "UPaneTreeTests", dependencies: ["UPaneTree"]),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"],
                     swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(

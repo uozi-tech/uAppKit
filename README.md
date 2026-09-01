@@ -1,6 +1,6 @@
 # uAppKit
 
-uTable 与 uTerm 共用的包，一个 SwiftPM 包三个产品。
+uTable 与 uTerm 共用的包，一个 SwiftPM 包多个产品。
 
 | 产品 | 用途 | 平台 |
 |---|---|---|
@@ -8,10 +8,11 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包三个产品。
 | `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`） | macOS 14+ |
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
 | `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
+| `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
 
 ## 为什么单独一个仓库
 
-这三个包原先各自住在其中一个 app 仓库里，由另一个 app 按
+`UDesignKit` / `UAppKitBridge` / `AgentKit` / `USSHKit` 原先各自住在其中一个 app 仓库里，由另一个 app 按
 `../<兄弟仓库>/Packages/<名字>` 的相对路径引用。这样有两个后果：
 
 1. 任何一个 app 都不能单独 clone —— 必须两个仓库并排放，目录名还得一字不差。
@@ -21,6 +22,10 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包三个产品。
 
 集中到这里并**按 tag 发布**之后，两个 app 的 `Package.resolved` 会钉住具体
 revision，上面两条都不成立了。
+
+`UPaneTree` 的来源不同：它从来不是包，而是**两个 app 各抄了一份**的分屏树源码，
+逐字相同、只有文档措辞按各自的叶子叫法（终端窗格 / 编辑组）改过。这种复制不会
+被任何构建报错抓到，改一处忘了另一处就是静默的行为分叉，所以也收进来。
 
 ## 消费方式
 
