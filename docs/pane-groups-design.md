@@ -850,18 +850,34 @@ collapse、moveTab 五种 zone、组内唯一标签拖本组边缘的克隆分�
    | 主线程花在 draw 里 | 113 ms/s | **315 ms/s** |
    | feed 字节 | 142 KB/s | 142 KB/s（相同） |
 
-   > ⚠️ **这一轮的绝对数字全部来自 Debug 构建，结论待 Release 复核**（2026-09-01 发现）。
-   > 后来那轮 VT 解析实测查明：同一份语料同一套测法，**Debug 224.8 ms/MB vs Release
-   > 23.9 ms/MB，差 9.4×**（Debug 走 `-Onone`，Release 走 `-O` + wholemodule）。而这轮
-   > 保活实验跑的是 `Build/Products/Debug/uTerm.app`（见 `scratchpad/run2.sh`）。
-   > `sample` 归因显示热点叶子是 `buildAttributedString` / `getAttributes`，都是 SwiftTerm
-   > 自己的 Swift 代码，会显著吃到 `-O` 的红利；但绘制还要过 CoreText / CoreGraphics
-   > 那些本来就优化过的系统库，**加速比不能按 9.4× 外推，必须实测**。
-   > 若 Release 下额外开销降到 ~23 ms/s 量级，终端区就未必需要放弃拍平挂载。
-   > **在 Release 复核完成前，不要据此把 `KeepAlive` 默认档定死。**
-   > 结构性事实不受影响：挂载 N 个终端就有 N 份重绘，`.opacity(0)` 不省绘制。
+   > ✅ **已用 Release 复核**（2026-09-01）。Debug 那轮的绝对数字不可引用，但**结论方向
+   > 没变**，最终建议也没变。核实构建：`-showBuildSettings` 不打印
+   > `SWIFT_OPTIMIZATION_LEVEL`（Release 的 xcconfig 没显式设它），要核编译器真实命令行 ——
+   > 两个 target 都是 `swiftc -O -whole-module-optimization`。插桩用环境变量开关，不用
+   > `#if DEBUG`（否则 Release 下不生效）。
+   >
+   > **场景 A**（6 标签各 22 KB/s，1 个活动）：draw 32.1/s → **192.9/s**（严格 6×），
+   > 主线程 draw 耗时 30.7 → **113.6 ms/s**，等频归一后**额外 +90～140 ms/s（约 0.1 核）**。
+   > **场景 B**（真实工作流：只有 2 个在输出，4 个静止）：draw 33.0 → 66.3/s（严格 2×），
+   > **额外仅 +21.5 ms/s**；4 个被挂载但静止的终端贡献 **0 次 draw**。
+   >
+   > **绘制只吃到 ≈3.9× 的 `-O` 红利，解析是 9.4×** —— CoreText / CoreGraphics 那一半不提速，
+   > 「不能按 9.4× 外推」的判断成立。顺带更正上一轮 Debug 数字：那轮拍平相的 SoC 频率比
+   > 自己的基线相高 2.09×，所以「113 → 315，Δ202」是被 DVFS 压缩过的，**等频 Δ 实际约
+   > +544 ms/s**；两轮等频 Δ 之比 544:123 = 4.4×，与每次 draw 的 3.9× 自洽。
 
-   **结论（Debug 数据）：隐藏但挂载的终端在全速重绘，`.opacity(0)` 一点绘制都不省** —— CoreAnimation
+   **决定：`KeepAlive` 默认取 `.activeTabPerGroup`，`.allTabs` 留成显式选项。**
+   拍平挂载在 Release 下**技术上可用**（真实工作流只要 +21 ms/s），但不做默认，三条依据：
+   ① **代价没有上限** —— 严格线性于「后台标签数 × 输出量」，用户开 12 个 tail 日志的标签
+   就是 +0.25 核长期烧着，产品侧没有任何东西给它封顶；② **在 uTerm 换不来什么** ——
+   `TerminalHostView` 本来就复用 `TerminalSession` 持有的 NSView，重挂只是 attach/detach、
+   scrollback 不丢，省下的只是 SwiftUI 那侧窗格树的一次性重建；③ **交易形状不划算** ——
+   拿一次性的切标签成本，换一个永久的每秒成本，且恰好在主线程最忙（后台狂输出）时付。
+   真要上 `.allTabs`，正确的缓解方向是让不可见的终端别画（SwiftTerm 侧改动），而不是靠
+   KeepAlive 档位。
+
+   **结论（Debug 数据，绝对值不可引用，结构性事实仍成立）：隐藏但挂载的终端在全速重绘，
+   `.opacity(0)` 一点绘制都不省** —— CoreAnimation
    照样叫 `drawInContext:`，透明度是合成阶段的事。**所以终端区不能照搬拍平挂载**，
    `UPaneGroupsPolicy.KeepAlive` 默认应取 `.activeTabPerGroup`。代价是终端区拿不到
    「切标签零重建」，但 `TerminalHostView` 本来就复用 `TerminalSession` 持有的 NSView，
