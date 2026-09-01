@@ -7,6 +7,7 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包三个产品。
 | `UDesignKit` | 设计语言 token 与 UD 组件 | macOS 14+ / iOS 18+ |
 | `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`） | macOS 14+ |
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
+| `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
 
 ## 为什么单独一个仓库
 
@@ -64,8 +65,22 @@ xcodebuild -workspace uTable-dev.xcworkspace -scheme uTable ...
 `.swiftLanguageMode(.v5)` —— 它迁进来之前是 tools-version 5.10。把它拖进 Swift 6
 严格并发是一次独立的迁移，要单独做、单独验，不该混在搬家里顺手完成。
 
-## 尚未迁入
+## 本包不能有 path 依赖
 
-`USSHKit` 仍在 uTerm。它依赖 `vendor/Citadel` 与 `vendor/swift-nio-ssh` 两个
-vendored fork（相对路径指进 uTerm），搬它得连这两个 fork 一起处理，成本和风险都
-另一个量级。
+**按 tag 消费的远程包不允许带 path 依赖**，SwiftPM 会直接拒绝：
+
+```
+package 'X' is required using a stable-version but
+'X' depends on an unstable-version package 'Y'
+```
+
+`USSHKit` 迁进来时正是撞上这条：它原先依赖 uTerm 里的 `vendor/Citadel` 和
+`vendor/swift-nio-ssh` 两个 path 包。解法是把那两个 fork 也拆成独立仓库、按 tag 引用：
+
+- `github.com/uozi-tech/swift-nio-ssh` —— 基线 `Wellz26/swift-nio-ssh` 0.3.6 + 补丁
+- `github.com/uozi-tech/Citadel` —— 基线 `orlandos-nl/Citadel` 0.12.1，仅改 manifest
+
+两者都用 `exact:` 钉死：它们不走语义化版本演进，每次动都是人工重放补丁，不该让
+解析器自己挑版本。补丁清单见各仓库的 `PATCHES.md`。
+
+往本包加依赖时记住这条约束——一条 path 依赖就会让两个 app 都解析失败。

@@ -7,6 +7,10 @@ import PackageDescription
 /// `Package.resolved`，于是发版产物里到底嵌了哪一版共享代码，任何地方都没有记录。
 /// 集中到这里并按 tag 发布之后，两个 app 的 `Package.resolved` 会钉住具体 revision，
 /// 历史发版才能复现。
+///
+/// 注意：本包按 tag 被消费，因此**不能有任何 path 依赖**——SwiftPM 会拒绝
+/// 「stable-version 的包依赖 unstable-version 的包」。USSHKit 的两个 fork 正是为此
+/// 从 uTerm 的 `vendor/` 里拆成了独立仓库。
 let package = Package(
     name: "uAppKit",
     platforms: [
@@ -17,6 +21,17 @@ let package = Package(
         .library(name: "UDesignKit", targets: ["UDesignKit"]),
         .library(name: "UAppKitBridge", targets: ["UAppKitBridge"]),
         .library(name: "AgentKit", targets: ["AgentKit"]),
+        .library(name: "USSHKit", targets: ["USSHKit"]),
+    ],
+    dependencies: [
+        // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
+        // 人工重放补丁，不该让解析器自己挑版本。补丁清单见各仓库的 PATCHES.md。
+        .package(url: "https://github.com/uozi-tech/Citadel", exact: "1.0.0"),
+        .package(url: "https://github.com/uozi-tech/swift-nio-ssh", exact: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
+        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.3.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
     ],
     targets: [
         .target(name: "UDesignKit"),
@@ -27,8 +42,36 @@ let package = Package(
         // 是为了 UDesignKit，不该顺手把 AgentKit 拖进 Swift 6 严格并发——
         // 那是一次独立的迁移，要单独做、单独验。
         .target(name: "AgentKit", swiftSettings: [.swiftLanguageMode(.v5)]),
+        // 同上：原先也是 5.10。
+        .target(
+            name: "USSHKit",
+            dependencies: [
+                .product(name: "Citadel", package: "Citadel"),
+                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .linkedFramework("Security"),
+            ]
+        ),
         .testTarget(name: "UAppKitBridgeTests", dependencies: ["UAppKitBridge"]),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"],
                     swiftSettings: [.swiftLanguageMode(.v5)]),
+        .testTarget(
+            name: "USSHKitTests",
+            dependencies: [
+                "USSHKit",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )
