@@ -72,6 +72,7 @@ let package = Package(
                 .linkedFramework("Security"),
             ]
         ),
+        .testTarget(name: "UDesignKitTests", dependencies: ["UDesignKit"]),
         .testTarget(name: "UAppKitBridgeTests", dependencies: ["UAppKitBridge"]),
         .testTarget(name: "UPaneTreeTests", dependencies: ["UPaneTree"]),
         .testTarget(name: "UPaneGroupsTests", dependencies: ["UPaneGroups", "UPaneTree"]),
