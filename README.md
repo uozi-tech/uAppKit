@@ -30,30 +30,36 @@ revision，上面两条都不成立了。
 https://github.com/uozi-tech/uAppKit
 ```
 
-### 本地开发：用 workspace 覆盖远程依赖
+### 本地开发：用 uozi.xcworkspace 覆盖远程依赖
 
-日常改包时不必"改一行就提交打 tag"。两个 app 各自带了一个 **dev workspace**，
-把本仓库挂进去，Xcode 会用本地副本覆盖同名的远程依赖（按 `Package.swift` 里的
+日常改包时不必"改一行就提交打 tag"。`path/to/dev.xcworkspace` 里同时挂着
+两个 app 和本仓库，Xcode 会用本地副本覆盖同名的远程依赖（按 `Package.swift` 里的
 包名 `uAppKit` 匹配，与 URL 无关）：
 
 ```
-uTable/uTable-dev.xcworkspace     ← uTable.xcodeproj + ../uAppKit
-uTerm/uTerm-dev.xcworkspace       ← uTerm.xcodeproj  + ../uAppKit
+uozi.xcworkspace
+├── uTable/uTable.xcodeproj
+├── uTerm/uTerm.xcodeproj
+└── uAppKit                  ← 覆盖两个 app 的远程 uAppKit 依赖
 ```
 
-用 Xcode 打开 `*-dev.xcworkspace` 而不是 `.xcodeproj`，就能在 app 里直接改包源码、
+用 Xcode 打开 `uozi.xcworkspace` 而不是单个 `.xcodeproj`，就能在 app 里直接改包源码、
 断点、跑测试，改动即时生效，不经过 git。命令行同理：
 
 ```sh
-xcodebuild -workspace uTable-dev.xcworkspace -scheme uTable ...
+xcodebuild -workspace path/to/dev.xcworkspace -scheme uTable ...
 ```
 
-这两个 workspace **被 gitignore 了**，是每个人本地的东西。原因是它一旦提交，
-发版构建也会走本地覆盖——那按 tag 钉版本就白做了。新机器上自己建一个即可，
-内容就是两个 `FileRef`（工程 + `../uAppKit`）。
+`<workspace>` 本身不是 git 仓库，所以这个 workspace 天然只存在于本地，不会
+把覆盖状态带进任何一个 app 的历史——**发版构建走 `-project uTable.xcodeproj`，
+拿的仍是按 tag 钉住的那一版**。
+
+两个 SSH fork（`Citadel` / `swift-nio-ssh`）也是 `<workspace>` 下的同级目录，
+但默认**不**挂进 workspace：它们用 `exact:` 钉死、只在人工重放补丁时才动。真要改的
+时候再拖进来，改完记得拖出去。
 
 改完之后的正常流程：在 uAppKit 里提交 → 打 tag → 在 app 里把版本要求升上去 →
-用 `.xcodeproj`（不是 dev workspace）验一遍，确保拿的是发布出去的那一版。
+用 `.xcodeproj`（不是 workspace）验一遍，确保拿的是发布出去的那一版。
 
 > 怎么确认覆盖真的生效了：看编译命令里 `UDColor.swift` 的路径。走覆盖时是
 > `<workspace>/uAppKit/Sources/...`，没走覆盖时是
