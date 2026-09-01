@@ -23,6 +23,7 @@ let package = Package(
         .library(name: "AgentKit", targets: ["AgentKit"]),
         .library(name: "USSHKit", targets: ["USSHKit"]),
         .library(name: "UPaneTree", targets: ["UPaneTree"]),
+        .library(name: "UPaneGroups", targets: ["UPaneGroups"]),
     ],
     dependencies: [
         // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
@@ -43,6 +44,11 @@ let package = Package(
         // macOS 专用（AppKit 事件桥）。源码整体用 `#if os(macOS)` 包住，
         // 这样即使被拉进 iOS 的构建图也只是空目标，不会编译失败。
         .target(name: "UAppKitBridge"),
+        // 「分屏里装标签」的 VSCode 编辑组模型：树的叶子是组，组内一排标签 +
+        // 一个前台标签，全区域一个活动组。视图层 macOS 专用（拖拽走 AppKit、
+        // 按下激活走 UAppKitBridge），模型层与投放区归类在 `#if` 之外，纯逻辑
+        // 单测在任何平台都能跑。
+        .target(name: "UPaneGroups", dependencies: ["UPaneTree", "UDesignKit", "UAppKitBridge"]),
         // 原先是 swift-tools-version 5.10，即 Swift 5 语言模式。这里统一到 6.2
         // 是为了 UDesignKit，不该顺手把 AgentKit 拖进 Swift 6 严格并发——
         // 那是一次独立的迁移，要单独做、单独验。
@@ -68,6 +74,7 @@ let package = Package(
         ),
         .testTarget(name: "UAppKitBridgeTests", dependencies: ["UAppKitBridge"]),
         .testTarget(name: "UPaneTreeTests", dependencies: ["UPaneTree"]),
+        .testTarget(name: "UPaneGroupsTests", dependencies: ["UPaneGroups", "UPaneTree"]),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"],
                     swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(

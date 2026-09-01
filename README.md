@@ -9,6 +9,7 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包多个产品。
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
 | `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
+| `UPaneGroups` | 「分屏里装标签」的 VSCode 编辑组（模型 + 区域视图） | 模型 macOS/iOS；视图 macOS 14+ |
 
 ## 为什么单独一个仓库
 
@@ -26,6 +27,13 @@ revision，上面两条都不成立了。
 `UPaneTree` 的来源不同：它从来不是包，而是**两个 app 各抄了一份**的分屏树源码，
 逐字相同、只有文档措辞按各自的叶子叫法（终端窗格 / 编辑组）改过。这种复制不会
 被任何构建报错抓到，改一处忘了另一处就是静默的行为分叉，所以也收进来。
+
+`UPaneGroups` 又不同：它是把 uTable 那套「分屏里装标签」泛型化抽出来，好让 uTerm
+的预览区与终端区改用同一套模型。抽包的动机不是去重（uTerm 还没有这套），而是
+**uTable 那 1165 行里有一半是被性能问题逼出来的**：面板拍平挂载而不建递归视图树、
+活动态传对象不传 Bool、按下激活用 NSEvent 探针不用 SwiftUI 手势。这些约束在源码
+注释里逐条写着出处和实测数字，重写一遍必然丢。设计与差异矩阵见
+`docs/pane-groups-design.md`。
 
 ## 消费方式
 
