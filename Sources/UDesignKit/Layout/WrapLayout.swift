@@ -6,7 +6,9 @@ import SwiftUI
 /// 与 `Features/Keys` 里的局部 `FlowLayout`（仅左对齐）区分：这个可居中、可复用，
 /// 供 Agent 空状态示例（居中）与「猜你想问」追问气泡（左对齐）等场景共用。
 public struct WrapLayout: Layout {
-    public enum Align { case leading, center }
+    /// `Layout` 要求 Sendable；public 类型不会隐式获得 Sendable 一致性
+    /// （隐式推导只到 internal），故显式写出。
+    public enum Align: Sendable { case leading, center }
 
     var spacing: CGFloat = 8
     var lineSpacing: CGFloat = 8

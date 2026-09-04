@@ -11,7 +11,7 @@ import SwiftUI
 /// 故以 `radius ≈ blur/2` 近似模糊半径、再适当压低不透明度补偿缺失的负 spread。
 public extension UD {
     /// 圆角 Radius。
-    public enum Radius {
+    enum Radius {
         /// 4 —— 键帽 / 小图标钮。
         public nonisolated static let xs: CGFloat = 4
         /// 6 —— 行 / 标签 / 列表项。
@@ -25,7 +25,7 @@ public extension UD {
     }
 
     /// 间距 Spacing（px）。节奏 4 6 8 10 12 14 18 24。
-    public enum Space {
+    enum Space {
         public nonisolated static let xxs: CGFloat = 4
         public nonisolated static let xs: CGFloat = 6
         public nonisolated static let sm: CGFloat = 8
@@ -37,7 +37,7 @@ public extension UD {
     }
 
     /// 阴影层级 Elevation。各级均为**单层**柔和投影（不再多层堆叠）。
-    public enum Shadow: Sendable {
+    enum Shadow: Sendable {
         /// 卡片 / 行悬停。设计稿 `--u-shadow-sm` `0 2 8 -4`。
         case sm
         /// 下拉 / 菜单 / 弹层。设计稿 `--u-shadow-md` `0 8 24 -12`。
@@ -51,7 +51,7 @@ public extension UD {
     }
 
     /// 模态卡片投影色：暗夜保留浮层深度，日间保持扁平、无 box-shadow。
-    public nonisolated static let modalShadowColor = dyn(.black(0.6), .black(0))
+    nonisolated static let modalShadowColor = dyn(.black(0.6), .black(0))
 }
 
 /// 单条投影描述（SwiftUI `.shadow` 无 spread，故用 blur/2 近似设计稿的模糊半径）。

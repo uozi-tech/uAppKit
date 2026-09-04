@@ -98,7 +98,7 @@ public struct UDComposer<ModelControl: View>: View {
 // MARK: - 无模型槽的便捷初始化（底栏只剩附件 + 发送）
 
 public extension UDComposer where ModelControl == EmptyView {
-    public init(text: Binding<String>,
+    init(text: Binding<String>,
          placeholder: String = "问点什么…",
          width: CGFloat? = nil,
          minLines: Int = 1,

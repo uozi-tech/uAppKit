@@ -67,7 +67,7 @@ public struct UDGlyphButton: View {
 // MARK: - Preview
 
 #Preview {
-    func demo(_ scheme: ColorScheme) -> some View {
+    @MainActor func demo(_ scheme: ColorScheme) -> some View {
         HStack(spacing: 8) {
             UDGlyphButton(icon: .sf("chevron.left.forwardslash.chevron.right"), help: "SQL") {}
             UDGlyphButton(icon: .sf("sparkles"), active: true, help: "AI") {}

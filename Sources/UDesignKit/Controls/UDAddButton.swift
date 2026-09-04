@@ -55,7 +55,7 @@ public struct UDAddButton: View {
 // MARK: - Preview
 
 #Preview {
-    func demo(_ scheme: ColorScheme) -> some View {
+    @MainActor func demo(_ scheme: ColorScheme) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             UDAddButton(title: "新建角色") {}
             UDAddButton(title: "添加成员") {}.disabled(true)

@@ -105,7 +105,7 @@ public struct UDTriCheckbox: View {
 // MARK: - Preview
 
 #Preview {
-    func demo(_ scheme: ColorScheme) -> some View {
+    @MainActor func demo(_ scheme: ColorScheme) -> some View {
         HStack(spacing: 14) {
             UDTriCheckbox(state: .on) {}
             UDTriCheckbox(state: .part) {}

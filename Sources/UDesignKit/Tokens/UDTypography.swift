@@ -9,31 +9,31 @@ import SwiftUI
 public extension UD {
     // MARK: - 界面字阶 SF Pro Text
     /// 标题 28 / 600。
-    public nonisolated static let title   = Font.system(size: 28, weight: .semibold)
+    nonisolated static let title   = Font.system(size: 28, weight: .semibold)
     /// 小节 16 / 500。
-    public nonisolated static let h2      = Font.system(size: 16, weight: .medium)
+    nonisolated static let h2      = Font.system(size: 16, weight: .medium)
     /// 正文 13 / 400。
-    public nonisolated static let body    = Font.system(size: 13, weight: .regular)
+    nonisolated static let body    = Font.system(size: 13, weight: .regular)
     /// 控件 12.5 / 500。
-    public nonisolated static let control = Font.system(size: 12.5, weight: .medium)
+    nonisolated static let control = Font.system(size: 12.5, weight: .medium)
     /// 次要 11 / 400。
-    public nonisolated static let caption = Font.system(size: 11, weight: .regular)
+    nonisolated static let caption = Font.system(size: 11, weight: .regular)
 
     // MARK: - 系统等宽字阶
     /// 终端 / 代码 12.5。
-    public nonisolated static let monoTerminal = Font.system(size: 12.5, weight: .regular, design: .monospaced)
+    nonisolated static let monoTerminal = Font.system(size: 12.5, weight: .regular, design: .monospaced)
     /// 数值 / 指标 11。
-    public nonisolated static let monoMetric   = Font.system(size: 11, weight: .regular, design: .monospaced)
+    nonisolated static let monoMetric   = Font.system(size: 11, weight: .regular, design: .monospaced)
     /// 键帽 / 标签 10.5。
-    public nonisolated static let monoKbd      = Font.system(size: 10.5, weight: .regular, design: .monospaced)
+    nonisolated static let monoKbd      = Font.system(size: 10.5, weight: .regular, design: .monospaced)
 
     // MARK: - 任意尺寸 helper
     /// 界面字体（SF Pro / system）。
-    public nonisolated static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    nonisolated static func font(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight)
     }
     /// 等宽字体（设计稿 mono；系统等宽回退）。
-    public nonisolated static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    nonisolated static func mono(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
     }
 }

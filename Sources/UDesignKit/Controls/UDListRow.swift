@@ -65,7 +65,7 @@ public struct UDListRow: View {
 // MARK: - Preview
 
 #Preview {
-    func demo(_ scheme: ColorScheme) -> some View {
+    @MainActor func demo(_ scheme: ColorScheme) -> some View {
         VStack(spacing: 2) {
             UDListRow(systemImage: "person", title: "app_readonly", monospacedTitle: true) {}
             UDListRow(systemImage: "person", title: "analytics_rw", monospacedTitle: true) {}
