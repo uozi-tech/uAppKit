@@ -7,7 +7,8 @@ import SwiftUI
 public struct UDSidebarRow: View {
     /// 前导 SF Symbol 名。
     let systemImage: String
-    /// 图标颜色（nil = 默认 UD.text3）。
+    /// 图标颜色（nil = 跟随选中态：选中 `UD.accent`、否则 `UD.text3`）。
+    /// 显式给值时它是**语义色**，选中态不覆盖。
     let iconColor: Color?
     /// 行标题。
     let label: String
@@ -44,9 +45,14 @@ public struct UDSidebarRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 // v2「驾驶舱」样式：选中态文字与图标同用 accent 色。
+                //
+                // **显式传进来的 `iconColor` 是语义色（欢迎页侧栏的分组色就是它），
+                // 选中态不覆盖它** —— 否则选中一个分组，代表这个分组的那个圆点会被
+                // 染成 accent 蓝，行里就再也看不出这是哪个分组。没传 `iconColor`
+                // 的调用方（图标本来就是中性灰）照旧走「选中变 accent」。
                 Image(systemName: systemImage)
                     .font(UD.font(12.5))
-                    .foregroundStyle(selected ? UD.accent : (iconColor ?? UD.text3))
+                    .foregroundStyle(iconColor ?? (selected ? UD.accent : UD.text3))
                     .frame(width: 14)
 
                 Text(label)
