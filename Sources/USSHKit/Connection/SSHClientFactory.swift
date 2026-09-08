@@ -2,6 +2,7 @@ import Foundation
 @preconcurrency import Citadel
 import NIOConcurrencyHelpers
 import NIOCore
+import NIOPosix
 import NIOSSH
 
 @_spi(uTermIntegration)
@@ -142,12 +143,40 @@ nonisolated enum SSHClientFactory {
                     )
                 ),
                 reconnect: .never,
-                connectTimeout: .nanoseconds(connectTimeout.nanosecondsClamped)
+                connectTimeout: .nanoseconds(connectTimeout.nanosecondsClamped),
+                loginTimeout: .nanoseconds(
+                    loginTimeout(
+                        connectTimeout: connectTimeout,
+                        approvalTimeout: approvalTimeout,
+                        policy: hostKeyPolicy
+                    ).nanosecondsClamped
+                )
             )
         } catch let error as SSHConnectionError {
             throw error
         } catch {
             throw SSHConnectionError.connectFailed(describe(error))
+        }
+    }
+
+    /// Citadel 的 login timer 覆盖「TCP 连接 + 握手 + 认证」全程，且从装 handler 那一刻起算。
+    /// 上游把它硬编码成 10 秒 —— 比用户读完并点掉主机密钥确认框所需的时间还短：`.ask`
+    /// 策略下 host-key 审批就发生在握手期，用户在弹层上多停几秒，timer 先到，`connect`
+    /// 以 `ChannelError.connectTimeout` 抛出；而底下的 NIOSSH 握手照常走完、服务端
+    /// 记下一次没人认领的 `Accepted publickey`。这里把它放大到「连接超时 + 审批超时」：
+    /// 审批本身另有 `approveWithTimeout` 兜底，超时即以 `hostKeyRejected` 失败，所以这个
+    /// 上限只在「服务端握手/认证期彻底无响应」时才会真的等满。非 `.ask` 策略不会有交互
+    /// 等待，只需覆盖连接超时本身。
+    static func loginTimeout(
+        connectTimeout: Duration,
+        approvalTimeout: Duration,
+        policy: SSHHostKeyPolicy
+    ) -> Duration {
+        switch policy {
+        case .ask:
+            return connectTimeout + approvalTimeout
+        case .strict, .acceptNew, .insecureAcceptAll:
+            return connectTimeout
         }
     }
 
@@ -191,7 +220,7 @@ nonisolated enum SSHClientFactory {
             throw SSHConnectionError.jumpHostFailed(describe(error))
         }
 
-        let settings = SSHClientSettings(
+        var settings = SSHClientSettings(
             host: endpoint.host,
             port: endpoint.port,
             authenticationMethod: { targetAuthentication },
@@ -205,6 +234,14 @@ nonisolated enum SSHClientFactory {
                     approver: approver
                 )
             )
+        )
+        settings.connectTimeout = .nanoseconds(connectTimeout.nanosecondsClamped)
+        settings.loginTimeout = .nanoseconds(
+            loginTimeout(
+                connectTimeout: connectTimeout,
+                approvalTimeout: approvalTimeout,
+                policy: hostKeyPolicy
+            ).nanosecondsClamped
         )
 
         do {
@@ -241,9 +278,56 @@ nonisolated enum SSHClientFactory {
         }
     }
 
-    private static func describe(_ error: Error) -> String {
-        let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        return localized.isEmpty ? String(reflecting: error) : localized
+    /// 把底层错误翻成能定位问题的文案。
+    ///
+    /// 纯 Swift 值类型错误（如 `NIOCore.ChannelError`）没有 `LocalizedError`，其
+    /// `localizedDescription` 走 NSError 桥接，只会给出「未能完成操作。（NIOCore.ChannelError
+    /// 错误 0。）」—— 那个数字是枚举 case 的序号（带载荷的 case 排在前面，所以
+    /// `connectTimeout` 恰好是 0），完全无法定位。这里对这类错误改用其自身的
+    /// `description` 并附上类型名。
+    static func describe(_ error: Error) -> String {
+        if let channelError = error as? ChannelError {
+            switch channelError {
+            case .connectTimeout(let amount):
+                return "登录阶段超时：\(formatSeconds(amount)) 内未完成握手与认证（ChannelError.connectTimeout）"
+            default:
+                return "\(channelError)（NIOCore.ChannelError）"
+            }
+        }
+        if let connectionError = error as? NIOConnectionError {
+            // 同样是无 LocalizedError 的值类型（struct → 恒为「错误 1」）。取最后一次尝试的
+            // 底层 IOError（含 errno 与 strerror），再带上目标地址。
+            let target = "\(connectionError.host):\(connectionError.port)"
+            if let last = connectionError.connectionErrors.last {
+                return "无法连接 \(target)：\(describe(last.error))"
+            }
+            if let dns = connectionError.dnsAError ?? connectionError.dnsAAAAError {
+                return "无法解析 \(connectionError.host)：\(describe(dns))"
+            }
+            return "无法连接 \(target)（NIOPosix.NIOConnectionError）"
+        }
+        if let ioError = error as? IOError {
+            // IOError 自带 description（"<reason>: <strerror> (errno: N)"），比桥接文案有用。
+            return String(describing: ioError)
+        }
+        if error is LocalizedError || type(of: error) is NSError.Type {
+            let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !localized.isEmpty { return localized }
+        }
+        let described = String(describing: error)
+        let typeName = String(reflecting: type(of: error))
+        if described.isEmpty || described == typeName {
+            return typeName
+        }
+        return described.contains(typeName) ? described : "\(described)（\(typeName)）"
+    }
+
+    private static func formatSeconds(_ amount: TimeAmount) -> String {
+        let seconds = Double(amount.nanoseconds) / 1_000_000_000
+        if seconds == seconds.rounded() {
+            return "\(Int(seconds)) 秒"
+        }
+        return String(format: "%.1f 秒", seconds)
     }
 }
 
