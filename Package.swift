@@ -28,12 +28,12 @@ let package = Package(
     dependencies: [
         // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
         // 人工重放补丁，不该让解析器自己挑版本。补丁清单见各仓库的 PATCHES.md。
-        .package(url: "https://github.com/uozi-tech/Citadel", exact: "1.0.1"),
-        .package(url: "https://github.com/uozi-tech/swift-nio-ssh", exact: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
-        .package(url: "https://github.com/apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
-        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.3.0"),
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
+        .package(url: "https://github.com/uozi-tech/Citadel.git", exact: "1.0.1"),
+        .package(url: "https://github.com/uozi-tech/swift-nio-ssh.git", exact: "1.0.0"),
+        .package(url: "git@github.com:apple/swift-nio.git", from: "2.81.0"),
+        .package(url: "git@github.com:apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
+        .package(url: "git@github.com:apple/swift-asn1.git", from: "1.3.0"),
+        .package(url: "git@github.com:apple/swift-log.git", from: "1.0.0"),
     ],
     targets: [
         .target(name: "UDesignKit"),
