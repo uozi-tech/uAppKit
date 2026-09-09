@@ -75,6 +75,10 @@ public struct UDTextField: View {
             .disabled(!isEnabled)
             .padding(.horizontal, Self.horizontalPadding)
             .frame(height: 34)
+            // 内部的 NSTextField 只有一行文字高（约 16pt）、且不含水平内边距；点在 34pt 框的
+            // 留白上原本落不到它身上，用户会以为「要点两次」。整框可点，点到就聚焦。
+            .contentShape(Rectangle())
+            .onTapGesture { if isEnabled { focused = true } }
             .background(
                 RoundedRectangle(cornerRadius: UD.Radius.md)
                     .fill(fieldBackground)

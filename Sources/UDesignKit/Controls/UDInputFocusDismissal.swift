@@ -87,8 +87,31 @@ struct UDInputFocusDismissMonitor: NSViewRepresentable {
                                                            inputFrameInWindow: inputFrame)
             else { return event }
 
-            onDismiss()
+            // 本地监听器在事件真正派发**之前**就被调用。这里若同步写 `isFocused = false`，
+            // SwiftUI 会把这次「清焦点」排到下一拍界面更新；而 mouseDown 紧接着就被送到
+            // 目标视图 —— 目标若是另一个输入框，它先拿到 field editor，随后那拍清焦点落地，
+            // 把刚建立的焦点也一起清掉，用户看到的就是「要点两次才能聚焦」。
+            // 所以推迟到事件派发完成之后再判断：别的视图已经接管第一响应者就不插手，
+            // 焦点仍在本输入框（点的是空白 / 不可聚焦的控件）才退出编辑态。
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isFocused, let window = self.window else { return }
+                if let takenOver = Self.responderView(of: window),
+                   takenOver.window === window,
+                   !takenOver.convert(takenOver.bounds, to: nil).intersects(self.convert(self.bounds, to: nil)) {
+                    return
+                }
+                self.onDismiss()
+            }
             return event
+        }
+
+        /// 当前第一响应者对应的视图：field editor 归还给它正在编辑的 `NSTextField`。
+        private static func responderView(of window: NSWindow) -> NSView? {
+            guard let responder = window.firstResponder as? NSView else { return nil }
+            if let textView = responder as? NSTextView, textView.isFieldEditor {
+                return textView.delegate as? NSView ?? textView
+            }
+            return responder
         }
 
         private nonisolated func removeMonitor() {
