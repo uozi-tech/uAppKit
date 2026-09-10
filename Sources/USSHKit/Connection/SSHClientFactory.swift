@@ -76,6 +76,8 @@ nonisolated enum DirectTCPIPAsyncChannelPreparation {
 }
 
 nonisolated enum SSHClientFactory {
+    /// - Parameter protocolOptions: 透传给 Citadel / NIOSSH 的协议级选项。语义、默认值与
+    ///   取值边界见 `USSHKitIntegration.connect` 的文档注释。跳板机场景下**两跳都会设**。
     static func connect(
         endpoint: SSHEndpoint,
         credential: SSHCredential,
@@ -83,7 +85,8 @@ nonisolated enum SSHClientFactory {
         hostKeyPolicy: SSHHostKeyPolicy,
         connectTimeout: Duration,
         approvalTimeout: Duration,
-        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool
+        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
+        protocolOptions: Set<SSHProtocolOption> = []
     ) async throws -> ConnectedClient {
         if let jumpHost = endpoint.jumpHost {
             return try await connectViaJumpHost(
@@ -94,7 +97,8 @@ nonisolated enum SSHClientFactory {
                 hostKeyPolicy: hostKeyPolicy,
                 connectTimeout: connectTimeout,
                 approvalTimeout: approvalTimeout,
-                approver: approver
+                approver: approver,
+                protocolOptions: protocolOptions
             )
         }
 
@@ -107,7 +111,8 @@ nonisolated enum SSHClientFactory {
             hostKeyPolicy: hostKeyPolicy,
             connectTimeout: connectTimeout,
             approvalTimeout: approvalTimeout,
-            approver: approver
+            approver: approver,
+            protocolOptions: protocolOptions
         )
         return ConnectedClient(target: target, bastion: nil)
     }
@@ -121,7 +126,8 @@ nonisolated enum SSHClientFactory {
         hostKeyPolicy: SSHHostKeyPolicy,
         connectTimeout: Duration,
         approvalTimeout: Duration,
-        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool
+        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
+        protocolOptions: Set<SSHProtocolOption> = []
     ) async throws -> SSHClient {
         let authenticationMethod = try makeAuthenticationMethod(
             username: username,
@@ -143,6 +149,7 @@ nonisolated enum SSHClientFactory {
                     )
                 ),
                 reconnect: .never,
+                protocolOptions: protocolOptions,
                 connectTimeout: .nanoseconds(connectTimeout.nanosecondsClamped),
                 loginTimeout: .nanoseconds(
                     loginTimeout(
@@ -188,7 +195,8 @@ nonisolated enum SSHClientFactory {
         hostKeyPolicy: SSHHostKeyPolicy,
         connectTimeout: Duration,
         approvalTimeout: Duration,
-        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool
+        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
+        protocolOptions: Set<SSHProtocolOption> = []
     ) async throws -> ConnectedClient {
         let bastion: SSHClient
         do {
@@ -201,7 +209,10 @@ nonisolated enum SSHClientFactory {
                 hostKeyPolicy: hostKeyPolicy,
                 connectTimeout: connectTimeout,
                 approvalTimeout: approvalTimeout,
-                approver: approver
+                approver: approver,
+                // 外层 hop 也要放大：内层连接的全部流量都装在外层这条 direct-tcpip
+                // 子通道里，外层窗口不放大，内层放大了也白搭。
+                protocolOptions: protocolOptions
             )
         } catch {
             throw SSHConnectionError.jumpHostFailed(
@@ -220,28 +231,15 @@ nonisolated enum SSHClientFactory {
             throw SSHConnectionError.jumpHostFailed(describe(error))
         }
 
-        var settings = SSHClientSettings(
-            host: endpoint.host,
-            port: endpoint.port,
-            authenticationMethod: { targetAuthentication },
-            hostKeyValidator: .custom(
-                HostKeyValidationDelegate(
-                    host: endpoint.host,
-                    port: endpoint.port,
-                    store: hostKeyStore,
-                    policy: hostKeyPolicy,
-                    approvalTimeout: approvalTimeout,
-                    approver: approver
-                )
-            )
-        )
-        settings.connectTimeout = .nanoseconds(connectTimeout.nanosecondsClamped)
-        settings.loginTimeout = .nanoseconds(
-            loginTimeout(
-                connectTimeout: connectTimeout,
-                approvalTimeout: approvalTimeout,
-                policy: hostKeyPolicy
-            ).nanosecondsClamped
+        let settings = makeJumpSettings(
+            endpoint: endpoint,
+            authenticationMethod: targetAuthentication,
+            hostKeyStore: hostKeyStore,
+            hostKeyPolicy: hostKeyPolicy,
+            connectTimeout: connectTimeout,
+            approvalTimeout: approvalTimeout,
+            approver: approver,
+            protocolOptions: protocolOptions
         )
 
         do {
@@ -253,6 +251,49 @@ nonisolated enum SSHClientFactory {
                 "经跳板机连接 \(endpoint.host):\(endpoint.port) 失败 —— \(describe(error))"
             )
         }
+    }
+
+    /// 内层 hop（跳板机 → 目标机）的 `SSHClientSettings`。
+    ///
+    /// 单独抽出来是为了可测：`bastion.jump(to:)` 必须有真连接才能调，而这些字段
+    /// 是否被正确填上（尤其是 `protocolOptions`——漏了它内层子通道就还是 128 KiB 窗口）
+    /// 是纯数据判断，不该只能靠真连一台跳板机来验。
+    static func makeJumpSettings(
+        endpoint: SSHEndpoint,
+        authenticationMethod: SSHAuthenticationMethod,
+        hostKeyStore: any HostKeyStore,
+        hostKeyPolicy: SSHHostKeyPolicy,
+        connectTimeout: Duration,
+        approvalTimeout: Duration,
+        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
+        protocolOptions: Set<SSHProtocolOption>
+    ) -> SSHClientSettings {
+        var settings = SSHClientSettings(
+            host: endpoint.host,
+            port: endpoint.port,
+            authenticationMethod: { authenticationMethod },
+            hostKeyValidator: .custom(
+                HostKeyValidationDelegate(
+                    host: endpoint.host,
+                    port: endpoint.port,
+                    store: hostKeyStore,
+                    policy: hostKeyPolicy,
+                    approvalTimeout: approvalTimeout,
+                    approver: approver
+                )
+            )
+        )
+        // 内层 hop 的窗口。外层 hop 在 `connectDirect` 那边设，两跳都要——见该处注释。
+        settings.protocolOptions = protocolOptions
+        settings.connectTimeout = .nanoseconds(connectTimeout.nanosecondsClamped)
+        settings.loginTimeout = .nanoseconds(
+            loginTimeout(
+                connectTimeout: connectTimeout,
+                approvalTimeout: approvalTimeout,
+                policy: hostKeyPolicy
+            ).nanosecondsClamped
+        )
+        return settings
     }
 
     static func makeAuthenticationMethod(
