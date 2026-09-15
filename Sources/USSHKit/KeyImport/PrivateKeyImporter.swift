@@ -23,7 +23,8 @@ nonisolated enum PrivateKeyImporter {
         }
     }
 
-    /// OpenSSH 容器：RSA / Ed25519 交给 Citadel；ECDSA 由 OpenSSHECDSADecoder 处理。
+    /// OpenSSH 容器：RSA 优先自解（见下），Ed25519 交给 Citadel，ECDSA 由
+    /// OpenSSHECDSADecoder 处理。
     private static func resolveOpenSSH(text: String, passphrase: String?) throws -> ParsedPrivateKey {
         let decryptionKey = passphrase?.data(using: .utf8)
         let keyType: SSHKeyType
@@ -34,6 +35,14 @@ nonisolated enum PrivateKeyImporter {
         }
         switch keyType {
         case .rsa:
+            // 先自己读容器：拿到 n/e/d/p/q 就能走 rsa-sha2-512（`RSASHA512AuthDelegate`）。
+            // 交给 Citadel 只能得到 ssh-rsa（SHA-1）签名，OpenSSH 8.8+ 服务端默认拒收，
+            // 认证以 allAuthenticationOptionsFailed 失败 —— 同一把密钥 `ssh` 却连得上。
+            if let components = try? OpenSSHRSADecoder.decodeComponents(openSSHText: text) {
+                return .rsa(components)
+            }
+            // 走到这里 = 容器带口令（解密只有 Citadel 有），或自解失败。回退老路：
+            // 老路至少能在仍接受 SHA-1 的服务端上连上，好过直接失败。
             do {
                 return .legacyOpenSSHRSA(try Insecure.RSA.PrivateKey(sshRsa: text, decryptionKey: decryptionKey))
             } catch { throw mapCitadelKeyError(error) }
