@@ -28,7 +28,7 @@ let package = Package(
     dependencies: [
         // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
         // 人工重放补丁，不该让解析器自己挑版本。补丁清单见各仓库的 PATCHES.md。
-        .package(url: "https://github.com/uozi-tech/Citadel.git", exact: "1.0.1"),
+        .package(url: "https://github.com/uozi-tech/Citadel.git", exact: "1.0.2"),
         .package(url: "https://github.com/uozi-tech/swift-nio-ssh.git", exact: "1.0.0"),
         .package(url: "git@github.com:apple/swift-nio.git", from: "2.81.0"),
         .package(url: "git@github.com:apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
@@ -58,6 +58,9 @@ let package = Package(
             name: "USSHKit",
             dependencies: [
                 .product(name: "Citadel", package: "Citadel"),
+                // bcrypt_pbkdf。解密带口令的 OpenSSH 私钥容器要用，整个 SSH 栈里
+                // 只有这个 C target 有实现；Citadel fork 为此把它导出成了 product。
+                .product(name: "CCitadelBcrypt", package: "Citadel"),
                 .product(name: "NIOSSH", package: "swift-nio-ssh"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),

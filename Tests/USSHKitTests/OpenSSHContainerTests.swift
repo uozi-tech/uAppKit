@@ -20,6 +20,17 @@ final class OpenSSHContainerTests: XCTestCase {
         }
     }
 
+    /// 给了口令就地解密，私钥段照常读出声明的算法。
+    func testEncryptedContainerOpensWithPassphrase() throws {
+        guard case .plaintext(let keyType, _) = try OpenSSHContainer.openPrivateSection(
+            text: KeyImportFixtures.rsaOpenSSHEnc,
+            passphrase: KeyImportFixtures.passphrase) else {
+            return XCTFail("给了口令应解开为明文私钥段")
+        }
+        XCTAssertEqual(keyType, "ssh-rsa")
+    }
+
+    /// 不给口令时不解密，只把 ciphername 报出去（调用方据此决定报错措辞）。
     func testEncryptedContainerReportsCipherName() throws {
         guard case .encrypted(let cipherName) =
                 try OpenSSHContainer.openPrivateSection(text: KeyImportFixtures.rsaOpenSSHEnc) else {
