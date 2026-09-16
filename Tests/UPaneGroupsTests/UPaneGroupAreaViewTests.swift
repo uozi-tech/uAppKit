@@ -234,6 +234,20 @@ final class UPaneGroupAreaViewTests: XCTestCase {
                       "翻转的只是 @Observable 属性，gate 的身份不变 —— 传 Bool 会重建整棵子树")
     }
 
+    // MARK: 标签栏几何
+
+    func testStripHeightIncludesItsBottomSeparator() throws {
+        let stripHeight: CGFloat = 36
+        let pane = CGRect(x: 11, y: 13, width: 800, height: 600)
+        let content = UPaneGroupGeometry.contentRect(in: pane, stripHeight: stripHeight)
+
+        XCTAssertEqual(content.minY - pane.minY, stripHeight, accuracy: 0.001,
+                       "底部分隔线必须画在 stripHeight 内，不能再把正文下推 1pt")
+        XCTAssertEqual(content.height, pane.height - stripHeight, accuracy: 0.001)
+        XCTAssertEqual(content.minX, pane.minX, accuracy: 0.001)
+        XCTAssertEqual(content.width, pane.width, accuracy: 0.001)
+    }
+
     // MARK: 四个初始化器（accessory / 右键菜单的有无组合）都要能构造出来
 
     func testAllInitialiserOverloadsBuildAndRender() throws {

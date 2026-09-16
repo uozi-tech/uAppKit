@@ -6,6 +6,18 @@ import UDesignKit
 import UniformTypeIdentifiers
 import UPaneTree
 
+/// 标签栏 chrome 与正文区域的共享几何。`stripHeight` 包含底部发丝线；相邻的
+/// toolbar 只要使用同一高度，分隔线就会落在同一条基线上。
+nonisolated enum UPaneGroupGeometry {
+    static func contentRect(in paneRect: CGRect, stripHeight: CGFloat) -> CGRect {
+        CGRect(
+            x: paneRect.minX,
+            y: paneRect.minY + stripHeight,
+            width: paneRect.width,
+            height: max(0, paneRect.height - stripHeight))
+    }
+}
+
 /// 分屏按钮的方向。
 public enum UPaneSplitButtonDirection: Sendable, Hashable {
     case horizontal          // 向右开新组
@@ -109,8 +121,10 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
         self.onActiveTabChanged = onActiveTabChanged
     }
 
-    /// 标签条高度 + 其下 1px 分隔线 = 组内容区的顶部偏移。
-    private var contentTopInset: CGFloat { stripHeight + 1 }
+    /// `stripHeight` 是标签栏 chrome 的完整高度；底部发丝线画在这个高度内部，
+    /// 所以内容区直接从 `stripHeight` 开始。若再额外加 1pt，会让它比同高的相邻
+    /// toolbar 多出一行，三栏底线无法落在同一条基线上。
+    private var contentTopInset: CGFloat { stripHeight }
 
     public var body: some View {
         GeometryReader { geo in
@@ -183,11 +197,9 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
             guard let group = model.groups[pane.paneID], !group.tabs.isEmpty else { return [] }
             let isActiveGroup = pane.paneID == activeGroupID
             if keepAlive == .activeGroupOnly && !isActiveGroup { return [] }
-            let rect = CGRect(
-                x: pane.rect.minX,
-                y: pane.rect.minY + contentTopInset,
-                width: pane.rect.width,
-                height: max(0, pane.rect.height - contentTopInset))
+            let rect = UPaneGroupGeometry.contentRect(
+                in: pane.rect,
+                stripHeight: contentTopInset)
             return group.tabs.enumerated().compactMap { idx, tab in
                 let isFront = idx == group.activeIndex
                 if keepAlive != .allTabs && !isFront { return nil }
@@ -421,7 +433,6 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
     var body: some View {
         VStack(spacing: 0) {
             tabStrip
-            Rectangle().fill(UD.border).frame(height: 1)
             // 内容由区域的扁平面板层画（见 `UPaneGroupArea.mountedTabs`），
             // 这里只剩空组占位和底色。
             Group {
@@ -518,6 +529,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
         }
         .frame(height: stripHeight)
         .background(UD.panel)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(UD.border).frame(height: 1)
+        }
     }
 
     /// `.automatic` 要读组的当前尺寸。在**点击回调里**读 `groupBounds`（一个
