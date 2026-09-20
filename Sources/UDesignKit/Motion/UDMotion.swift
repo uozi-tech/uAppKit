@@ -22,13 +22,16 @@ import UIKit
 // 所以本包里所有「永远在动的小装饰」都下沉到 Core Animation：插值发生在渲染服务器，
 // 主线程每帧 0 开销，窗口不可见时系统根本不合成它。
 //
-// 本文件是内部实现细节，不对外暴露 —— 消费方继续用 `UDHostDot` / `UDStatusBadge`
-// / `UDIndeterminateBar` 等既有组件，公开 API 一字未改。
+// 自 v1.4.13 起这些图元是**公开 API**：uTable 的 Redis 订阅指示点等场景需要同一套
+// 东西，不能各抄一份（uTerm 已有一份 `CAMotion.swift`，再抄第三份就失控了）。
+//
+// 消费方优先用成品组件（`UDPulseHalo` / `UDBreathingDot` / `UDHostDot` /
+// `UDStatusBadge`）；形状或动画对不上时再用底层的 `UDMotionShape` 自己拼。
 
 // MARK: - 图元描述
 
 /// 图元内容。
-enum UDMotionContent: Equatable {
+public enum UDMotionContent: Equatable {
     /// 填充形状。
     /// - `cornerRadius`: nil = 取短边一半（圆 / 胶囊）。
     /// - `size`: nil = 填满 bounds；给定时靠**左**、垂直居中放置（配合
@@ -43,27 +46,32 @@ enum UDMotionContent: Equatable {
 /// 不用 `ClosedRange` —— 它要求 `lowerBound <= upperBound`，而动画端点经常是**反向**的
 /// （不透明度 0.3 → 0）。用 `ClosedRange` 写会在构造时直接
 /// `Fatal error: Range requires lowerBound <= upperBound`。
-struct UDMotionRamp<Value: Equatable>: Equatable {
-    var from: Value
-    var to: Value
+public struct UDMotionRamp<Value: Equatable>: Equatable {
+    public var from: Value
+    public var to: Value
+
+    public init(from: Value, to: Value) {
+        self.from = from
+        self.to = to
+    }
 }
 
 /// 一段无限循环动画。`Equatable` 用于「参数没变就不重启动画」—— 否则每次
 /// `updateNSView`（父视图任意重绘都会触发）都把动画从头播一遍，看起来像卡顿。
-struct UDMotion: Equatable {
+public struct UDMotion: Equatable {
     /// 不透明度端点。nil = 不动不透明度。
-    var opacity: UDMotionRamp<Double>?
+    public var opacity: UDMotionRamp<Double>?
     /// 缩放端点。nil = 不缩放。
-    var scale: UDMotionRamp<CGFloat>?
+    public var scale: UDMotionRamp<CGFloat>?
     /// 横向位移端点（pt）。nil = 不位移。
-    var translationX: UDMotionRamp<CGFloat>?
+    public var translationX: UDMotionRamp<CGFloat>?
     /// 是否绕中心匀速转整圈。
-    var spins: Bool
-    var duration: TimeInterval
-    var autoreverses: Bool
-    var timing: CAMediaTimingFunctionName
+    public var spins: Bool
+    public var duration: TimeInterval
+    public var autoreverses: Bool
+    public var timing: CAMediaTimingFunctionName
 
-    init(opacity: UDMotionRamp<Double>? = nil,
+    public init(opacity: UDMotionRamp<Double>? = nil,
          scale: UDMotionRamp<CGFloat>? = nil,
          translationX: UDMotionRamp<CGFloat>? = nil,
          spins: Bool = false,
@@ -266,9 +274,30 @@ final class UDMotionView: UDMotionBaseView {
 
 // MARK: - SwiftUI 薄壳
 
+/// 一块挂着无限循环 CA 动画的形状。尺寸由调用方用 `.frame(...)` 给。
+///
 /// 颜色在 `context.environment` 里解析，所以深 / 浅切换（`\.colorScheme` 变化）
-/// 会自动触发 `update` 重新上色。
-struct UDMotionShape {
+/// 会自动触发重新上色。
+///
+/// 这是底层逃生口 —— 常见形态优先用 `UDPulseHalo` / `UDBreathingDot`。
+public struct UDMotionShape: View {
+    let color: Color
+    let content: UDMotionContent
+    let motion: UDMotion?
+
+    public init(color: Color, content: UDMotionContent, motion: UDMotion?) {
+        self.color = color
+        self.content = content
+        self.motion = motion
+    }
+
+    public var body: some View {
+        UDMotionRepresentable(color: color, content: content, motion: motion)
+    }
+}
+
+/// 平台桥接层。保持 internal —— `UDMotionView` 是实现细节，不该进公开 API。
+struct UDMotionRepresentable {
     let color: Color
     let content: UDMotionContent
     let motion: UDMotion?
@@ -281,7 +310,7 @@ struct UDMotionShape {
 }
 
 #if canImport(AppKit)
-extension UDMotionShape: NSViewRepresentable {
+extension UDMotionRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> UDMotionView { UDMotionView(frame: .zero) }
 
     func updateNSView(_ view: UDMotionView, context: Context) {
@@ -290,7 +319,7 @@ extension UDMotionShape: NSViewRepresentable {
     }
 }
 #elseif canImport(UIKit)
-extension UDMotionShape: UIViewRepresentable {
+extension UDMotionRepresentable: UIViewRepresentable {
     func makeUIView(context: Context) -> UDMotionView { UDMotionView(frame: .zero) }
 
     func updateUIView(_ view: UDMotionView, context: Context) {
@@ -302,16 +331,33 @@ extension UDMotionShape: UIViewRepresentable {
 
 // MARK: - 复用件
 
-/// 呼吸光晕（状态点外圈）。`UDHostDot` / `UDStatusBadge` 共用。
-struct UDPulseHalo: View {
+/// 呼吸光晕（状态点外圈的那圈扩散光）。`UDHostDot` / `UDStatusBadge` 共用。
+///
+/// 只画光晕，核心实心点由调用方自己画（常见是叠在 `ZStack` 里）。
+public struct UDPulseHalo: View {
     let color: Color
     let diameter: CGFloat
-    /// 不透明度峰值 —— 取原 SwiftUI 实现里两层 `.opacity()` **相乘后**的实际值。
     let peakOpacity: Double
-    var scale: UDMotionRamp<CGFloat> = .init(from: 0.9, to: 1.1)
-    var duration: TimeInterval = 2.4
+    var scale: UDMotionRamp<CGFloat>
+    var duration: TimeInterval
 
-    var body: some View {
+    /// - Parameters:
+    ///   - diameter: 光晕静止直径（动画在此基础上做 `scale`）。
+    ///   - peakOpacity: 不透明度峰值，动画从它衰减到 0。注意取的是**实际**峰值 ——
+    ///     若原实现是两层 `.opacity()` 相乘，这里要填相乘后的结果。
+    public init(color: Color,
+                diameter: CGFloat,
+                peakOpacity: Double,
+                scale: UDMotionRamp<CGFloat> = .init(from: 0.9, to: 1.1),
+                duration: TimeInterval = 2.4) {
+        self.color = color
+        self.diameter = diameter
+        self.peakOpacity = peakOpacity
+        self.scale = scale
+        self.duration = duration
+    }
+
+    public var body: some View {
         UDMotionShape(
             color: color,
             content: .fill(cornerRadius: nil, size: nil),
@@ -320,6 +366,56 @@ struct UDPulseHalo: View {
                              timing: .easeInEaseOut)
         )
         .frame(width: diameter, height: diameter)
+        .allowsHitTesting(false)
+    }
+}
+
+/// 整点呼吸的状态点 —— 点**自身**在 `1 ↔ dimOpacity` 之间往复淡入淡出。
+///
+/// 与 `UDPulseHalo` 的区别：那个是在实心点外面画一圈扩散光晕（点本身不变），
+/// 这个是整颗点在喘气。用于「订阅中 / 监听中」这类**长驻**指示（uTable 的 Redis
+/// pub/sub 小绿点）—— 正因为长驻，更不能用 SwiftUI `.repeatForever`。
+///
+/// Reduce Motion 下常显不闪。
+public struct UDBreathingDot: View {
+    let color: Color
+    let size: CGFloat
+    let dimOpacity: Double
+    let duration: TimeInterval
+    let pulse: Bool
+
+    /// - Parameters:
+    ///   - dimOpacity: 暗态不透明度（亮态恒为 1）。
+    ///   - pulse: false 时**根本不创建**平台视图，退化为静态圆点，零成本。
+    public init(color: Color,
+                size: CGFloat = 7,
+                dimOpacity: Double = 0.35,
+                duration: TimeInterval = 0.9,
+                pulse: Bool = true) {
+        self.color = color
+        self.size = size
+        self.dimOpacity = dimOpacity
+        self.duration = duration
+        self.pulse = pulse
+    }
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    public var body: some View {
+        Group {
+            if pulse && !reduceMotion {
+                UDMotionShape(
+                    color: color,
+                    content: .fill(cornerRadius: nil, size: nil),
+                    motion: UDMotion(opacity: .init(from: 1, to: dimOpacity),
+                                     duration: duration, autoreverses: true,
+                                     timing: .easeInEaseOut)
+                )
+            } else {
+                Circle().fill(color)
+            }
+        }
+        .frame(width: size, height: size)
         .allowsHitTesting(false)
     }
 }
