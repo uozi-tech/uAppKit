@@ -50,7 +50,6 @@ public struct UDStatusBadge: View {
         self.state = state
     }
 
-    @SwiftUI.State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let dotSize: CGFloat = 7
@@ -74,18 +73,11 @@ public struct UDStatusBadge: View {
 
     private var dot: some View {
         ZStack {
+            // 光晕走 CA（见 `Motion/UDMotion.swift`），不用 SwiftUI `.repeatForever`：
+            // 后者会把整个宿主窗口钉在满帧重绘上。原实现两层 `.opacity()` 相乘，
+            // 峰值 0.2 × 0.2 = 0.04。
             if state.pulse && !reduceMotion {
-                Circle()
-                    .fill(state.color)
-                    .opacity(0.2)
-                    .padding(-1)
-                    .scaleEffect(animate ? 1.1 : 0.9)
-                    .opacity(animate ? 0.0 : 0.2)
-                    .animation(
-                        .easeInOut(duration: 2.4).repeatForever(autoreverses: true),
-                        value: animate
-                    )
-                    .onAppear { animate = true }
+                UDPulseHalo(color: state.color, diameter: dotSize + 2, peakOpacity: 0.2 * 0.2)
             }
             Circle()
                 .fill(state.color)

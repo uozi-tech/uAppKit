@@ -51,7 +51,6 @@ public struct UDLinearBar: View {
 public struct UDIndeterminateBar: View {
     var height: CGFloat = 4
 
-    @State private var animating = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(height: CGFloat = 4) {
@@ -68,21 +67,29 @@ public struct UDIndeterminateBar: View {
                     .fill(UD.uw05)
                     .frame(width: width, height: height)
 
-                Capsule()
-                    .fill(UD.accent)
-                    .frame(width: sliderWidth, height: height)
-                    // Reduce Motion：停掉往复滑动，滑块静置居中（瞬时态）。
-                    .offset(x: reduceMotion ? (width - sliderWidth) / 2
-                            : (animating ? width : -sliderWidth))
+                if reduceMotion {
+                    // Reduce Motion：停掉滑动，滑块静置居中（瞬时态）。
+                    Capsule()
+                        .fill(UD.accent)
+                        .frame(width: sliderWidth, height: height)
+                        .offset(x: (width - sliderWidth) / 2)
+                } else {
+                    // 滑块走 CA（见 `Motion/UDMotion.swift`）：SwiftUI `.repeatForever`
+                    // 会把整个宿主窗口钉在满帧重绘上，代价跟视图树大小成正比。
+                    UDMotionShape(
+                        color: UD.accent,
+                        content: .fill(cornerRadius: nil,
+                                       size: CGSize(width: sliderWidth, height: height)),
+                        motion: UDMotion(translationX: .init(from: -sliderWidth, to: width),
+                                         duration: 1.4, autoreverses: false,
+                                         timing: .easeInEaseOut)
+                    )
+                    .frame(width: width, height: height)
+                    .allowsHitTesting(false)
+                }
             }
             .frame(width: width, height: height)
             .clipShape(Capsule())
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: false)) {
-                    animating = true
-                }
-            }
         }
         .frame(height: height)
     }

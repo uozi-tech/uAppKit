@@ -112,25 +112,17 @@ public struct UDHostDot: View {
         self.pulse = pulse
     }
 
-    @State private var animate = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let size: CGFloat = 8
 
     public var body: some View {
         ZStack {
+            // 光晕走 CA（见 `Motion/UDMotion.swift`），不用 SwiftUI `.repeatForever`：
+            // 后者会把整个宿主窗口钉在满帧重绘上。视觉逐参数等价 —— 原实现是两层
+            // `.opacity()` 相乘，峰值 0.18 × 0.18 = 0.0324。
             if pulse && !reduceMotion {
-                Circle()
-                    .fill(color)
-                    .padding(-2)
-                    .opacity(0.18)
-                    .scaleEffect(animate ? 1.1 : 0.9)
-                    .opacity(animate ? 0.0 : 0.18)
-                    .animation(
-                        .easeInOut(duration: 2.4).repeatForever(autoreverses: true),
-                        value: animate
-                    )
-                    .onAppear { animate = true }
+                UDPulseHalo(color: color, diameter: size + 4, peakOpacity: 0.18 * 0.18)
             }
             Circle()
                 .fill(color)

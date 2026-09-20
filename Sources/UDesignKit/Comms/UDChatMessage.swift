@@ -91,19 +91,26 @@ public struct UDChatMessage<Content: View>: View {
 
 /// 流式回答尾随的闪烁光标（≈4×11 accent 方块，1↔0 透明度 ~1.1s 往复）。
 private struct UDStreamCaret: View {
-    @State private var on = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public var body: some View {
-        Rectangle()
-            .fill(UD.accent)
-            .frame(width: 4, height: 11)
+        Group {
             // Reduce Motion：停掉闪烁，光标常显（瞬时态）。
-            .opacity(reduceMotion ? 1 : (on ? 1 : 0))
-            .animation(reduceMotion ? nil
-                       : .easeInOut(duration: 1.1).repeatForever(autoreverses: true),
-                       value: on)
-            .onAppear { if !reduceMotion { on = false } }
+            if reduceMotion {
+                Rectangle().fill(UD.accent)
+            } else {
+                // 闪烁走 CA（见 `Motion/UDMotion.swift`）：SwiftUI `.repeatForever`
+                // 会让整个窗口在流式回答全程满帧重绘。
+                UDMotionShape(
+                    color: UD.accent,
+                    content: .fill(cornerRadius: 0, size: nil),
+                    motion: UDMotion(opacity: .init(from: 1, to: 0), duration: 1.1,
+                                     autoreverses: true, timing: .easeInEaseOut)
+                )
+            }
+        }
+        .frame(width: 4, height: 11)
+        .allowsHitTesting(false)
     }
 }
 
