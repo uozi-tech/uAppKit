@@ -141,6 +141,9 @@ public struct UDTransferRow: View {
         self.direction = direction
     }
 
+    /// 卡片底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let cardBg = UD.dyn(.white(0.025), .hex(0xFFFFFF))
+
     public var body: some View {
         VStack(spacing: 7) {
             HStack(spacing: 6) {
@@ -174,7 +177,7 @@ public struct UDTransferRow: View {
         .frame(width: 320)
         .background(
             RoundedRectangle(cornerRadius: UD.Radius.lg)
-                .fill(UD.dyn(.white(0.025), .hex(0xFFFFFF)))
+                .fill(Self.cardBg)
         )
         .overlay(
             RoundedRectangle(cornerRadius: UD.Radius.lg)

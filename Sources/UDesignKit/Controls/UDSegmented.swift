@@ -79,6 +79,9 @@ private struct SegmentLabel: View {
     let font: Font
     @State private var hovering = false
 
+    /// 未选中段的 hover 底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let hoverBg = UD.dyn(.white(0.05), .black(0.05))
+
     public var body: some View {
         Text(label)
             .font(font)
@@ -94,7 +97,7 @@ private struct SegmentLabel: View {
                         .fill(UD.accent)
                 } else if hovering {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(UD.dyn(.white(0.05), .black(0.05)))
+                        .fill(Self.hoverBg)
                 }
             }
             .contentShape(Rectangle())

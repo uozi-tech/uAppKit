@@ -73,6 +73,9 @@ public struct UDToolCall: View {
         isDone ? UD.success : UD.accent
     }
 
+    /// 卡片底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let cardBg = UD.dyn(.white(0.025), .black(0.042))
+
     public var body: some View {
         VStack(spacing: 0) {
             header
@@ -86,7 +89,7 @@ public struct UDToolCall: View {
                 actions
             }
         }
-        .background(UD.dyn(.white(0.025), .black(0.042)))
+        .background(Self.cardBg)
         .clipShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)

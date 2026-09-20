@@ -151,9 +151,12 @@ public struct UDTextField: View {
         }
     }
 
+    /// 禁用态输入底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let disabledBg = UD.dyn(.white(0.02), .black(0.025))
+
     private var fieldBackground: Color {
         if !isEnabled {
-            return UD.dyn(.white(0.02), .black(0.025))
+            return Self.disabledBg
         }
         return UD.inputBg   // v2：淡灰填充承担边界（暗 white 5.5% / 日 black 5%）
     }

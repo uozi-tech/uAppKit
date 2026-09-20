@@ -55,6 +55,11 @@ public enum UD {
     }
 
     /// 把 (深, 浅) 两个 spec 合成一个随系统外观切换的动态 `Color`。
+    ///
+    /// **不要在 `body` 里现调**：每次调用都新建一对 NSColor + Color，而 `Color` 的 `==`
+    /// 落到底层 NSColor 的**实例同一性**上（同一实例 true / 值相同的两个实例 false）。
+    /// 现算出来的颜色永远不等于上一帧的那个，SwiftUI「值没变就跳过子树」的快路径因此
+    /// 永久失效，body 每帧重跑。固定配色一律提成 `static let`。
     public nonisolated static func dyn(_ dark: ColorSpec, _ light: ColorSpec) -> Color {
         #if canImport(AppKit)
         return Color(nsColor: dynNS(dark, light))
@@ -69,12 +74,22 @@ public enum UD {
     }
 
     #if canImport(AppKit)
+    /// `bestMatch` 的候选表。provider 闭包对**每一次**颜色解析都会跑一遍，
+    /// 数组不该在里面现建。
+    private nonisolated static let appearanceCandidates: [NSAppearance.Name] = [.aqua, .darkAqua]
+
     /// `dyn` 的 `NSColor` 版 —— 供 AppKit 视图（SQL 编辑器的 NSTextView / 行号栏等）
     /// 直接消费，同样随系统外观切换。
     public nonisolated static func dynNS(_ dark: ColorSpec, _ light: ColorSpec) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            return (isDark ? dark : light).nsColor()
+        // 两个分支的 NSColor 在闭包外建好、由闭包捕获：每次解析只剩一次 bestMatch
+        // 加一次三目，不再新建颜色对象。
+        let darkNS = dark.nsColor()
+        let lightNS = light.nsColor()
+        return NSColor(name: nil) { appearance in
+            // 必须走 bestMatch，不能写成 `appearance.name == .darkAqua`：VibrantDark
+            // 外观（菜单 / popover / 系统浮层）的 name 是 NSAppearanceNameVibrantDark，
+            // 比 name 会把深色浮层判成浅色。
+            appearance.bestMatch(from: appearanceCandidates) == .darkAqua ? darkNS : lightNS
         }
     }
     #endif
@@ -111,33 +126,62 @@ public enum UD {
 
     // MARK: - 强调 Accent（可切换；见 AccentColor / AccentState。getter 同步读 selected →
     // SwiftUI body 求值期访问被 Observation 追踪 → 切色全局自动重渲染。默认蓝 = 原手调值。）
-    @MainActor public static var accent: Color {
-        let a = AccentState.shared.selected
-        return dyn(a.accentSpec(dark: true), a.accentSpec(dark: false))
-    }
-    @MainActor public static var accentInk: Color {
-        let a = AccentState.shared.selected
-        return dyn(a.inkSpec(dark: true), a.inkSpec(dark: false))
-    }
-    @MainActor public static var accentSoft: Color {
-        let a = AccentState.shared.selected
-        return dyn(a.softSpec(dark: true), a.softSpec(dark: false))
-    }
-    @MainActor public static var accentPressed: Color {
-        let a = AccentState.shared.selected
-        return dyn(a.pressedSpec(dark: true), a.pressedSpec(dark: false))
+    //
+    // 每个强调色的 7 个槽位在进程启动时一次性建好并缓存，getter 只查表、返回**同一个**
+    // `Color` 实例。这不是省几次构造那么简单：`Color` 的 `==` 落到底层 `NSColor` 的
+    // **实例同一性**上（同一实例 true / 值相同的两个实例 false），getter 每次新建就意味着
+    // 任何把 accent 存进 view value 的视图「这一帧的值永远不等于上一帧」，SwiftUI
+    // 「值没变就跳过子树」的快路径被永久废掉，body 每帧重跑。
+    //
+    // 缓存的是「哪个 Color 对象」，不是「解析后的 RGBA」：表里存的仍是 `dyn` 产出的动态
+    // Color，底层 provider 照旧在每次绘制时按当前外观解析，深浅色切换不受影响。
+
+    /// 一个强调色的全部槽位，深浅仍由各 `Color` 自己的动态 provider 决定。
+    ///
+    /// 用 `final class` 而不是 `struct`：查表结果每读一次就要复制一遍，7 个 `Color`
+    /// 字段意味着 7 对 retain/release；引用类型只需一次。全部字段 `let` + `Color`
+    /// 是 `Sendable`，故无需 `@unchecked`。
+    private final class AccentPalette: Sendable {
+        let accent: Color, ink: Color, soft: Color, pressed: Color
+        let tint: Color, tintHover: Color, tintDisabled: Color
+
+        init(_ a: AccentColor) {
+            accent  = UD.dyn(a.accentSpec(dark: true),  a.accentSpec(dark: false))
+            ink     = UD.dyn(a.inkSpec(dark: true),     a.inkSpec(dark: false))
+            soft    = UD.dyn(a.softSpec(dark: true),    a.softSpec(dark: false))
+            pressed = UD.dyn(a.pressedSpec(dark: true), a.pressedSpec(dark: false))
+            func tinted(_ alpha: CGFloat) -> Color {
+                UD.dyn(a.accentSpec(dark: true).withAlpha(alpha),
+                       a.accentSpec(dark: false).withAlpha(alpha))
+            }
+            // v2「填充即边界」accent tint 阶（两主题通用）：
+            // 选中 / 主操作底 14% · hover 22% · 禁用底 7%。不再使用 accent 30–55% 描边。
+            tint = tinted(0.14)
+            tintHover = tinted(0.22)
+            tintDisabled = tinted(0.07)
+        }
     }
 
-    // v2「填充即边界」accent tint 阶（两主题通用）：
-    // 选中 / 主操作底 14% · hover 22% · 禁用底 7%。不再使用 accent 30–55% 描边。
-    @MainActor public static var accentTint: Color { tint(0.14) }
-    @MainActor public static var accentTintHover: Color { tint(0.22) }
-    @MainActor public static var accentTintDisabled: Color { tint(0.07) }
-    @MainActor private static func tint(_ alpha: CGFloat) -> Color {
-        let a = AccentState.shared.selected
-        return dyn(a.accentSpec(dark: true).withAlpha(alpha),
-                   a.accentSpec(dark: false).withAlpha(alpha))
+    /// 全色查表。按 `allCases` 建，新增强调色无需改这里。
+    private nonisolated static let accentPalettes: [AccentColor: AccentPalette] =
+        Dictionary(uniqueKeysWithValues: AccentColor.allCases.map { ($0, AccentPalette($0)) })
+
+    /// 表由 `allCases` 建，每个 case 必有条目；这个兜底只是为了不写 `!`。
+    private nonisolated static let accentPaletteFallback = AccentPalette(.blue)
+
+    /// 同步读 `selected` —— Observation 依赖照旧在此注册，切换强调色仍全局生效。
+    @MainActor private static var accentPalette: AccentPalette {
+        accentPalettes[AccentState.shared.selected] ?? accentPaletteFallback
     }
+
+    @MainActor public static var accent: Color { accentPalette.accent }
+    @MainActor public static var accentInk: Color { accentPalette.ink }
+    @MainActor public static var accentSoft: Color { accentPalette.soft }
+    @MainActor public static var accentPressed: Color { accentPalette.pressed }
+
+    @MainActor public static var accentTint: Color { accentPalette.tint }
+    @MainActor public static var accentTintHover: Color { accentPalette.tintHover }
+    @MainActor public static var accentTintDisabled: Color { accentPalette.tintDisabled }
 
     /// Nonisolated default accent (fixed blue, still dark/light dynamic) for use
     /// as a **default parameter / stored-property value** in nonisolated inits.

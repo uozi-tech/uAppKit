@@ -247,11 +247,14 @@ private struct UDIconButtonStyle: ButtonStyle {
 
     private struct Palette { var bg: Color; var border: Color; var text: Color }
 
+    /// plain 按下底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let plainDownBg = UD.dyn(.white(0.12), .black(0.10))
+
     private func colors(hover: Bool, down: Bool) -> Palette {
         switch style {
         case .plain:
             let text: Color = !isEnabled ? UD.text4 : ((hover || down) ? UD.text : UD.text3)
-            let bg: Color = down ? UD.dyn(.white(0.12), .black(0.10))
+            let bg: Color = down ? Self.plainDownBg
                                  : (hover ? UD.panelHover : .clear)
             return Palette(bg: bg, border: .clear, text: text)
         case .filled:

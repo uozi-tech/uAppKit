@@ -149,9 +149,12 @@ private struct UDMenuItemRow: View {
         return item.active ? UD.accent : UD.text2
     }
 
+    /// hover 行底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let hoverBg = UD.dyn(.white(0.05), .black(0.05))
+
     private var background: Color {
         if item.active { return UD.rowSelected }
-        if hovered { return UD.dyn(.white(0.05), .black(0.05)) }
+        if hovered { return Self.hoverBg }
         return .clear
     }
 }

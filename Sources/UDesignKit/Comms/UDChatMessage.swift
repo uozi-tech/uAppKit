@@ -117,6 +117,9 @@ public struct UDMonoTag: View {
         self.text = text
     }
 
+    /// 标签底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
+    private static let tagBg = UD.dyn(.white(0.05), .black(0.05))
+
     public var body: some View {
         Text(text)
             .font(UD.mono(11.5))
@@ -125,7 +128,7 @@ public struct UDMonoTag: View {
             .padding(.horizontal, 4)
             .background(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(UD.dyn(.white(0.05), .black(0.05)))
+                    .fill(Self.tagBg)
             )
     }
 }
