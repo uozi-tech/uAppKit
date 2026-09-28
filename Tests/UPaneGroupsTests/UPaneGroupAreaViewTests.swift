@@ -181,6 +181,41 @@ final class UPaneGroupAreaViewTests: XCTestCase {
         XCTAssertTrue(before === remaining[0], "合屏也只是改 frame")
     }
 
+    // MARK: 内容比面板宽：不许溢出到相邻组
+
+    /// 800pt 宽的编辑区左右分屏，每组 ~400pt，面板内容最小宽 600pt。内容只能在
+    /// 自己的面板里从左缘排起、超出部分被裁掉 —— 而不是把帧撑到 600 再居中，
+    /// 左右各溢出 100pt 盖住邻组（uTable 窄分屏下数据网格工具栏 / 页脚的实况）。
+    func testContentWiderThanItsPaneStaysInsideThePaneRect() throws {
+        let model = UPaneGroupsModel<TestPayload>()
+        let a = model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        let b = model.openTab { UPaneTab(payload: .scratch, customTitle: "b") }
+
+        let view = UPaneGroupArea(
+            model: model,
+            dragType: .plainText,
+            descriptor: { _ in UPaneTabDescriptor(title: "t") },
+            content: { tab, _ in Marker(tabID: tab.id).frame(minWidth: 600) },
+            emptyGroup: { _ in Color.clear },
+            onRequestClose: { _ in })
+        let (window, hostView) = host(view.frame(width: 800, height: 600))
+        defer { window.contentView = nil }
+
+        let frames = Dictionary(uniqueKeysWithValues: markers(in: hostView).map {
+            ($0.tabID, $0.convert($0.bounds, to: nil))
+        })
+        let left = try XCTUnwrap(frames[a])
+        let right = try XCTUnwrap(frames[b])
+        XCTAssertEqual(left.width, 600, accuracy: 0.5, "内容保持自己的最小宽，靠裁剪而不是压扁")
+        XCTAssertEqual(left.minX, 0, accuracy: 0.5,
+                       "左组内容必须从面板左缘排起，不能居中后向左溢出：\(left)")
+        // 右组面板从中线（± 分隔线几个点）开始。
+        XCTAssertGreaterThanOrEqual(right.minX, 400 - 4,
+                                    "右组内容越过中线盖到了左组上：\(right)")
+    }
+
     // MARK: 空组与活动态门
 
     func testEmptyGroupPlaceholderIsShownAndNoPaneIsMounted() throws {

@@ -335,7 +335,12 @@ private struct UPaneContentHost<Payload, Content: View>: View {
 
     var body: some View {
         content(item.tab, item.isFront)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // `minWidth/minHeight: 0` 不能省：flexible frame 没有下限时会跟着内容的
+            // 最小尺寸撑大，再被外层 `.frame(width:height:)` 居中摆进面板矩形 ——
+            // 内容一宽过面板就两侧一起溢出、盖到相邻编辑组上，而下面的 `.clipped()`
+            // 裁的是撑大后的帧，拦不住。
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity,
+                   alignment: .topLeading)
             .clipped()   // AppKit 内容不许画到自己的面板外面
             .opacity(item.isFront ? 1 : 0)
             .environment(\.activePaneGate, gate)
