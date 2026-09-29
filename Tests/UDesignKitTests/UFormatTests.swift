@@ -219,7 +219,28 @@ final class UFormatTests: XCTestCase {
         XCTAssertEqual(UFormat.duration(seconds: 7229), "2h 00m")
         XCTAssertEqual(UFormat.duration(seconds: 7230), "2h 01m")
         XCTAssertEqual(UFormat.duration(seconds: 2 * 3600 + 59 * 60 + 45), "3h 00m")
-        XCTAssertEqual(UFormat.duration(seconds: 100 * 3600), "100h 00m")
+        XCTAssertEqual(UFormat.duration(seconds: 100 * 3600), "4d 04h")
+    }
+
+    func testDurationDayTier() {
+        XCTAssertEqual(UFormat.duration(seconds: 86_369), "23h 59m")   // 23h 59m 29s
+        XCTAssertEqual(UFormat.duration(seconds: 86_370), "1d 00h")      // 舍入后满一天，不是 "24h 00m"
+        XCTAssertEqual(UFormat.duration(seconds: 86_400), "1d 00h")
+        XCTAssertEqual(UFormat.duration(seconds: 3 * 86_400 + 4 * 3600), "3d 04h")
+        XCTAssertEqual(UFormat.duration(seconds: 3 * 86_400 + 23 * 3600 + 1800), "4d 00h")
+        XCTAssertEqual(UFormat.duration(seconds: 400 * 86_400), "400d 00h")
+    }
+
+    func testDurationWholeSeconds() {
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 0), "0 s")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 45), "45 s")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 59), "59 s")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 60), "1m 00s")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 125), "2m 05s")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 3600), "1h 00m")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: 3 * 86_400 + 4 * 3600), "3d 04h")
+        XCTAssertEqual(UFormat.duration(wholeSeconds: -1), "—")
+        XCTAssertTrue(UFormat.duration(wholeSeconds: .max).hasSuffix("h"))
     }
 
     func testDurationInvalidInputs() {
@@ -233,9 +254,9 @@ final class UFormatTests: XCTestCase {
     }
 
     func testDurationHugeValuesDoNotCrash() {
-        XCTAssertTrue(UFormat.duration(seconds: 1e300).hasSuffix("m"))
-        XCTAssertTrue(UFormat.duration(seconds: .greatestFiniteMagnitude).hasSuffix("m"))
-        XCTAssertTrue(UFormat.duration(.seconds(Int64.max)).hasSuffix("m"))
+        XCTAssertTrue(UFormat.duration(seconds: 1e300).hasSuffix("h"))
+        XCTAssertTrue(UFormat.duration(seconds: .greatestFiniteMagnitude).hasSuffix("h"))
+        XCTAssertTrue(UFormat.duration(.seconds(Int64.max)).hasSuffix("h"))
     }
 
     func testDurationOverloads() {

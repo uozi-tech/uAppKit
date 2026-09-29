@@ -92,7 +92,7 @@ nonisolated public enum UFormat {
 
     // MARK: - 耗时
 
-    /// 耗时：µs（整数）→ ms / s（三位有效数字）→ "2m 05s" → "1h 02m"。
+    /// 耗时：µs（整数）→ ms / s（三位有效数字）→ "2m 05s" → "1h 02m" → "3d 04h"。
     /// 负数 / 非有限 → "—"。
     public static func duration(seconds: Double) -> String {
         guard seconds.isFinite, seconds >= 0 else { return placeholder }
@@ -116,9 +116,24 @@ nonisolated public enum UFormat {
             return "\(m)m " + twoDigits(s) + "s"
         }
         let totalMinutes = (seconds / 60).rounded(.toNearestOrAwayFromZero)
-        let hours = (totalMinutes / 60).rounded(.down)
-        let minutes = Int(totalMinutes - hours * 60)
-        return String(format: "%.0fh ", hours) + twoDigits(minutes) + "m"
+        if totalMinutes < 24 * 60 {
+            let hours = (totalMinutes / 60).rounded(.down)
+            let minutes = Int(totalMinutes - hours * 60)
+            return String(format: "%.0fh ", hours) + twoDigits(minutes) + "m"
+        }
+        // ≥ 1 天：「3d 04h」（23h 59m 40s 舍入后满一天 → "1d 00h"）。
+        let totalHours = (seconds / 3600).rounded(.toNearestOrAwayFromZero)
+        let days = (totalHours / 24).rounded(.down)
+        let hours = Int(totalHours - days * 24)
+        return String(format: "%.0fd ", days) + twoDigits(hours) + "h"
+    }
+
+    /// 整秒时长（TTL、存活时长、剩余时间这类本就以秒计的量）：不满一分钟写 "45 s"，
+    /// 不带 `duration(seconds:)` 的小数位（"45.0 s"）；一分钟起同 `duration(seconds:)`。
+    public static func duration(wholeSeconds: Int64) -> String {
+        guard wholeSeconds >= 0 else { return placeholder }
+        if wholeSeconds < 60 { return "\(wholeSeconds) s" }
+        return duration(seconds: Double(wholeSeconds))
     }
 
     public static func duration(_ d: Duration) -> String {
