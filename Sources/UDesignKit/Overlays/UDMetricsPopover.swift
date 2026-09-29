@@ -23,6 +23,7 @@ public struct UDMetricsPopover: View {
     private static let width: CGFloat = 340
     private static let contentWidth: CGFloat = 312
     private static let sparkHeight: CGFloat = 56
+    private static let coresMaxHeight: CGFloat = 240
 
     public init(
         title: String,
@@ -71,16 +72,19 @@ public struct UDMetricsPopover: View {
                 .frame(width: Self.contentWidth, height: Self.sparkHeight)
 
             // 每核网格
+            // 核数不可控（128 核 = 64 行）：限高内滚，不让浮层伸出屏幕。
             if let cores {
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: 18),
-                        GridItem(.flexible(), spacing: 18)
-                    ],
-                    spacing: 6
-                ) {
-                    ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
-                        coreRow(index: index, value: value)
+                UDCappedScroll(maxHeight: Self.coresMaxHeight) {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 18),
+                            GridItem(.flexible(), spacing: 18)
+                        ],
+                        spacing: 6
+                    ) {
+                        ForEach(Array(cores.enumerated()), id: \.offset) { index, value in
+                            coreRow(index: index, value: value)
+                        }
                     }
                 }
                 .padding(.top, 10)

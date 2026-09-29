@@ -8,6 +8,10 @@ import AppKit
 /// NSTableView）之上（overlay/`.zIndex` 管不到平台视图，见 v8 §跨区浮层），且**无 popover
 /// 箭头**，齐平匹配设计稿的绝对定位下拉（`position:absolute;top;left`）。
 ///
+/// **屏幕边缘**：锚点下方放不下、且下方不足 `anchoredPanelMinComfortHeight` 而上方更宽裕时
+/// 改为向上展开；无论哪个方向，都把剩余可用高度经 `udPanelAvailableHeight` 注入内容，
+/// 长列表据此限高内滚（`UDMenu` 自动遵守，自绘内容可读此环境值）。
+///
 /// **单层背景 + 落影**：窗口自身零绘制（`.clear` 底、`hasShadow=false`）—— 开窗口投影会在
 /// 内容圆角浮层之外再画一圈灰色圆角、看着像「双重背景」。落影改由内容自带 `udShadow(.md)`
 /// 提供，并在四周留 `shadowInset` 透明边让阴影不被窗口裁掉；透明边内的点击照样算「面板外」关闭。
@@ -21,6 +25,65 @@ import AppKit
 /// ```
 /// 内容四周留白：给 `udShadow(.md)` 的模糊留空间，透明不可见。
 private let anchoredPanelShadowInset: CGFloat = 24
+
+/// 面板离屏幕可见区边缘至少留这么多，不贴死 Dock / 屏幕下沿。
+private let anchoredPanelScreenMargin: CGFloat = 8
+
+/// 下方剩余空间不足以放下内容、且上方更宽裕时，改为向上展开。
+/// 低于此高度时优先考虑上翻（哪怕内容能滚动，也别挤成几行）。
+private let anchoredPanelMinComfortHeight: CGFloat = 160
+
+/// `.anchoredPanel` 呈现时注入给内容的**可用最大高度**（内容自身，不含落影留白）——
+/// 即锚点到屏幕可见区边缘（避开 Dock / 菜单栏）的距离。内容里的长列表据此限高内滚，
+/// 否则会直接伸出屏幕、底下的项既看不见也点不到（`UDMenu` 已自动遵守）。
+/// 不在面板里时为 nil。
+private struct UDPanelAvailableHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+public extension EnvironmentValues {
+    var udPanelAvailableHeight: CGFloat? {
+        get { self[UDPanelAvailableHeightKey.self] }
+        set { self[UDPanelAvailableHeightKey.self] = newValue }
+    }
+}
+
+/// 自绘面板内容里「限高内滚列表」的高度上限计算：固定上限与面板可用高度（扣掉列表以外
+/// 的标题 / 搜索框 / 底部行等「外框」）取小，且至少留几行可见。
+///
+/// 用法（外框高由 `.udPanelChrome` 实测）：
+/// ```
+/// @Environment(\.udPanelAvailableHeight) private var available
+/// @State private var chrome: CGFloat = 0
+/// list.frame(height: min(h, UDPanelListCap.cap(420, available: available, chrome: chrome)))
+/// ```
+public enum UDPanelListCap {
+    /// 屏幕边缘再局促，列表也至少留这么高（约两三行）。
+    public static let minimum: CGFloat = 64
+
+    public static func cap(_ maxHeight: CGFloat, available: CGFloat?, chrome: CGFloat) -> CGFloat {
+        guard let available else { return maxHeight }
+        return max(min(maxHeight, available - chrome), minimum)
+    }
+}
+
+public extension View {
+    /// 实测「整块内容高 − 列表当前高」= 列表以外的外框高，写进 `chrome`（配合
+    /// `UDPanelListCap`）。挂在整块面板内容最外层（含 padding）；`listHeight` 传列表
+    /// **当前渲染高**，未量到时传 nil（跳过）。写回落到下一拍，避免 AttributeGraph 环。
+    func udPanelChrome(_ chrome: Binding<CGFloat>, listHeight: CGFloat?) -> some View {
+        // 观测值直接取「外框高」而非整块高：列表高从未知变为已知时整块高可能不变
+        // （首帧 maxHeight 已顶到上限），盯整块高就永远等不到回调。
+        onGeometryChange(for: CGFloat?.self, of: { proxy in
+            listHeight.map { max(proxy.size.height - $0, 0) }
+        }) { measured in
+            guard let measured, abs(chrome.wrappedValue - measured) > 0.5 else { return }
+            DispatchQueue.main.async {
+                guard abs(chrome.wrappedValue - measured) > 0.5 else { return }
+                chrome.wrappedValue = measured
+            }
+        }
+    }
+}
 
 /// 浮层水平对齐：内容左上贴锚点左下（`leading`）/ 内容右上贴锚点右下（`trailing`，
 /// 用于贴右边缘的触发器，避免菜单向右溢出窗口）。
@@ -63,9 +126,10 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         // 内容外套透明边 + 自带 md 落影（窗口零绘制，避免双重背景 / 阴影被裁）。
         // onGeometryChange 盯内容实际尺寸：展开后内容变高/变矮（如搜索过滤）时面板跟着
         // 改 frame——否则 NSHostingView 定格在呈现时的 fittingSize，缩小的内容会被垂直居中。
-        coord.buildContent = { [weak coord] in
+        coord.buildContent = { [weak coord] availableHeight in
             AnyView(
                 content(dismiss)
+                    .environment(\.udPanelAvailableHeight, availableHeight)
                     .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
                         coord?.contentSizeChanged(size)
                     }
@@ -89,7 +153,10 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         var alignment: UDPanelAlignment = .leading
         var becomesKey = false
         var appearance: NSAppearance?
-        var buildContent: (() -> AnyView)?
+        /// 参数 = 注入内容的可用最大高度（nil = 不限，仅用于先量内容自然高度）。
+        var buildContent: ((CGFloat?) -> AnyView)?
+        /// 本次呈现是否向上展开（锚点下方放不下时）。呈现期间固定，不随内容尺寸来回翻。
+        private var opensUpward = false
         /// presenter 注入的「置 binding=false」。走 binding 而非直接拆窗口，避免同一事件里重入。
         var onRequestDismiss: (() -> Void)?
 
@@ -107,7 +174,19 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         private func present() {
             guard let anchor, let parent = anchor.window, let build = buildContent else { return }
 
-            let hosting = NSHostingView(rootView: build())
+            // 先不限高量出内容自然高度，再按锚点上下的屏幕空间定方向与可用高度，
+            // 重建一次 rootView 把可用高度注入内容——长列表据此内滚，而不是伸出屏幕。
+            let hosting = NSHostingView(rootView: build(nil))
+            let inset = anchoredPanelShadowInset
+            let natural = hosting.fittingSize.height - inset * 2
+            let space = availableSpace(anchor: anchor, parent: parent)
+            opensUpward = natural > space.below
+                && space.below < anchoredPanelMinComfortHeight
+                && space.above > space.below
+            let available = max(opensUpward ? space.above : space.below, 0)
+            if natural > available {
+                hosting.rootView = build(available)
+            }
             hosting.setFrameSize(hosting.fittingSize)
 
             let panel: NSPanel = becomesKey
@@ -157,7 +236,7 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             if let tf = findField(content) { panel.makeFirstResponder(tf) }
         }
 
-        /// 内容尺寸变化（搜索过滤增删行等）→ 面板窗口跟着改 frame，顶边保持贴锚点。
+        /// 内容尺寸变化（搜索过滤增删行等）→ 面板窗口跟着改 frame，贴锚那条边保持不动。
         /// 内容 ideal 尺寸不依赖容器尺寸（定宽卡片），不会与 setContentSize 形成回环。
         func contentSizeChanged(_ size: CGSize) {
             guard let panel else { return }
@@ -167,6 +246,16 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
                 || abs(panel.frame.height - target.height) > 0.5 else { return }
             panel.setContentSize(target)
             reposition()
+        }
+
+        /// 锚点下沿（含 gap）到屏幕可见区下沿、锚点上沿到可见区上沿的距离。
+        private func availableSpace(anchor: NSView, parent: NSWindow) -> (below: CGFloat, above: CGFloat) {
+            let onScreen = parent.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+            let screen = NSScreen.screens.first { $0.frame.intersects(onScreen) } ?? parent.screen ?? NSScreen.main
+            guard let visible = screen?.visibleFrame else { return (.greatestFiniteMagnitude, .greatestFiniteMagnitude) }
+            let margin = anchoredPanelScreenMargin
+            return (onScreen.minY - gap - visible.minY - margin,
+                    visible.maxY - onScreen.maxY - gap - margin)
         }
 
         private func reposition() {
@@ -179,8 +268,11 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             let x: CGFloat = alignment == .leading
                 ? onScreen.minX - inset
                 : onScreen.maxX - panel.frame.width + inset
-            let origin = NSPoint(x: x, y: onScreen.minY - gap + inset - panel.frame.height)
-            panel.setFrameOrigin(origin)
+            // 向下：内容顶边贴锚点下沿；向上：内容底边贴锚点上沿。尺寸变化时对应边保持不动。
+            let y: CGFloat = opensUpward
+                ? onScreen.maxY + gap - inset
+                : onScreen.minY - gap + inset - panel.frame.height
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
         private func installDismissMonitor() {

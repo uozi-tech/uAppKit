@@ -72,13 +72,18 @@ public struct UDSessionsDropdown: View {
 
     // MARK: - 列表
 
+    /// 会话数不可控：限高内滚，不让浮层伸出屏幕。
+    private static let listMaxHeight: CGFloat = 320
+
     private var list: some View {
-        VStack(spacing: 1) {
-            ForEach(sessions) { session in
-                row(session)
+        UDCappedScroll(maxHeight: Self.listMaxHeight) {
+            VStack(spacing: 1) {
+                ForEach(sessions) { session in
+                    row(session)
+                }
             }
+            .padding(4)
         }
-        .padding(4)
     }
 
     private func row(_ session: UDChatSessionItem) -> some View {
