@@ -129,7 +129,7 @@ public struct UDMenu: View {
                 .strokeBorder(UD.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .udPanelChrome($chromeHeight, listHeight: panelAvailableHeight == nil ? nil : renderedItemsHeight)
+        .udPanelChrome($chromeHeight, listHeight: renderedItemsHeight)
         // 落影由承载它的 `.anchoredPanel` 统一提供（见 UDDropdown）；此处不再自带，避免双重阴影。
     }
 }

@@ -69,17 +69,36 @@ public enum UDPanelListCap {
 public extension View {
     /// 实测「整块内容高 − 列表当前高」= 列表以外的外框高，写进 `chrome`（配合
     /// `UDPanelListCap`）。挂在整块面板内容最外层（含 padding）；`listHeight` 传列表
-    /// **当前渲染高**，未量到时传 nil（跳过）。写回落到下一拍，避免 AttributeGraph 环。
+    /// **当前渲染高**，未量到时传 nil（跳过）。
+    ///
+    /// 只在面板确实受限（环境里有 `udPanelAvailableHeight`，即锚点贴近屏幕边缘）时才挂
+    /// 几何观测：外层观测会在列表每次滚动的布局里被重算，实测让导入目标表浮层滚动帧
+    /// p95 多出约 2ms（ImportTargetMenuCostTests），不受限时外框高也用不上。
     func udPanelChrome(_ chrome: Binding<CGFloat>, listHeight: CGFloat?) -> some View {
-        // 观测值直接取「外框高」而非整块高：列表高从未知变为已知时整块高可能不变
-        // （首帧 maxHeight 已顶到上限），盯整块高就永远等不到回调。
-        onGeometryChange(for: CGFloat?.self, of: { proxy in
-            listHeight.map { max(proxy.size.height - $0, 0) }
-        }) { measured in
-            guard let measured, abs(chrome.wrappedValue - measured) > 0.5 else { return }
-            DispatchQueue.main.async {
-                guard abs(chrome.wrappedValue - measured) > 0.5 else { return }
-                chrome.wrappedValue = measured
+        modifier(UDPanelChromeProbe(chrome: chrome, listHeight: listHeight))
+    }
+}
+
+private struct UDPanelChromeProbe: ViewModifier {
+    @Binding var chrome: CGFloat
+    let listHeight: CGFloat?
+    @Environment(\.udPanelAvailableHeight) private var available
+
+    func body(content: Content) -> some View {
+        if available == nil {
+            content
+        } else {
+            // 观测值直接取「外框高」而非整块高：列表高从未知变为已知时整块高可能不变
+            // （首帧 maxHeight 已顶到上限），盯整块高就永远等不到回调。
+            content.onGeometryChange(for: CGFloat?.self, of: { proxy in
+                listHeight.map { max(proxy.size.height - $0, 0) }
+            }) { measured in
+                // 写回落到下一拍，避免 AttributeGraph 环。
+                guard let measured, abs(chrome - measured) > 0.5 else { return }
+                DispatchQueue.main.async {
+                    guard abs(chrome - measured) > 0.5 else { return }
+                    chrome = measured
+                }
             }
         }
     }
