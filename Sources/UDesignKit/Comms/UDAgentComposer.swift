@@ -21,7 +21,7 @@ public enum UDAgentComposerLayout {
 /// - **工具栏恒为一行**：左侧 `toolbar` 槽放消费方自己的控件（模型、审批档位、附加…），
 ///   推荐用本文件的幽灵外观（`UDComposerGhostLabel` / `UDComposerGhostIconStyle`）——
 ///   静态无底色、hover 才出底，不再一控件一枚灰胶囊。
-/// - **状态可见**：聚焦有描边 + 外环（同 `UDTextField`）；`status` 是卡片上方的一行小字。
+/// - **状态可见**：`status` 是卡片上方的一行小字。聚焦时卡片外观不变（不加强调描边 / 外环）。
 /// - **键盘**：↩ 发送、⌥↩ 换行、esc 停止（焦点在输入框且 `canStop` 时）。
 ///
 /// 纯展示组件：只读 `UD` token + 普通值 / 闭包 / 视图输入，不依赖任何 domain model。
@@ -88,8 +88,6 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         self.toolbar = toolbar
     }
 
-    private var isFocused: Bool { focus?.wrappedValue ?? ownFocus }
-
     private func takeFocus() {
         if let focus { focus.wrappedValue = true } else { ownFocus = true }
     }
@@ -144,13 +142,12 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         .padding(.top, 12)
         .padding([.horizontal, .bottom], 8)
         .background(shape.fill(UD.overlay))
-        .overlay(shape.strokeBorder(isFocused ? UD.accent : UD.border, lineWidth: 1))
-        .background(shape.inset(by: -1.5).stroke(UD.accent.opacity(isFocused ? 0.13 : 0), lineWidth: 3))
+        // 聚焦不换描边、不加外环：光标已经说明了焦点，蓝框在面板里太抢眼。
+        .overlay(shape.strokeBorder(UD.border, lineWidth: 1))
         .udShadow(.sm)
         // 卡片留白处也能点进输入框（工具栏上的控件各自吃掉自己的点击）。
         .contentShape(shape)
         .onTapGesture { takeFocus() }
-        .animation(.easeOut(duration: 0.12), value: isFocused)
     }
 }
 

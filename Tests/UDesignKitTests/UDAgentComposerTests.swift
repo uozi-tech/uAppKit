@@ -22,6 +22,17 @@ final class UDAgentComposerTests: XCTestCase {
                       "UDAgentComposer 必须让 esc 在 canStop 时触发停止。")
     }
 
+    /// 聚焦时卡片不换强调描边、也不加外环：只留一圈常态 `UD.border`。
+    func testFocusDoesNotDrawAccentRing() throws {
+        let src = try source()
+        XCTAssertTrue(src.contains(".overlay(shape.strokeBorder(UD.border, lineWidth: 1))"),
+                      "UDAgentComposer 的描边应恒为 UD.border。")
+        XCTAssertFalse(src.contains("UD.accent.opacity(isFocused"),
+                       "UDAgentComposer 聚焦时不应再画外环。")
+        XCTAssertFalse(src.contains("isFocused ? UD.accent"),
+                       "UDAgentComposer 聚焦时不应换成强调色描边。")
+    }
+
     private func source() throws -> String {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()   // UDesignKitTests
