@@ -44,6 +44,7 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
     @ViewBuilder var toolbar: () -> Toolbar
 
     @FocusState private var ownFocus: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     /// - Parameters:
     ///   - maxLines: 输入行最多长到几行；缺省 `max(minLines + 4, 8)`。
@@ -104,6 +105,18 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         }
     }
 
+    /// 底板 + 投影。投影只挂在底板形状上：挂在整张卡片上时，SwiftUI 要把输入框、工具栏
+    /// 整棵离屏栅格化才算得出阴影，每敲一个字都重来一遍。
+    ///
+    /// 两层：贴边的接触影交代边缘，更散更淡的环境影把卡片托起来。原先单层 `.sm`
+    /// （半径 4、10%）在浅色下是一圈发灰的晕边，深色下几乎看不见。
+    private func cardBackground(_ shape: RoundedRectangle) -> some View {
+        let dark = colorScheme == .dark
+        return shape.fill(UD.overlay)
+            .shadow(color: .black.opacity(dark ? 0.30 : 0.035), radius: 1, x: 0, y: 1)
+            .shadow(color: .black.opacity(dark ? 0.38 : 0.07), radius: 14, x: 0, y: 6)
+    }
+
     private var card: some View {
         let shape = RoundedRectangle(cornerRadius: UDAgentComposerLayout.cornerRadius, style: .continuous)
         return VStack(alignment: .leading, spacing: 8) {
@@ -141,10 +154,9 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         }
         .padding(.top, 12)
         .padding([.horizontal, .bottom], 8)
-        .background(shape.fill(UD.overlay))
+        .background { cardBackground(shape) }
         // 聚焦不换描边、不加外环：光标已经说明了焦点，蓝框在面板里太抢眼。
         .overlay(shape.strokeBorder(UD.border, lineWidth: 1))
-        .udShadow(.sm)
         // 卡片留白处也能点进输入框（工具栏上的控件各自吃掉自己的点击）。
         .contentShape(shape)
         .onTapGesture { takeFocus() }
