@@ -43,10 +43,22 @@ public enum AgentToolApproval {
     "reason":"brief explanation in Chinese"}. When uncertain choose manual.
     """
 
+    /// 规则直接放行只读命令时给的理由。
+    public static let readOnlyReason = "只读命令，自动运行"
+
+    /// 确定性判定的只读命令：不必请 AI 审查，也不必问用户。见 `ReadOnlyShellCommand`。
+    public static func isReadOnly(_ request: Request) -> Bool {
+        request.toolName == "run_command" && ReadOnlyShellCommand.isReadOnly(request.command)
+    }
+
     /// `review` must be an independent, tool-free model request with a host timeout.
-    /// Hard rules run first and cannot be relaxed by an AI response.
+    /// Read-only commands are approved by rule without a review. In read-only mode
+    /// everything else goes to a human; in standard mode hard rules run first and
+    /// cannot be relaxed by an AI response.
     public static func evaluate(_ request: Request,
                                 review: @Sendable (String, String) async throws -> String) async -> Decision {
+        if isReadOnly(request) { return Decision(approved: true, reason: readOnlyReason) }
+        if request.mode == .readOnly { return Decision(approved: false, reason: "不是只读命令，请人工确认") }
         if let reason = manualReason(for: request) { return Decision(approved: false, reason: reason) }
         guard !Task.isCancelled else { return Decision(approved: false, reason: "审批已取消") }
         do {
@@ -73,7 +85,7 @@ public enum AgentToolApproval {
 
     /// Deliberately a small grammar, not a blacklist pretending to parse shell.
     /// Unknown commands/options, shell composition and sensitive paths fail closed.
-    /// Even eligible commands still require the independent AI decision.
+    /// Commands that pass still require the independent AI decision (standard mode).
     public static func manualReason(for request: Request) -> String? {
         guard request.toolName == "run_command" else { return "此工具需要人工确认" }
         guard !request.userIntent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
