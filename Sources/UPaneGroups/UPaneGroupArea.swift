@@ -61,6 +61,12 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
 
     /// 本区域的拖拽会话状态，所有组共享一份。
     @State private var dragState = UPaneDragState()
+    /// 视觉风格（`.uPaneGroupStyle(_:)` 注入，默认 `.classic`）。
+    @Environment(\.uPaneGroupStyle) private var style
+    /// `.card` 下是否把面板画成卡内凹槽（`.uPaneGroupWells()` 注入，见 `UPaneWellMetrics`）。
+    @Environment(\.uPaneGroupWells) private var wellsEnabled
+
+    private var drawsWells: Bool { style.kind == .card && wellsEnabled }
 
     /// 完整初始化器。带默认值的便捷版本见下方 extension。
     public init(
@@ -129,12 +135,15 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
     public var body: some View {
         GeometryReader { geo in
             let layout = model.root.frames(in: CGRect(origin: .zero, size: geo.size))
+            let wells = drawsWells
             ZStack(alignment: .topLeading) {
                 ForEach(layout.panes, id: \.paneID) { pane in
                     UPaneGroupChrome(
                         model: model, dragState: dragState, groupID: pane.paneID,
                         dragType: dragType, foreignDropTypes: foreignDropTypes,
                         stripHeight: stripHeight,
+                        style: style,
+                        bodyInsets: bodyInsets(for: pane.rect, areaSize: geo.size),
                         showsSplitButton: showsSplitButton,
                         splitButtonDirection: splitButtonDirection,
                         splitButtonIcon: splitButtonIcon,
@@ -146,17 +155,30 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
                         .frame(width: pane.rect.width, height: pane.rect.height)
                         .offset(x: pane.rect.minX, y: pane.rect.minY)
                 }
-                ForEach(mountedTabs(in: layout)) { item in
+                ForEach(mountedTabs(in: layout, areaSize: geo.size)) { item in
                     UPaneContentHost(
                         model: model, dragState: dragState, item: item,
                         dragType: dragType, foreignDropTypes: foreignDropTypes,
-                        contentTopInset: contentTopInset,
                         content: content, onForeignDrop: onForeignDrop)
                         .frame(width: item.rect.width, height: item.rect.height)
                         .offset(x: item.rect.minX, y: item.rect.minY)
                         .zIndex(item.isFront ? 1 : 0)
                 }
-                if showsActiveGroupRing, layout.panes.count > 1 {
+                if wells {
+                    // 凹槽外框（角帽 / 日间窗格轮廓 / 活动组 accent 框）按组画一份，
+                    // 盖在面板之上、投放高亮之下。
+                    let multi = layout.panes.count > 1
+                    ForEach(layout.panes, id: \.paneID) { pane in
+                        let well = UPaneGroupGeometry.rect(
+                            pane.rect, insetBy: bodyInsets(for: pane.rect, areaSize: geo.size))
+                        UPaneWellChrome(groupID: pane.paneID, model: model,
+                                        showsRings: multi,
+                                        showsActiveRing: showsActiveGroupRing && multi)
+                            .frame(width: well.width, height: well.height)
+                            .offset(x: well.minX, y: well.minY)
+                            .zIndex(1.5)
+                    }
+                } else if showsActiveGroupRing, layout.panes.count > 1 {
                     ForEach(layout.panes, id: \.paneID) { pane in
                         PaneFocusRing(groupID: pane.paneID, model: model)
                             .frame(width: pane.rect.width, height: pane.rect.height)
@@ -184,26 +206,41 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
         }
-        .background(UD.bg)
+        .background(style.areaBackground)
+    }
+
+    /// 组矩形里正文（面板 / 空态）相对组矩形的内缩。默认只让出标签条；凹槽模式另把
+    /// 贴区域外缘的三边各缩 6pt。
+    private func bodyInsets(for paneRect: CGRect, areaSize: CGSize) -> EdgeInsets {
+        guard drawsWells else {
+            return EdgeInsets(top: contentTopInset, leading: 0, bottom: 0, trailing: 0)
+        }
+        return UPaneGroupGeometry.wellInsets(
+            paneRect: paneRect, areaSize: areaSize, stripHeight: contentTopInset)
     }
 
     /// 该挂载哪些标签的面板，各自配上该占的内容矩形（组矩形去掉标签条）。
     /// 每个标签只出现一次、身份就是 `tab.id` —— 换组只换 frame。
     /// 挂多少由 `policy.keepAlive` 决定。
-    private func mountedTabs(in layout: LayoutFrames) -> [MountedTab<Payload>] {
+    private func mountedTabs(in layout: LayoutFrames, areaSize: CGSize) -> [MountedTab<Payload>] {
         let keepAlive = model.policy.keepAlive
         let activeGroupID = model.activeGroupID ?? model.root.firstLeafID
         return layout.panes.flatMap { pane -> [MountedTab<Payload>] in
             guard let group = model.groups[pane.paneID], !group.tabs.isEmpty else { return [] }
             let isActiveGroup = pane.paneID == activeGroupID
             if keepAlive == .activeGroupOnly && !isActiveGroup { return [] }
-            let rect = UPaneGroupGeometry.contentRect(
-                in: pane.rect,
-                stripHeight: contentTopInset)
+            let insets = bodyInsets(for: pane.rect, areaSize: areaSize)
+            let rect = drawsWells
+                ? UPaneGroupGeometry.rect(pane.rect, insetBy: insets)
+                : UPaneGroupGeometry.contentRect(in: pane.rect, stripHeight: contentTopInset)
+            // 落点区的分区判定用**整个组**的坐标系，面板内的位置要补回这段偏移。
+            let locationOffset = CGSize(width: rect.minX - pane.rect.minX,
+                                        height: rect.minY - pane.rect.minY)
             return group.tabs.enumerated().compactMap { idx, tab in
                 let isFront = idx == group.activeIndex
                 if keepAlive != .allTabs && !isFront { return nil }
-                return MountedTab(tab: tab, groupID: pane.paneID, rect: rect, isFront: isFront)
+                return MountedTab(tab: tab, groupID: pane.paneID, rect: rect, isFront: isFront,
+                                  locationOffset: locationOffset)
             }
         }
     }
@@ -311,6 +348,8 @@ struct MountedTab<Payload>: Identifiable {
     let groupID: UUID
     let rect: CGRect
     let isFront: Bool
+    /// 面板矩形相对组矩形的偏移（投放分区判定换算用）。
+    let locationOffset: CGSize
     var id: UUID { tab.id }
 }
 
@@ -322,7 +361,6 @@ private struct UPaneContentHost<Payload, Content: View>: View {
     let item: MountedTab<Payload>
     let dragType: UTType
     let foreignDropTypes: [UTType]
-    let contentTopInset: CGFloat
     let content: (UPaneTab<Payload>, Bool) -> Content
     let onForeignDrop: (_ providers: [NSItemProvider], _ groupID: UUID, _ zone: PaneDropZone) -> Bool
 
@@ -352,7 +390,7 @@ private struct UPaneContentHost<Payload, Content: View>: View {
                 dragState: dragState,
                 dragType: dragType,
                 foreignTypes: foreignDropTypes,
-                locationOffset: CGSize(width: 0, height: contentTopInset),
+                locationOffset: item.locationOffset,
                 onDrop: { sourceTab, zone in
                     model.moveTab(sourceTab, toGroup: item.groupID, zone: zone)
                 },
@@ -417,6 +455,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
     let dragType: UTType
     let foreignDropTypes: [UTType]
     let stripHeight: CGFloat
+    let style: UPaneGroupStyle
+    /// 正文（空态占位）相对组矩形的内缩；顶边即标签条高度。
+    let bodyInsets: EdgeInsets
     let showsSplitButton: Bool
     let splitButtonDirection: UPaneSplitButtonDirection
     let splitButtonIcon: UPaneTabIcon
@@ -448,8 +489,11 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.leading, bodyInsets.leading)
+            .padding(.trailing, bodyInsets.trailing)
+            .padding(.bottom, bodyInsets.bottom)
         }
-        .background(UD.bg)
+        .background(style.areaBackground)
         // 把本组当前尺寸实时写进共享拖拽状态，供投放代理的分区判定读取。
         // 不能让 delegate 捕获尺寸 —— 窗口 resize 后会变旧，见 `groupBounds`。
         .background(
@@ -481,23 +525,70 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
         }
     }
 
+    @ViewBuilder
     private var tabStrip: some View {
+        switch style.kind {
+        case .classic: classicTabStrip
+        case .card: cardTabStrip
+        }
+    }
+
+    private func chip(index idx: Int, tab: UPaneTab<Payload>) -> some View {
+        UPaneTabChip(
+            tab: tab,
+            activity: model.tabActivity(groupID: groupID, index: idx),
+            descriptor: descriptor,
+            tabMenu: tabMenu,
+            dragState: dragState,
+            dragType: dragType,
+            groupID: groupID,
+            stripHeight: stripHeight,
+            style: style,
+            onActivate: { model.activateTab(groupID: groupID, index: idx) },
+            onClose: { onRequestClose(tab) },
+            onReorder: { source, target in model.reorderTab(source, before: target) })
+    }
+
+    /// `.card`：标签条透出卡面、无底线；胶囊之间 2pt，左右内边距 8，右侧按钮 26×26 无竖线。
+    private var cardTabStrip: some View {
+        HStack(spacing: 2) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    ForEach(Array((group?.tabs ?? []).enumerated()), id: \.element.id) { idx, tab in
+                        chip(index: idx, tab: tab)
+                    }
+                }
+                .frame(height: stripHeight)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            stripAccessory(groupID)
+
+            if (group?.tabs.isEmpty ?? true), model.groupCount > 1 {
+                UPaneCardStripButton(help: "关闭这个空分组（⌘W）",
+                                     action: { model.closeEmptyGroup(groupID: groupID) }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+            }
+
+            if showsSplitButton, splitAllowed {
+                UPaneCardStripButton(help: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）",
+                                     action: { model.splitGroup(groupID, direction: resolvedSplitDirection()) }) {
+                    UPaneTabIconView(icon: splitButtonIcon, size: 14)
+                }
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: stripHeight)
+    }
+
+    private var classicTabStrip: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(Array((group?.tabs ?? []).enumerated()), id: \.element.id) { idx, tab in
-                        UPaneTabChip(
-                            tab: tab,
-                            activity: model.tabActivity(groupID: groupID, index: idx),
-                            descriptor: descriptor,
-                            tabMenu: tabMenu,
-                            dragState: dragState,
-                            dragType: dragType,
-                            groupID: groupID,
-                            stripHeight: stripHeight,
-                            onActivate: { model.activateTab(groupID: groupID, index: idx) },
-                            onClose: { onRequestClose(tab) },
-                            onReorder: { source, target in model.reorderTab(source, before: target) })
+                        chip(index: idx, tab: tab)
                     }
                 }
             }
@@ -570,6 +661,7 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
     let dragType: UTType
     let groupID: UUID
     let stripHeight: CGFloat
+    let style: UPaneGroupStyle
     let onActivate: () -> Void
     let onClose: () -> Void
     let onReorder: @MainActor @Sendable (_ source: UUID, _ target: UUID) -> Void
@@ -632,6 +724,56 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
 
     @ViewBuilder
     private func chip(_ d: UPaneTabDescriptor) -> some View {
+        switch style.kind {
+        case .classic: classicChip(d)
+        case .card: cardChip(d)
+        }
+    }
+
+    /// `.card`：26 高胶囊。前台标签（含非焦点组的那一枚）填 `UD.panelHi`，后台标签透明、
+    /// 悬停 `panelHover`；没有 accent 顶条与竖线 —— 活动组的前台标签图标走 accent、标题
+    /// 正文强度，「哪一组是活动组」另可由焦点框表达（`showsActiveGroupRing`）。
+    @ViewBuilder
+    private func cardChip(_ d: UPaneTabDescriptor) -> some View {
+        HStack(spacing: 7) {
+            if let dot = d.leadingDot {
+                Circle().fill(dot).frame(width: 6, height: 6)
+            }
+            if case .none = d.icon {} else {
+                UPaneTabIconView(icon: d.icon, size: 12)
+                    .foregroundStyle(iconColor(d))
+            }
+            Text(title(d))
+                .font(UD.mono(12))
+                .italic(tab.isTransient)
+                .foregroundStyle(hovering && !isFront ? UD.text2 : titleColor)
+                .lineLimit(1)
+                .fixedSize()
+            if d.isDirty {
+                Circle().fill(d.accentColor ?? UD.accent).frame(width: 6, height: 6)
+            }
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(hoveringClose ? UD.text
+                                     : (isFront || hovering ? UD.text3 : Color.clear))
+                    .frame(width: 18, height: 18)
+                    .background(RoundedRectangle(cornerRadius: 5)
+                        .fill(hoveringClose ? UD.panelHover : Color.clear))
+            }
+            .buttonStyle(.plain)
+            .onHover { hoveringClose = $0 }
+            .help("关闭")
+        }
+        .padding(.leading, 10).padding(.trailing, 4)
+        .frame(height: UPaneGroupStyle.pillHeight)
+        .background(
+            RoundedRectangle(cornerRadius: UPaneGroupStyle.pillRadius, style: .continuous)
+                .fill(isFront ? UD.panelHi : (hovering ? UD.panelHover : Color.clear)))
+    }
+
+    @ViewBuilder
+    private func classicChip(_ d: UPaneTabDescriptor) -> some View {
         HStack(spacing: 7) {
             if let dot = d.leadingDot {
                 Circle().fill(dot).frame(width: 6, height: 6)

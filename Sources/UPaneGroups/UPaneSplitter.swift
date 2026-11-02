@@ -20,6 +20,9 @@ public struct UPaneSplitter: View {
     public var maxFraction: Double
 
     @State private var dragStartFraction: Double?
+    @State private var hovering = false
+    @Environment(\.uPaneGroupStyle) private var style
+    @Environment(\.uPaneGroupWells) private var wellsEnabled
 
     public init(orientation: Orientation, fraction: Binding<Double>, totalLength: CGFloat,
                 minFraction: Double = 0.15, maxFraction: Double = 0.85) {
@@ -33,21 +36,14 @@ public struct UPaneSplitter: View {
     public var body: some View {
         Rectangle()
             .fill(Color.clear)
-            .overlay(
-                // 静息态画 1px UD.border 实线分隔，拖动时提亮为 accent。
-                Rectangle()
-                    .fill(dragStartFraction != nil ? UD.accent.opacity(0.6) : UD.border)
-                    .frame(
-                        width: orientation == .vertical ? 1 : nil,
-                        height: orientation == .horizontal ? 1 : nil
-                    )
-            )
+            .overlay { indicator }
             .frame(
                 width: orientation == .vertical ? 6 : nil,
                 height: orientation == .horizontal ? 6 : nil
             )
             .contentShape(Rectangle())
             .onHover { inside in
+                hovering = inside
                 if inside {
                     (orientation == .vertical ? NSCursor.resizeLeftRight : NSCursor.resizeUpDown).set()
                 } else {
@@ -73,6 +69,30 @@ public struct UPaneSplitter: View {
             )
             .accessibilityLabel(Text(orientation == .vertical ? "调整左右分组宽度" : "调整上下分组高度"))
             .accessibilityAddTraits(.allowsDirectInteraction)
+    }
+
+    @ViewBuilder
+    private var indicator: some View {
+        let dragging = dragStartFraction != nil
+        if style.kind == .card && wellsEnabled {
+            // 凹槽模式：6pt 卡面间隙本身就是分隔，静息态什么都不画，悬停浮出 2×24 的
+            // text4 把手，拖动时把手转 accent（设计稿 pane-split.jsx）。
+            let long = UPaneWellMetrics.gripLength
+            let thin = UPaneWellMetrics.gripThickness
+            Capsule()
+                .fill(dragging ? UD.accent : UD.text4)
+                .frame(width: orientation == .vertical ? thin : long,
+                       height: orientation == .vertical ? long : thin)
+                .opacity(dragging || hovering ? 1 : 0)
+        } else {
+            // 静息态画 1px UD.border 实线分隔，拖动时提亮为 accent。
+            Rectangle()
+                .fill(dragging ? UD.accent.opacity(0.6) : UD.border)
+                .frame(
+                    width: orientation == .vertical ? 1 : nil,
+                    height: orientation == .horizontal ? 1 : nil
+                )
+        }
     }
 }
 #endif
