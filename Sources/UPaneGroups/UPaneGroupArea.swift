@@ -549,7 +549,8 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
             onReorder: { source, target in model.reorderTab(source, before: target) })
     }
 
-    /// `.card`：标签条透出卡面、无底线；胶囊之间 2pt，左右内边距 8，右侧按钮 26×26 无竖线。
+    /// `.card`：标签条透出卡面；胶囊之间 2pt，左右内边距 8，右侧按钮 26×26 无竖线。
+    /// 默认无底线，`stripDivider` 打开时在条内底部画 1pt 线（含在 `stripHeight` 里）。
     private var cardTabStrip: some View {
         HStack(spacing: 2) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -581,6 +582,11 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
         }
         .padding(.horizontal, 8)
         .frame(height: stripHeight)
+        .overlay(alignment: .bottom) {
+            if style.stripDivider {
+                Rectangle().fill(UD.border).frame(height: 1)
+            }
+        }
     }
 
     private var classicTabStrip: some View {

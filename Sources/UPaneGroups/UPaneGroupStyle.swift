@@ -21,11 +21,19 @@ public struct UPaneGroupStyle: Sendable, Equatable {
     }
 
     public var kind: Kind
+    /// `.card` 下标签条底部是否画 1pt `UD.border` 线（两侧同为卡面色）。标签条下面紧接
+    /// 编辑器 / 预览这类铺满的正文时用它标出正文起点；正文是凹槽或自带分区时不需要。
+    public var stripDivider: Bool
 
-    public init(_ kind: Kind) { self.kind = kind }
+    public init(_ kind: Kind, stripDivider: Bool = false) {
+        self.kind = kind
+        self.stripDivider = stripDivider
+    }
 
     public static let classic = UPaneGroupStyle(.classic)
     public static let card = UPaneGroupStyle(.card)
+    /// `.card` + 标签条底线。
+    public static let cardDivided = UPaneGroupStyle(.card, stripDivider: true)
 
     /// 胶囊标签的高与圆角（设计稿 `.ut-tab`：height 26 · radius 7）。
     public static let pillHeight: CGFloat = 26
