@@ -78,6 +78,25 @@ public struct AgentReasoningSupport: Sendable, Equatable {
         }
     }
 
+    /// 这个模型收不收 `temperature` / `top_p` / `top_k`（不管选没选思考深度）。
+    ///
+    /// Claude Opus 4.7 起、Sonnet 5 / 5.5、Haiku 5.5、Fable / Mythos 把采样参数拿掉了，
+    /// 带了就 400；OpenAI 的推理模型（o 系列、gpt-5）只收默认值。认不出的模型照旧收。
+    public static func acceptsSamplingParameters(protocol wire: AgentWireProtocol, modelID: String) -> Bool {
+        switch wire {
+        case .anthropic:
+            guard let model = ClaudeModel(modelID) else { return true }
+            if model.family == "fable" || model.family == "mythos" { return false }
+            return !model.atLeast(4, 7)
+        case .openAICompatible:
+            guard case .openAIReasoningEffort? = openAI(modelID)?.style else { return true }
+            // 同属 reasoning_effort 一族，但 grok / gemini 照收 temperature。
+            var id = modelID.lowercased()
+            if let slash = id.lastIndex(of: "/") { id = String(id[id.index(after: slash)...]) }
+            return !(id.hasPrefix("o1") || id.hasPrefix("o3") || id.hasPrefix("o4") || id.hasPrefix("gpt-5"))
+        }
+    }
+
     // MARK: - Anthropic
 
     /// 解析出来的 Claude 型号：家族 + 版本。

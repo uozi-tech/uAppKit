@@ -45,6 +45,25 @@ final class AgentReasoningTests: XCTestCase {
         XCTAssertNil(levels(.openAICompatible, "deepseek-reasoner"))
     }
 
+    func testSamplingParametersByModel() {
+        let accepts = { AgentReasoningSupport.acceptsSamplingParameters(protocol: $0, modelID: $1) }
+        XCTAssertFalse(accepts(.anthropic, "claude-opus-4-7"))
+        XCTAssertFalse(accepts(.anthropic, "claude-opus-5-5"))
+        XCTAssertFalse(accepts(.anthropic, "claude-sonnet-5"))
+        XCTAssertFalse(accepts(.anthropic, "claude-fable-5-1"))
+        XCTAssertTrue(accepts(.anthropic, "claude-opus-4-6"))
+        XCTAssertTrue(accepts(.anthropic, "claude-sonnet-4-5-20250929"))
+        XCTAssertTrue(accepts(.anthropic, "claude-haiku-4-5"))
+        XCTAssertTrue(accepts(.anthropic, "my-proxy-model"))
+        XCTAssertFalse(accepts(.openAICompatible, "o3-mini"))
+        XCTAssertFalse(accepts(.openAICompatible, "openai/gpt-5"))
+        XCTAssertTrue(accepts(.openAICompatible, "gpt-5-chat-latest"))
+        XCTAssertTrue(accepts(.openAICompatible, "grok-3-mini"))
+        XCTAssertTrue(accepts(.openAICompatible, "deepseek-chat"))
+        // 走 OpenAI 兼容中转的 Claude：中转多半自己处理，照旧发。
+        XCTAssertTrue(accepts(.openAICompatible, "claude-opus-4-7"))
+    }
+
     func testDefaultAndUnsupportedEffortProduceNoRequest() {
         XCTAssertNil(AgentReasoningRequest.make(protocol: .anthropic, modelID: "claude-opus-4-7", effort: nil))
         // Opus 5.5 关不掉思考：存着的「关」不能变成会 400 的请求。
