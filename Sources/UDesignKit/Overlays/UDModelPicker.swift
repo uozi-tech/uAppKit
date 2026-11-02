@@ -430,7 +430,9 @@ struct UDModelPickerKeyMonitor: NSViewRepresentable {
             monitor = nil
         }
 
-        deinit { uninstall() }
+        // NSView 只在主线程释放；deinit 本身是 nonisolated 的，直接调 uninstall() 会报
+        // 「main actor-isolated」。通常 dismantleNSView / 离开窗口时已经卸掉，这里兜底。
+        deinit { MainActor.assumeIsolated { uninstall() } }
     }
 }
 

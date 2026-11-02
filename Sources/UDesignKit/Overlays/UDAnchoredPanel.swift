@@ -33,6 +33,19 @@ private let anchoredPanelScreenMargin: CGFloat = 8
 /// 低于此高度时优先考虑上翻（哪怕内容能滚动，也别挤成几行）。
 private let anchoredPanelMinComfortHeight: CGFloat = 160
 
+/// 面板横向摆放（单测守它）。
+enum UDAnchoredPanelPlacement {
+    /// 把面板 x 推回屏幕可见区：内容（面板去掉两侧 `inset` 留白）离可见区左右边缘至少
+    /// `margin`。两边都放不下（内容比屏幕还宽）时贴左边，至少开头看得见。
+    static func clampedX(_ x: CGFloat, panelWidth: CGFloat, inset: CGFloat,
+                         visible: NSRect?, margin: CGFloat) -> CGFloat {
+        guard let visible else { return x }
+        let maxX = visible.maxX - margin - (panelWidth - inset)
+        let minX = visible.minX + margin - inset
+        return max(min(x, maxX), minX)
+    }
+}
+
 /// `.anchoredPanel` 呈现时注入给内容的**可用最大高度**（内容自身，不含落影留白）——
 /// 即锚点到屏幕可见区边缘（避开 Dock / 菜单栏）的距离。内容里的长列表据此限高内滚，
 /// 否则会直接伸出屏幕、底下的项既看不见也点不到（`UDMenu` 已自动遵守）。
@@ -284,9 +297,15 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             let inset = anchoredPanelShadowInset
             // 内容（面板内缩 inset）贴锚点下方、下移 gap；leading=内容左沿对齐锚点左沿，
             // trailing=内容右沿对齐锚点右沿。屏幕坐标 y 向上。
-            let x: CGFloat = alignment == .leading
+            let aligned: CGFloat = alignment == .leading
                 ? onScreen.minX - inset
                 : onScreen.maxX - panel.frame.width + inset
+            // 锚点贴近屏幕左右边缘时（如靠右的 Agent 侧栏、笔记本小屏），对齐出来的位置会让
+            // 内容伸出屏幕被裁掉 —— 横向推回可见区内。
+            let screen = NSScreen.screens.first { $0.frame.intersects(onScreen) } ?? parent.screen ?? NSScreen.main
+            let x = UDAnchoredPanelPlacement.clampedX(aligned, panelWidth: panel.frame.width, inset: inset,
+                                                      visible: screen?.visibleFrame,
+                                                      margin: anchoredPanelScreenMargin)
             // 向下：内容顶边贴锚点下沿；向上：内容底边贴锚点上沿。尺寸变化时对应边保持不动。
             let y: CGFloat = opensUpward
                 ? onScreen.maxY + gap - inset
