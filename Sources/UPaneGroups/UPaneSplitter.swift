@@ -85,13 +85,22 @@ public struct UPaneSplitter: View {
                        height: orientation == .vertical ? long : thin)
                 .opacity(dragging || hovering ? 1 : 0)
         } else {
-            // 静息态画 1px UD.border 实线分隔，拖动时提亮为 accent。
+            // 静息态画 1px UD.border 实线分隔；悬停 / 拖动时加粗到 3px 并转 accent（1px 太细、
+            // 看不出能拖）。粗线只画在 overlay 里，布局仍按 1px 算，两侧分组不会跟着挤动。
             Rectangle()
-                .fill(dragging ? UD.accent.opacity(0.6) : UD.border)
+                .fill(UD.border)
                 .frame(
                     width: orientation == .vertical ? 1 : nil,
                     height: orientation == .horizontal ? 1 : nil
                 )
+                .overlay {
+                    if dragging || hovering {
+                        Rectangle()
+                            .fill(UD.accent)
+                            .frame(width: orientation == .vertical ? 3 : nil,
+                                   height: orientation == .horizontal ? 3 : nil)
+                    }
+                }
         }
     }
 }
