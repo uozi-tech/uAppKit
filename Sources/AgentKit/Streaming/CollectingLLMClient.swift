@@ -20,10 +20,13 @@ public enum CollectingLLMClient {
         public let text: String?
         /// Every `.toolCall` event, in arrival order.
         public let toolCalls: [LLMToolCall]
+        /// Every `.thinking` block, in arrival order (Anthropic only; replay data).
+        public let thinking: [LLMThinkingBlock]
 
-        public init(text: String?, toolCalls: [LLMToolCall]) {
+        public init(text: String?, toolCalls: [LLMToolCall], thinking: [LLMThinkingBlock] = []) {
             self.text = text
             self.toolCalls = toolCalls
+            self.thinking = thinking
         }
     }
 
@@ -50,6 +53,7 @@ public enum CollectingLLMClient {
     public static func collect(_ events: AsyncThrowingStream<LLMEvent, Error>) async throws -> Collected {
         var text: String?
         var toolCalls: [LLMToolCall] = []
+        var thinking: [LLMThinkingBlock] = []
         do {
             for try await event in events {
                 switch event {
@@ -57,11 +61,14 @@ public enum CollectingLLMClient {
                     text = (text ?? "") + delta
                 case .toolCall(let call):
                     toolCalls.append(call)
+                case .thinking(let block):
+                    thinking.append(block)
                 }
             }
         } catch {
-            throw CollectionFailure(partial: Collected(text: text, toolCalls: toolCalls), underlying: error)
+            throw CollectionFailure(partial: Collected(text: text, toolCalls: toolCalls, thinking: thinking),
+                                    underlying: error)
         }
-        return Collected(text: text, toolCalls: toolCalls)
+        return Collected(text: text, toolCalls: toolCalls, thinking: thinking)
     }
 }

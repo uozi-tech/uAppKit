@@ -23,6 +23,11 @@ public enum LLMEvent: Sendable, Equatable {
     case text(String)
     /// One fully-aggregated tool call request (arguments already assembled).
     case toolCall(LLMToolCall)
+    /// 一个完整的 Anthropic thinking / redacted_thinking 块（签名已收齐）。
+    /// 不给人看：只为在同一轮工具循环里原样回传 —— 开着 thinking 时，带 `tool_use`
+    /// 的 assistant 消息若丢了它前面的 thinking 块，API 会拒绝续轮请求。
+    /// OpenAI 兼容端点永远不产出此事件。
+    case thinking(LLMThinkingBlock)
 }
 
 /// A single tool call requested by the model, with arguments already
