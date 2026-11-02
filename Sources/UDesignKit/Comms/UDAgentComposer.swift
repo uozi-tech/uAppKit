@@ -318,7 +318,7 @@ private struct UDAgentComposerPrimaryStyle: ButtonStyle {
             switch role {
             case .send:
                 guard isEnabled else { return UD.uw04 }
-                return configuration.isPressed ? UD.accentPressed : UD.accent.opacity(hovering ? 0.9 : 1)
+                return configuration.isPressed ? UD.accentPressed : (hovering ? UD.accentHover : UD.accent)
             case .stop:
                 return configuration.isPressed || hovering ? UD.uw08 : UD.uw06
             }

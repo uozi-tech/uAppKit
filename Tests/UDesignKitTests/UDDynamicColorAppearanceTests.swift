@@ -53,14 +53,16 @@ final class UDDynamicColorAppearanceTests: XCTestCase {
                           + "动态 provider 被算死成静态色了。")
     }
 
-    /// 在指定外观下解析，返回 sRGB 红分量（本文件的两个分支是黑/白，红分量足够判别）。
+    /// 在指定外观下解析，返回 sRGB 三分量均值（黑/白两支取 0/1；深浅两档主色蓝红分量相同，
+    /// 只看红分量会判不出区别）。
     private func brightness(of color: NSColor, under name: NSAppearance.Name) throws -> CGFloat {
         let appearance = try XCTUnwrap(NSAppearance(named: name), "取不到外观 \(name.rawValue)")
         var resolved: NSColor?
         appearance.performAsCurrentDrawingAppearance {
             resolved = color.usingColorSpace(.sRGB)
         }
-        return try XCTUnwrap(resolved, "在 \(name.rawValue) 下解析不出 sRGB 颜色").redComponent
+        let c = try XCTUnwrap(resolved, "在 \(name.rawValue) 下解析不出 sRGB 颜色")
+        return (c.redComponent + c.greenComponent + c.blueComponent) / 3
     }
 }
 #endif

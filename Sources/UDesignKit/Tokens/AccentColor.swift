@@ -1,9 +1,10 @@
 import SwiftUI
 import Observation
 
-/// 5 个可选强调色。每色提供 accent / ink / soft / pressed 四槽位的深/浅 `UD.ColorSpec`。
-/// `.blue` 返回现有手调常量（默认零回归）；其余从 base 派生。纯值类型，可单测。
-/// 设计稿 `--u-accent` = iOS 蓝（浅 #007AFF / 深 #0A84FF），active tint = 该蓝 13–14%。
+/// 5 个可选强调色。每色提供 accent / hover / ink / soft / pressed 五槽位的深/浅 `UD.ColorSpec`。
+/// `.blue` 取组件库调色板的主色三态（Ant Design 预设：深 #1668DC / #3C89E8 / #65A9F3，
+/// 浅 #1677FF / #4096FF / #69B1FF）；其余从 base 派生。纯值类型，可单测。
+/// hover / pressed 一律**向亮色**走（pressed 最亮），与调色板「base · hover · pressed 逐级变亮」一致。
 public enum AccentColor: String, CaseIterable, Identifiable, Sendable {
     case blue, purple, green, orange, red
     public var id: String { rawValue }
@@ -20,7 +21,7 @@ public enum AccentColor: String, CaseIterable, Identifiable, Sendable {
 
     public func base(dark: Bool) -> UD.ColorSpec {
         switch self {
-        case .blue:   return dark ? .hex(0x0A84FF) : .hex(0x007AFF)
+        case .blue:   return dark ? .hex(0x1668DC) : .hex(0x1677FF)
         case .purple: return dark ? .hex(0xBF5AF2) : .hex(0xAF52DE)
         case .green:  return dark ? .hex(0x30D158) : .hex(0x34C759)
         case .orange: return dark ? .hex(0xFF9F0A) : .hex(0xFF8A00)
@@ -30,18 +31,27 @@ public enum AccentColor: String, CaseIterable, Identifiable, Sendable {
 
     public func accentSpec(dark: Bool) -> UD.ColorSpec { base(dark: dark) }
 
+    /// 悬停色：调色板 hover（Ant 5 号色）。非蓝色向白混 18%，与蓝色两档的提亮幅度相当。
+    public func hoverSpec(dark: Bool) -> UD.ColorSpec {
+        if self == .blue { return dark ? .hex(0x3C89E8) : .hex(0x4096FF) }
+        return base(dark: dark).mixedWithWhite(0.18)
+    }
+
+    /// 文字 / 图标用的强调色。日间即主色（调色板 accentInk = primary）；暗夜深底上主色偏暗，
+    /// 文字取 hover 档提亮。
     public func inkSpec(dark: Bool) -> UD.ColorSpec {
-        if self == .blue { return dark ? .hex(0x4DA3FF) : .hex(0x0067E0) }
+        if self == .blue { return dark ? hoverSpec(dark: true) : base(dark: false) }
         return base(dark: dark).brightened(dark ? 1.22 : 0.84)
     }
 
     public func softSpec(dark: Bool) -> UD.ColorSpec {
-        base(dark: dark).withAlpha(dark ? 0.10 : 0.13)
+        base(dark: dark).withAlpha(dark ? 0.10 : 0.12)
     }
 
+    /// 按下色：调色板 pressed（Ant 4 号色，比 hover 更亮）。非蓝色向白混 36%。
     public func pressedSpec(dark: Bool) -> UD.ColorSpec {
-        if self == .blue { return dark ? .hex(0x96ACCD) : .hex(0x5A7099) }
-        return base(dark: dark).desaturated(0.55)
+        if self == .blue { return dark ? .hex(0x65A9F3) : .hex(0x69B1FF) }
+        return base(dark: dark).mixedWithWhite(0.36)
     }
 }
 
@@ -52,6 +62,11 @@ public extension UD.ColorSpec {
     nonisolated func brightened(_ factor: CGFloat) -> UD.ColorSpec {
         func c(_ x: CGFloat) -> CGFloat { min(max(x * factor, 0), 1) }
         return UD.ColorSpec(r: c(r), g: c(g), b: c(b), a: a)
+    }
+    /// 向白色混合 t（0=原色，1=纯白）。
+    nonisolated func mixedWithWhite(_ t: CGFloat) -> UD.ColorSpec {
+        func mix(_ x: CGFloat) -> CGFloat { x * (1 - t) + t }
+        return UD.ColorSpec(r: mix(r), g: mix(g), b: mix(b), a: a)
     }
     /// 向中性灰(0.5)收敛 t（0=原色，1=全灰）。
     nonisolated func desaturated(_ t: CGFloat) -> UD.ColorSpec {

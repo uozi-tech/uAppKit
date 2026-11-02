@@ -94,40 +94,49 @@ public enum UD {
     }
     #endif
 
-    // MARK: - 表面 Surfaces（uTable.dc.html v2 --u-bg / --u-panel / --u-panelHi / --u-card）
-    // v2 日间：画布与 panel（标题栏 / 侧栏 / 工具栏）全部纯白 #FFFFFF，仅靠 hairline 分区；
-    // panelHi 收敛为近中性灰 #F2F2F3；中性叠加一律纯黑基（禁蓝调 slate）。
-    // 深色：骨架不变。
-    public nonisolated static let bg         = dyn(.hex(0x101012), .hex(0xFFFFFF))
-    public nonisolated static let panel      = dyn(.hex(0x17171A), .hex(0xFFFFFF))
-    public nonisolated static let panelHi    = dyn(.hex(0x1C1C20), .hex(0xF2F2F3))
-    public nonisolated static let panelHover = dyn(.hex(0x202026), .black(0.05))
-    /// 窗口外页底（设计稿 v2 --u-page-bg，仅日间与画布区分）。
-    public nonisolated static let pageBg     = dyn(.hex(0x101012), .hex(0xF4F4F5))
-    /// 卡片面（侧栏 / AI 助手面板 / 状态栏 / 连接卡）——设计稿 --u-card。
-    public nonisolated static let card       = dyn(.hex(0x1B1B1F), .hex(0xFFFFFF))
+    // MARK: - 表面 Surfaces（组件库调色板 · Ant Design 预设：body / card / raised / modal / popover）
+    // 深色：layout #000 → container #141414 → elevated #1F1F1F → modal #262626。
+    // 日间：画布与 panel 纯白，panelHi #F0F0F0，窗口外页底 #F5F5F5。
+    public nonisolated static let bg         = dyn(.hex(0x000000), .hex(0xFFFFFF))
+    public nonisolated static let panel      = dyn(.hex(0x141414), .hex(0xFFFFFF))
+    public nonisolated static let panelHi    = dyn(.hex(0x1F1F1F), .hex(0xF0F0F0))
+    /// 悬停填充。**半透明叠加**而不是实色：调色板的实色值（深 #262626 / 浅 #F0F0F0）与
+    /// overlayHi、border、panelHi、tabActive 撞同一个值——模态里悬停看不见、带描边的卡片悬停时
+    /// 填成边框色而丢边、悬停的 tab 和激活 tab 分不出。叠加在 panel 上与调色板几乎同值，
+    /// 叠在任何更亮的面上仍可见。带描边的元素悬停时还要把描边提到 `borderHi`。
+    public nonisolated static let panelHover = dyn(.white(0.08), .black(0.04))
+    /// 窗口外页底（设计稿 --u-page-bg，仅日间与画布区分）。
+    public nonisolated static let pageBg     = dyn(.hex(0x000000), .hex(0xF5F5F5))
+    /// 卡片面（侧栏 / AI 助手面板 / 状态栏 / 连接卡）——调色板里 card 与 panel 同为 container。
+    public nonisolated static let card       = dyn(.hex(0x141414), .hex(0xFFFFFF))
     /// 浮层实体面（下拉 / 菜单 / popover）。浅色用纯白面板。
-    public nonisolated static let overlay    = dyn(.hex(0x1B1B1F), .hex(0xFFFFFF))
+    public nonisolated static let overlay    = dyn(.hex(0x1F1F1F), .hex(0xFFFFFF))
     /// 模态实体面（指标卡 / 菜单栏面板）。
-    public nonisolated static let overlayHi  = dyn(.hex(0x202024), .hex(0xFFFFFF))
+    public nonisolated static let overlayHi  = dyn(.hex(0x262626), .hex(0xFFFFFF))
 
-    // MARK: - 描边 Stroke（uTable.dc.html v2 --u-border：深=白叠加 / 浅=纯黑叠加）
+    // MARK: - 描边 Stroke（调色板 divider / border：深=白叠加 / 浅=实色）
     // v2 描边只允许四处：分区 hairline / 浮层 / 白底列表容器 / 状态描边（聚焦环·错误·拖放·同步中）。
-    public nonisolated static let border     = dyn(.white(0.07), .black(0.09))
-    public nonisolated static let borderHi   = dyn(.white(0.10), .black(0.13))
+    public nonisolated static let border     = dyn(.white(0.12), .hex(0xF0F0F0))
+    public nonisolated static let borderHi   = dyn(.white(0.26), .hex(0xD9D9D9))
 
-    // MARK: - 文本 Text（uTable.dc.html v2 --u-text*：深=白叠加 / 浅=纯黑基叠加）
+    // MARK: - 文本 Text（调色板 text1–text4：深=白叠加 85 / 65 / 45 / 25% / 浅=实色）
     // text2 正文层 · text3 次要信息层 · text4 仅装饰 / 结构层（分隔线 / 行号 / 禁用图标）。
-    // v2 清单：日间 ramp = 黑 60% / 46% / 32%。
-    public nonisolated static let text       = dyn(.hex(0xEDEDEE), .hex(0x171718))
-    public nonisolated static let text2      = dyn(.white(0.46), .black(0.60))   // 正文层
-    public nonisolated static let text3      = dyn(.white(0.28), .black(0.46))   // 次要信息层
-    public nonisolated static let text4      = dyn(.white(0.18), .black(0.32))   // 仅装饰 / 结构层
+    public nonisolated static let text       = dyn(.hex(0xD9D9D9), .hex(0x1F1F1F))
+    public nonisolated static let text2      = dyn(.white(0.65), .hex(0x595959))   // 正文层
+    public nonisolated static let text3      = dyn(.white(0.45), .hex(0x8C8C8C))   // 次要信息层
+    public nonisolated static let text4      = dyn(.white(0.25), .hex(0xBFBFBF))   // 仅装饰 / 结构层
+
+    // MARK: - 次按钮 Button2（调色板 button2 · default / hover / pressed）
+    // 深色白叠加 8 / 12 / 18%；日间黑叠加 4 / 6 / 15%——落在白底上正是调色板的
+    // #F5F5F5 / #F0F0F0 / #D9D9D9，但不会像实色那样在 #F5F5F5 画布（pageBg）上隐形。
+    public nonisolated static let button2        = dyn(.white(0.08), .black(0.04))
+    public nonisolated static let button2Hover   = dyn(.white(0.12), .black(0.06))
+    public nonisolated static let button2Pressed = dyn(.white(0.18), .black(0.15))
 
     // MARK: - 强调 Accent（可切换；见 AccentColor / AccentState。getter 同步读 selected →
     // SwiftUI body 求值期访问被 Observation 追踪 → 切色全局自动重渲染。默认蓝 = 原手调值。）
     //
-    // 每个强调色的 7 个槽位在进程启动时一次性建好并缓存，getter 只查表、返回**同一个**
+    // 每个强调色的 9 个槽位在进程启动时一次性建好并缓存，getter 只查表、返回**同一个**
     // `Color` 实例。这不是省几次构造那么简单：`Color` 的 `==` 落到底层 `NSColor` 的
     // **实例同一性**上（同一实例 true / 值相同的两个实例 false），getter 每次新建就意味着
     // 任何把 accent 存进 view value 的视图「这一帧的值永远不等于上一帧」，SwiftUI
@@ -138,27 +147,28 @@ public enum UD {
 
     /// 一个强调色的全部槽位，深浅仍由各 `Color` 自己的动态 provider 决定。
     ///
-    /// 用 `final class` 而不是 `struct`：查表结果每读一次就要复制一遍，7 个 `Color`
+    /// 用 `final class` 而不是 `struct`：查表结果每读一次就要复制一遍，9 个 `Color`
     /// 字段意味着 7 对 retain/release；引用类型只需一次。全部字段 `let` + `Color`
     /// 是 `Sendable`，故无需 `@unchecked`。
     private final class AccentPalette: Sendable {
-        let accent: Color, ink: Color, soft: Color, pressed: Color
-        let tint: Color, tintHover: Color, tintDisabled: Color
+        let accent: Color, hover: Color, ink: Color, soft: Color, pressed: Color
+        let tint: Color, tintHover: Color, tintPressed: Color, tintDisabled: Color
 
         init(_ a: AccentColor) {
             accent  = UD.dyn(a.accentSpec(dark: true),  a.accentSpec(dark: false))
+            hover   = UD.dyn(a.hoverSpec(dark: true),   a.hoverSpec(dark: false))
             ink     = UD.dyn(a.inkSpec(dark: true),     a.inkSpec(dark: false))
             soft    = UD.dyn(a.softSpec(dark: true),    a.softSpec(dark: false))
             pressed = UD.dyn(a.pressedSpec(dark: true), a.pressedSpec(dark: false))
-            func tinted(_ alpha: CGFloat) -> Color {
-                UD.dyn(a.accentSpec(dark: true).withAlpha(alpha),
-                       a.accentSpec(dark: false).withAlpha(alpha))
+            func tinted(_ spec: (Bool) -> UD.ColorSpec, _ alpha: CGFloat) -> Color {
+                UD.dyn(spec(true).withAlpha(alpha), spec(false).withAlpha(alpha))
             }
-            // v2「填充即边界」accent tint 阶（两主题通用）：
-            // 选中 / 主操作底 14% · hover 22% · 禁用底 7%。不再使用 accent 30–55% 描边。
-            tint = tinted(0.14)
-            tintHover = tinted(0.22)
-            tintDisabled = tinted(0.07)
+            // v2「填充即边界」accent tint 阶（两主题通用）：选中 / 主操作底 14% · 禁用底 7%；
+            // hover 取 hover 色 22%、按下取 pressed 色 19%（调色板 base · hover · pressed 逐级变亮）。
+            tint = tinted(a.accentSpec, 0.14)
+            tintHover = tinted(a.hoverSpec, 0.22)
+            tintPressed = tinted(a.pressedSpec, 0.19)
+            tintDisabled = tinted(a.accentSpec, 0.07)
         }
     }
 
@@ -175,12 +185,14 @@ public enum UD {
     }
 
     @MainActor public static var accent: Color { accentPalette.accent }
+    @MainActor public static var accentHover: Color { accentPalette.hover }
     @MainActor public static var accentInk: Color { accentPalette.ink }
     @MainActor public static var accentSoft: Color { accentPalette.soft }
     @MainActor public static var accentPressed: Color { accentPalette.pressed }
 
     @MainActor public static var accentTint: Color { accentPalette.tint }
     @MainActor public static var accentTintHover: Color { accentPalette.tintHover }
+    @MainActor public static var accentTintPressed: Color { accentPalette.tintPressed }
     @MainActor public static var accentTintDisabled: Color { accentPalette.tintDisabled }
 
     /// Nonisolated default accent (fixed blue, still dark/light dynamic) for use
@@ -202,15 +214,16 @@ public enum UD {
     public nonisolated static let accentGold   = ColorSpec.hex(0xFFD60A).color()   // 黯金
     public nonisolated static let accentRose   = ColorSpec.hex(0xFF5A5A).color()   // 藕薇
 
-    // MARK: - 语义状态 Semantic（设计稿 --u-status-*）
-    // 暗夜：iOS 鲜艳系统色（保持原样）。日间：低饱和、年轻化——白底上仍清晰可辨，
-    // 由设计稿 oklch 值转 sRGB（绿 0.70/0.13/156、黄 0.78/0.115/82、橙 0.72/0.125/56、
-    // 红 0.64/0.15/24、蓝 0.67/0.115/242）。状态点 / 徽章 / danger 态等全经此 token。
-    public nonisolated static let success = dyn(.hex(0x30D158), .hex(0x4EB67C))   // 已连接
-    public nonisolated static let warning = dyn(.hex(0xFFD60A), .hex(0xDCB05B))   // 连接中
-    public nonisolated static let caution = dyn(.hex(0xFF9F0A), .hex(0xE08E52))   // 断开
-    public nonisolated static let danger  = dyn(.hex(0xFF5A5A), .hex(0xD8625E))   // 失败 / 危险
-    public nonisolated static let info    = dyn(.hex(0x64D2FF), .hex(0x4D9DD6))   // 信息
+    // MARK: - 语义状态 Semantic（调色板 success / warning / error / info，取 Ant 色阶）
+    // info 与主色同为蓝。caution（断开）不并进 warning：「连接中」与「断开」必须分得出，
+    // 取 Ant 橙色阶（深 orange-6 暗色版 / 浅 orange-6）。状态点 / 徽章 / danger 态等全经此 token。
+    public nonisolated static let success = dyn(.hex(0x49AA19), .hex(0x52C41A))   // 已连接
+    public nonisolated static let warning = dyn(.hex(0xD89614), .hex(0xFAAD14))   // 连接中
+    public nonisolated static let caution = dyn(.hex(0xD87A16), .hex(0xFA8C16))   // 断开
+    public nonisolated static let danger  = dyn(.hex(0xDC4446), .hex(0xFF4D4F))   // 失败 / 危险
+    public nonisolated static let info    = dyn(.hex(0x1668DC), .hex(0x1677FF))   // 信息
+    /// danger 的 hover 色（危险按钮悬停时的文字）。
+    public nonisolated static let dangerHover = dyn(.hex(0xE86E6B), .hex(0xFF7875))
 
     // MARK: - 文件夹 / 图标色 Folder & Icon（设计稿 --u-folder-1/2 · --u-icon-teal）
     // 暗夜保持原样（鲜艳双色蓝 + 青）；日间文件夹换 macOS Finder 风格鲜亮饱和蓝
@@ -229,11 +242,11 @@ public enum UD {
     public nonisolated static let docDetail = dyn(.white(0.32), .hex(0xA8A6A3))   // 内部文本线
 
     // MARK: - 代码区 Code（设计稿 --u-term-bg · --u-syn-*，2026-07 评审 §4）
-    // 代码面板随主题，不再强制深色：termBg 深 #0A0A0C / 浅 #F6F8FA（GitHub 风浅代码底）。
+    // 代码面板随主题，不再强制深色：termBg 深 #000000（调色板 term）/ 浅 #FFFFFF。
     // 语法高亮双套：深 = VSCode Dark 系，浅 = GitHub Light 系。spec 常量供
     // SwiftUI（`dyn`）与 AppKit（`dynNS`，SQL 编辑器 NSTextView）两侧共用。
     public enum CodeSpec {
-        public nonisolated static let bg:      (dark: ColorSpec, light: ColorSpec) = (.hex(0x08080A), .hex(0xFFFFFF))
+        public nonisolated static let bg:      (dark: ColorSpec, light: ColorSpec) = (.hex(0x000000), .hex(0xFFFFFF))
         public nonisolated static let kw:      (dark: ColorSpec, light: ColorSpec) = (.hex(0xC586C0), .hex(0x8250DF))
         public nonisolated static let fn:      (dark: ColorSpec, light: ColorSpec) = (.hex(0x9CDCFE), .hex(0x0550AE))
         public nonisolated static let str:     (dark: ColorSpec, light: ColorSpec) = (.hex(0xCE9178), .hex(0xA8410B))
@@ -256,13 +269,13 @@ public enum UD {
 
     // MARK: - 行态 Row / Tab（uTable.dc.html v2 --u-row-hover / --u-row-sel / --u-tab-active）
     // rowHover = 中性 hover（日 黑4%）。导航类选中态（列表行 / pill / ⌘K 行 / 底部导航）
-    // = accent 14% 填充 + accent 文字图标（清单 §4「驾驶舱」样式），无 accent 描边；
-    // uTable 无强调色切换器，故用 nonisolated `accentDefault` 派生（运行时等价 `accent`）。
+    // = accent 填充（深 14% / 日 12%，调色板 sel）+ accent 文字图标（清单 §4「驾驶舱」样式），
+    // 无 accent 描边；uTable 无强调色切换器，故用 nonisolated `accentDefault` 派生（运行时等价 `accent`）。
     public nonisolated static let rowHover    = dyn(.white(0.035), .black(0.04))
     public nonisolated static let rowSelected = dyn(AccentColor.blue.accentSpec(dark: true).withAlpha(0.14),
-                                             AccentColor.blue.accentSpec(dark: false).withAlpha(0.14))
-    /// 激活 Tab 底（日间 黑 5.5%；暗夜保持与编辑器正文同底的无缝拼接 = bg 深色）。
-    public nonisolated static let tabActive   = dyn(.hex(0x101012), .black(0.055))
+                                             AccentColor.blue.accentSpec(dark: false).withAlpha(0.12))
+    /// 激活 Tab 底（日间 = panelHi；暗夜保持与编辑器正文同底的无缝拼接 = bg 深色）。
+    public nonisolated static let tabActive   = dyn(.hex(0x000000), .hex(0xF0F0F0))
 
     // MARK: - 自适应灰阶 uw-*（uTable.dc.html v2 --uw-*：深=白叠加 / 浅=黑叠加）
     // v2 整体加深一档（变量名保留旧 α）：灰底控件的边界全靠填充，禁再叠描边。

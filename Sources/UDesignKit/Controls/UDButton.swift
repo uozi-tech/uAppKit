@@ -9,8 +9,9 @@ import SwiftUI
 /// 通过自定义 `ButtonStyle` 读 hover（`.onHover`）+ `configuration.isPressed`。
 ///
 /// v2 约定：**有填充就没有描边**（透明 1pt 描边占位防聚焦跳动）；两主题同构——
-/// primary = accent 14% tint 底 + accent 色文字（非白字）；secondary / ghost =
-/// `uw04` 淡灰底；danger = danger 14% tint 底 + danger 文字；link = 透明底 + accent 文字。
+/// primary = accent 14% tint 底 + accent 色文字（非白字），hover / 按下换 hover / pressed 色的 tint；
+/// secondary / ghost = `button2` 三态填充；danger = danger 14% tint 底 + danger 文字；
+/// link = 透明底 + accent 文字。
 /// `isLoading` 时前置 `ProgressView` 迷你转子、按钮不可点、文案由调用方切换（「创建中…」等）。
 /// 状态切换仅靠底色与文本——无位移（transform）、无四周投影（shadow）。
 /// 纯展示组件，只读 `UD` token + 普通值输入，不依赖任何 domain model。
@@ -154,19 +155,19 @@ private struct UDButtonStyle: ButtonStyle {
                 return Palette(bg: UD.accentTintDisabled, border: .clear,
                                text: UD.accent.opacity(0.45))
             }
-            let bg: Color = down ? UD.accent.opacity(0.26)
+            let bg: Color = down ? UD.accentTintPressed
                                  : (hover ? UD.accentTintHover : UD.accentTint)
             return Palette(bg: bg, border: .clear, text: UD.accent)
 
         case .secondary, .ghost:
-            // 次按钮 / 幽灵：uw04 淡灰底、无边；hover 用 panelHover。
+            // 次按钮 / 幽灵：调色板 button2 三态填充、无边。
             guard isEnabled else {
                 return Palette(bg: UD.uw03, border: .clear, text: UD.text4)
             }
             if down {
-                return Palette(bg: UD.uw06, border: .clear, text: UD.text)
+                return Palette(bg: UD.button2Pressed, border: .clear, text: UD.text)
             }
-            return Palette(bg: hover ? UD.panelHover : UD.uw04, border: .clear,
+            return Palette(bg: hover ? UD.button2Hover : UD.button2, border: .clear,
                            text: hover ? UD.text : UD.text2)
 
         case .danger:
@@ -175,7 +176,7 @@ private struct UDButtonStyle: ButtonStyle {
                                text: UD.danger.opacity(0.45))
             }
             let bg = (hover || down) ? UD.danger.opacity(0.22) : UD.danger.opacity(0.14)
-            return Palette(bg: bg, border: .clear, text: UD.danger)
+            return Palette(bg: bg, border: .clear, text: (hover || down) ? UD.dangerHover : UD.danger)
 
         case .link:
             // 透明文字链：无底无边，accent 文字；禁用 text4，按下略降透明。
@@ -259,11 +260,11 @@ private struct UDIconButtonStyle: ButtonStyle {
             return Palette(bg: bg, border: .clear, text: text)
         case .filled:
             guard isEnabled else { return Palette(bg: UD.accentTintDisabled, border: .clear, text: UD.accent.opacity(0.45)) }
-            let bg: Color = down ? UD.accent.opacity(0.26) : (hover ? UD.accentTintHover : UD.accentTint)
+            let bg: Color = down ? UD.accentTintPressed : (hover ? UD.accentTintHover : UD.accentTint)
             return Palette(bg: bg, border: .clear, text: UD.accent)
         case .bordered:
             let text: Color = !isEnabled ? UD.text4 : ((hover || down) ? UD.text : UD.text2)
-            let bg: Color = down ? UD.uw06 : (hover ? UD.panelHover : UD.uw04)
+            let bg: Color = down ? UD.button2Pressed : (hover ? UD.button2Hover : UD.button2)
             return Palette(bg: bg, border: .clear, text: text)
         case .danger:
             guard isEnabled else { return Palette(bg: .clear, border: .clear, text: UD.text4) }
