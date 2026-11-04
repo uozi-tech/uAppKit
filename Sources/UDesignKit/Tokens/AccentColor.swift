@@ -83,13 +83,39 @@ public extension UD.ColorSpec {
 
     @ObservationIgnored private let defaults: UserDefaults
 
+    @ObservationIgnored private nonisolated(unsafe) var defaultsObserver: NSObjectProtocol?
+
     public var selected: AccentColor {
-        didSet { defaults.set(selected.rawValue, forKey: AccentState.key) }
+        didSet {
+            guard defaults.string(forKey: AccentState.key) != selected.rawValue else { return }
+            defaults.set(selected.rawValue, forKey: AccentState.key)
+        }
     }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.selected = defaults.string(forKey: AccentState.key).flatMap(AccentColor.init) ?? .blue
+        // 偏好同步在本进程内直接写 UserDefaults。不跟着变的话，新颜色要等下次启动才显现，
+        // 用户看到的就是「更新完 App 颜色自己变了」。
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: defaults,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.followStoredValue() }
+        }
+    }
+
+    deinit {
+        if let defaultsObserver { NotificationCenter.default.removeObserver(defaultsObserver) }
+    }
+
+    /// 读不懂的值（键被删、新版本同步来的新颜色）不跟：退回蓝色会经 `didSet` 把它写坏。
+    private func followStoredValue() {
+        guard let raw = defaults.string(forKey: AccentState.key),
+              let stored = AccentColor(rawValue: raw),
+              stored != selected else { return }
+        selected = stored
     }
 }
 
