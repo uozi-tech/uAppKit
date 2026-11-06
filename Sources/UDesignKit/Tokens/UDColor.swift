@@ -114,13 +114,14 @@ public enum UD {
     /// 模态实体面（指标卡 / 菜单栏面板）。
     public nonisolated static let overlayHi  = dyn(.hex(0x262626), .hex(0xFFFFFF))
 
-    // MARK: - 描边 Stroke（深=白叠加 / 浅：border 黑 9%、borderHi 实色）
+    // MARK: - 描边 Stroke（深=白叠加 / 浅：border 黑 6.5%、borderHi 实色）
     // v2 描边只允许四处：分区 hairline / 浮层 / 白底列表容器 / 状态描边（聚焦环·错误·拖放·同步中）。
     // 日间 border 不用调色板的 #F0F0F0：v3.3 的卡内分栏全靠这条 1pt 线，#F0F0F0 压在白卡上
-    // 几乎看不见（实测截图接缝处只有 244–247 的灰，用户反馈「缺分割线」）。黑 9% 落在白底
-    // ≈ #E8E8E8，与 panelHi #F0F0F0 也拉开了差。
-    public nonisolated static let border     = dyn(.white(0.12), .black(0.09))
-    public nonisolated static let borderHi   = dyn(.white(0.26), .hex(0xD9D9D9))
+    // 几乎看不见（实测截图接缝处只有 244–247 的灰，用户反馈「缺分割线」）。
+    // 2026-11-06 又从黑 9% / 白 12% 调到黑 6.5% / 白 9%（用户反馈「所有的线都太显眼」）：
+    // 黑 6.5% 落在白底 ≈ #EEEEEE，仍比 panelHi #F0F0F0 深一档、接缝处可辨。再淡就回到看不见。
+    public nonisolated static let border     = dyn(.white(0.09), .black(0.065))
+    public nonisolated static let borderHi   = dyn(.white(0.20), .hex(0xE0E0E0))
 
     // MARK: - 文本 Text（调色板 text1–text4：深=白叠加 85 / 65 / 45 / 25% / 浅=实色）
     // text2 正文层 · text3 次要信息层 · text4 仅装饰 / 结构层（分隔线 / 行号 / 禁用图标）。
