@@ -525,8 +525,23 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
         }
     }
 
-    @ViewBuilder
+    /// 标签条整条挂一个只做重排的落点区（见 `UPaneTabStripDropDelegate`）。chip
+    /// 自己的重排代理在里层，先命中；落在 chip 之外的位置由它接住，不再漏给外层
+    /// 组外壳的 5 分区判定。
     private var tabStrip: some View {
+        tabStripContent
+            .contentShape(Rectangle())
+            .onDrop(of: [dragType], delegate: UPaneTabStripDropDelegate(
+                groupID: groupID,
+                dragState: dragState,
+                dragType: dragType,
+                onDropAtEnd: { sourceTab in
+                    model.moveTabToEnd(sourceTab, ofGroup: groupID)
+                }))
+    }
+
+    @ViewBuilder
+    private var tabStripContent: some View {
         switch style.kind {
         case .classic: classicTabStrip
         case .card: cardTabStrip

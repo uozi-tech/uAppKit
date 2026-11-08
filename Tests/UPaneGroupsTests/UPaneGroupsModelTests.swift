@@ -600,6 +600,41 @@ final class UPaneGroupsDragModelTests: XCTestCase {
     }
 
     @MainActor
+    func testMoveTabToEndWithinGroupNeverSplits() throws {
+        let model = makeModel()
+        let a = model.openTab { tab("a") }
+        let b = model.openTab { tab("b") }
+        let c = model.openTab { tab("c") }
+        let gid = try XCTUnwrap(model.activeGroupID)
+
+        // 标签条空白处松手：挪到末尾，不分屏。
+        model.moveTabToEnd(a, ofGroup: gid)
+        XCTAssertEqual(model.groupCount, 1)
+        XCTAssertEqual(model.groups[gid]?.tabs.map(\.id), [b, c, a])
+        XCTAssertEqual(model.groups[gid]?.activeIndex, 2)
+
+        // 已在末尾：位置不变。
+        model.moveTabToEnd(a, ofGroup: gid)
+        XCTAssertEqual(model.groups[gid]?.tabs.map(\.id), [b, c, a])
+        XCTAssertEqual(model.groupCount, 1)
+    }
+
+    @MainActor
+    func testMoveTabToEndOfAnotherGroupMerges() throws {
+        let model = makeModel()
+        let a = model.openTab { tab("a") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        let g2 = try XCTUnwrap(model.activeGroupID)
+        let b = model.openTab { tab("b") }
+
+        model.moveTabToEnd(a, ofGroup: g2)
+        XCTAssertEqual(model.groupCount, 1)
+        XCTAssertEqual(model.groups[g2]?.tabs.map(\.id), [b, a])
+        XCTAssertEqual(model.activeGroupID, g2)
+    }
+
+    @MainActor
     func testReorderOntoItselfIsANoop() throws {
         let model = makeModel()
         let a = model.openTab { tab("a") }

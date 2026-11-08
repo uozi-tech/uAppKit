@@ -187,6 +187,46 @@ struct UPaneGroupDropDelegate: DropDelegate {
     }
 }
 
+/// 标签条（chip 以外的部分：胶囊间隙、胶囊上下留白、尾部空白、右侧按钮）的
+/// 投放代理。标签条横向拖动是重排手势，**不能**掉进组级 5 分区判定 —— 标签条
+/// 贴着组的上沿，按整组矩形算会落进 `.top`（靠两端还会落进左右），一松手就
+/// 意外分屏。这里悬停不画分屏高亮，松手只把标签挪到本组末尾。
+struct UPaneTabStripDropDelegate: DropDelegate {
+    let groupID: UUID
+    let dragState: UPaneDragState
+    let dragType: UTType
+    let onDropAtEnd: @MainActor @Sendable (_ sourceTab: UUID) -> Void
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [dragType])
+    }
+
+    func dropEntered(info: DropInfo) {
+        dragState.setHover(nil)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        dragState.setHover(nil)
+        return DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let onDropAtEnd = onDropAtEnd
+        if let sourceTab = dragState.draggingTabID {
+            dragState.end()
+            onDropAtEnd(sourceTab)
+            return true
+        }
+        dragState.end()
+        guard let provider = info.itemProviders(for: [dragType]).first else { return false }
+        UPaneTabDragPayload.load(from: provider, type: dragType) { sourceTab in
+            guard let sourceTab else { return }
+            Task { @MainActor in onDropAtEnd(sourceTab) }
+        }
+        return true
+    }
+}
+
 /// 标签 chip 上的重排代理：把被拖拽标签插到本 chip 的槽位（跨组也适用）。
 /// 同步源优先。
 struct UPaneTabReorderDropDelegate: DropDelegate {

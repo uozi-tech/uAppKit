@@ -409,6 +409,22 @@ public final class UPaneGroupsModel<Payload> {
         }
     }
 
+    /// 把标签挪到目标组的末尾（拖到标签条的空白处松手）。同组 = 挪到最后一格；
+    /// 跨组 = 并入，等同 `moveTab(_:toGroup:zone: .center)`。永远不分屏。
+    public func moveTabToEnd(_ tabID: UUID, ofGroup targetID: UUID) {
+        guard groups[targetID] != nil, let src = locateTab(tabID) else { return }
+        guard src.groupID == targetID else {
+            moveTab(tabID, toGroup: targetID, zone: .center)
+            return
+        }
+        guard var group = groups[targetID] else { return }
+        let tab = group.tabs.remove(at: src.index)
+        group.tabs.append(tab)
+        group.activeIndex = group.tabs.count - 1
+        groups[targetID] = group
+        activeGroupID = targetID
+    }
+
     /// 把标签插到目标标签的槽位（同组重排 / 跨组移动都走这条）。
     public func reorderTab(_ tabID: UUID, before targetTabID: UUID) {
         guard tabID != targetTabID,
