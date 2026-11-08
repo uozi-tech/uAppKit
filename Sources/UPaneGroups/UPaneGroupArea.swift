@@ -537,6 +537,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                 dragType: dragType,
                 onDropAtEnd: { sourceTab in
                     model.moveTabToEnd(sourceTab, ofGroup: groupID)
+                },
+                onCommit: { sourceTab, slot in
+                    model.moveTab(sourceTab, to: slot, inGroup: groupID)
                 }))
     }
 
@@ -561,7 +564,20 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
             style: style,
             onActivate: { model.activateTab(groupID: groupID, index: idx) },
             onClose: { onRequestClose(tab) },
-            onReorder: { source, target in model.reorderTab(source, before: target) })
+            tabs: { model.groups[groupID]?.tabs.map(\.id) ?? [] },
+            onReorder: { source, target in model.reorderTab(source, before: target) },
+            onCommit: { source, slot in model.moveTab(source, to: slot, inGroup: groupID) })
+    }
+
+    /// 标签条上的一排 chip。拖动排序时按落位实时重排（见 `UPaneTabRow`）。
+    private func tabRow(spacing: CGFloat) -> some View {
+        let tabs = group?.tabs ?? []
+        return UPaneTabRow(tabIDs: tabs.map(\.id), groupID: groupID, dragState: dragState,
+                           spacing: spacing) { id in
+            if let idx = tabs.firstIndex(where: { $0.id == id }) {
+                chip(index: idx, tab: tabs[idx])
+            }
+        }
     }
 
     /// `.card`：标签条透出卡面；胶囊之间 2pt，左右内边距 8，右侧按钮 26×26 无竖线。
@@ -569,12 +585,8 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
     private var cardTabStrip: some View {
         HStack(spacing: 2) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    ForEach(Array((group?.tabs ?? []).enumerated()), id: \.element.id) { idx, tab in
-                        chip(index: idx, tab: tab)
-                    }
-                }
-                .frame(height: stripHeight)
+                tabRow(spacing: 2)
+                    .frame(height: stripHeight)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -607,11 +619,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
     private var classicTabStrip: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    ForEach(Array((group?.tabs ?? []).enumerated()), id: \.element.id) { idx, tab in
-                        chip(index: idx, tab: tab)
-                    }
-                }
+                tabRow(spacing: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -664,6 +672,62 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
     }
 }
 
+// MARK: - 标签条上的一排 chip（拖动排序动画）
+
+/// 一排 chip。**单独成视图**：只有它读 `reorderPreview`，拖动排序期间失效重算的就只有这一排，组外壳不动。
+///
+/// 同组拖动时按落位实时重排：其余标签滑过去让位（`UPaneTabReorder.animation`）；被拖的那枚在新位置
+/// 留一个空槽（光标下已经有系统画的拖拽图，原位不再画一遍标签）。空槽**不参与滑动**、直接跳到新槽位——
+/// 让位时邻居一次只挪一格，空槽也滑的话两者会在半路叠在一起。松手落在空槽上（模型改成的顺序与显示的
+/// 一致，不会再跳），空槽 0.2s 淡回成标签。「减弱动态效果」打开时不滑，淡入淡出照旧（不是位移）。
+/// 时长与曲线与 iOS 工作区标签条一致。
+struct UPaneTabRow<Chip: View>: View {
+    let tabIDs: [UUID]
+    let groupID: UUID
+    let dragState: UPaneDragState
+    let spacing: CGFloat
+    /// 测试用：系统的「减弱动态效果」读不到可写的环境值，用它代替。
+    var reduceMotionOverride: Bool? = nil
+    @ViewBuilder let chip: (UUID) -> Chip
+
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { reduceMotionOverride ?? systemReduceMotion }
+
+    struct Arrangement: Equatable {
+        var order: [UUID]
+        var placeholder: UUID?
+    }
+
+    static func arrangement(tabIDs: [UUID], groupID: UUID, dragState: UPaneDragState) -> Arrangement {
+        let preview = dragState.reorderPreview?.groupID == groupID ? dragState.reorderPreview : nil
+        let source = preview == nil ? nil : dragState.draggingTabID
+        return Arrangement(order: UPaneTabReorder.displayOrder(tabIDs, source: source, slot: preview?.slot),
+                           placeholder: source)
+    }
+
+    var body: some View {
+        let arrangement = Self.arrangement(tabIDs: tabIDs, groupID: groupID, dragState: dragState)
+        HStack(spacing: spacing) {
+            ForEach(arrangement.order, id: \.self) { id in
+                let isPlaceholder = id == arrangement.placeholder
+                chip(id)
+                    .opacity(isPlaceholder ? 0 : 1)
+                    .background {
+                        RoundedRectangle(cornerRadius: UPaneGroupStyle.pillRadius, style: .continuous)
+                            .fill(UD.panelHover)
+                            .frame(height: UPaneGroupStyle.pillHeight)
+                            .opacity(isPlaceholder ? 1 : 0)
+                    }
+                    // 变成空槽是瞬时的，落回标签是淡出。
+                    .animation(isPlaceholder ? nil : UPaneTabReorder.landing, value: isPlaceholder)
+                    // 空槽自己的位置变化不做动画（见上）。
+                    .transaction { if isPlaceholder { $0.animation = nil } }
+            }
+        }
+        .animation(reduceMotion ? nil : UPaneTabReorder.animation, value: arrangement.order)
+    }
+}
+
 // MARK: - 标签条上的一枚 chip
 
 /// 活动态 = 2px accent 顶条 + accent 图标 + 正文强度标题，**不填灰底**；非选中项
@@ -685,7 +749,9 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
     let style: UPaneGroupStyle
     let onActivate: () -> Void
     let onClose: () -> Void
+    let tabs: @MainActor () -> [UUID]
     let onReorder: @MainActor @Sendable (_ source: UUID, _ target: UUID) -> Void
+    let onCommit: @MainActor @Sendable (_ source: UUID, _ slot: UPaneReorderSlot) -> Void
 
     @State private var hovering = false
     @State private var hoveringClose = false
@@ -735,9 +801,17 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
             }
             .onDrop(of: [dragType], delegate: UPaneTabReorderDropDelegate(
                 targetTabID: tab.id,
+                groupID: groupID,
                 dragState: dragState,
                 dragType: dragType,
-                onReorder: onReorder))
+                tabs: tabs,
+                onReorder: onReorder,
+                onCommit: onCommit))
+            // 拖动排序按光标在左半还是右半判落位，要知道自己多宽。
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width in
+                dragState.chipWidths[tab.id] = width
+            }
+            .onDisappear { dragState.chipWidths[tab.id] = nil }
             .modifier(OptionalContextMenu(isEnabled: TabMenu.self != EmptyView.self,
                                           menu: { tabMenu(tab) }))
             .help(d.help ?? title(d))

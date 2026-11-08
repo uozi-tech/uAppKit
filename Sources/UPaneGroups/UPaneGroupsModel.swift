@@ -425,6 +425,14 @@ public final class UPaneGroupsModel<Payload> {
         activeGroupID = targetID
     }
 
+    /// 拖动排序松手：落到标签条上显示的那个位置（`UPaneReorderSlot`）。
+    public func moveTab(_ tabID: UUID, to slot: UPaneReorderSlot, inGroup groupID: UUID) {
+        switch slot {
+        case .before(let target): reorderTab(tabID, before: target)
+        case .end: moveTabToEnd(tabID, ofGroup: groupID)
+        }
+    }
+
     /// 把标签插到目标标签的槽位（同组重排 / 跨组移动都走这条）。
     public func reorderTab(_ tabID: UUID, before targetTabID: UUID) {
         guard tabID != targetTabID,
