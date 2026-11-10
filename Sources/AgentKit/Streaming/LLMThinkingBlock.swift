@@ -44,6 +44,9 @@ public struct LLMThinkingBlockAccumulator: Sendable {
 
     public init() {}
 
+    /// 有 thinking 块开了头还没收尾：模型正在想。
+    public var hasOpenBlock: Bool { !open.isEmpty }
+
     /// `content_block_start`：是 thinking 类块就开始记，返回 true。
     @discardableResult
     public mutating func start(index: Int, block: [String: Any]) -> Bool {
