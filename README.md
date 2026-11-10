@@ -5,7 +5,7 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包多个产品。
 | 产品 | 用途 | 平台 |
 |---|---|---|
 | `UDesignKit` | 设计语言 token 与 UD 组件 | macOS 14+ / iOS 18+ |
-| `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`） | macOS 14+ |
+| `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`、带位移死区的拖拽源 `.dragSource`） | macOS 14+ |
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
 | `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |

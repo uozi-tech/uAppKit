@@ -78,7 +78,7 @@ let package = Package(
         .testTarget(name: "UDesignKitTests", dependencies: ["UDesignKit"]),
         .testTarget(name: "UAppKitBridgeTests", dependencies: ["UAppKitBridge"]),
         .testTarget(name: "UPaneTreeTests", dependencies: ["UPaneTree"]),
-        .testTarget(name: "UPaneGroupsTests", dependencies: ["UPaneGroups", "UPaneTree"]),
+        .testTarget(name: "UPaneGroupsTests", dependencies: ["UPaneGroups", "UPaneTree", "UAppKitBridge"]),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"],
                     swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(

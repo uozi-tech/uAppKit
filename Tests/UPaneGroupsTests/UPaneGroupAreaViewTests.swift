@@ -12,8 +12,8 @@ import XCTest
 /// （uTable 实测重建一个 30 列 × 100 行的数据网格 ≈350ms、拆掉 ≈180ms）；
 /// 摊平之后身份只由 `tab.id` 决定，操作只是改 frame。
 ///
-/// 测不了的：`.onDrag` / `DropDelegate` 的真实拖拽会话（要真的按住鼠标走 AppKit
-/// 拖拽循环）、`onPointerDown` 的 NSEvent 本地监视器（要真实鼠标事件；这条前提
+/// 测不了的：真实拖拽会话（要真的按住鼠标走 AppKit 拖拽循环；起拖与落点两头各自的
+/// 测法见 `UPaneTabDragSourceTests`）、`onPointerDown` 的 NSEvent 本地监视器（要真实鼠标事件；这条前提
 /// 已由 `UAppKitBridgeTests` 钉住）、以及颜色 / 排版的观感。
 @MainActor
 final class UPaneGroupAreaViewTests: XCTestCase {

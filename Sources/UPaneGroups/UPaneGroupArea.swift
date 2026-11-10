@@ -784,18 +784,19 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
         chip(d)
             .contentShape(Rectangle())
             // **按下即激活**，对齐原生标签栏 / 浏览器标签（`.onTapGesture` 的抬起
-            // 触发读起来像输入延迟）。不能用 SwiftUI 手势实现：任何在按下瞬间就
+            // 触发读起来像输入延迟）。走事件旁观而不是 SwiftUI 手势：任何在按下瞬间就
             // 响应的手势（即使 simultaneous 的 `DragGesture(minimumDistance: 0)`
-            // 或 `onLongPressGesture(0.01s)`）都会抢占鼠标事件流，外层 `.onDrag`
-            // 的 AppKit 拖拽会话永远起不来 —— 标签就拖不动、拖拽分屏整套没了。
-            // （探针实测：DragGesture 稳定阻断，LongPress 时序竞态偶发阻断。）
+            // 或 `onLongPressGesture(0.01s)`）都会抢占鼠标事件流，同一视图上的
+            // SwiftUI 拖放跟着失灵。（探针实测：`.onDrag` 被 DragGesture 稳定阻断，
+            // LongPress 时序竞态偶发阻断。）
             .onPointerDown {
                 if !hoveringClose { onActivate() }
             }
             .onHover { hovering = $0 }
-            .onDrag {
+            // 不用 SwiftUI 的 `.onDrag`：它没有位移死区，点击时手一抖就起拖、预览闪出来。
+            .dragSource(canBegin: { !hoveringClose }) {
                 dragState.begin(tabID: tab.id, groupID: groupID)
-                return UPaneTabDragPayload.itemProvider(tabID: tab.id, type: dragType)
+                return UPaneTabDragPayload.pasteboardItem(tabID: tab.id, type: dragType)
             } preview: {
                 UPaneTabDragPreviewChip(title: title(d), icon: d.icon)
             }

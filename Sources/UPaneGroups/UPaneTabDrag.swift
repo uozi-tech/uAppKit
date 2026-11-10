@@ -25,6 +25,14 @@ public enum UPaneTabDragPayload {
         return provider
     }
 
+    /// 同一份载荷的拖拽板写法，给自己起 AppKit 拖拽会话的拖拽源用（标签 chip 的
+    /// `dragSource`）。`.onDrop` 那头读到的还是 `NSItemProvider`，`load` 照常能取。
+    public static func pasteboardItem(tabID: UUID, type: UTType) -> NSPasteboardItem {
+        let item = NSPasteboardItem()
+        item.setData(Data(tabID.uuidString.utf8), forType: NSPasteboard.PasteboardType(type.identifier))
+        return item
+    }
+
     public static func load(from provider: NSItemProvider, type: UTType,
                             completion: @escaping @Sendable (UUID?) -> Void) {
         _ = provider.loadDataRepresentation(forTypeIdentifier: type.identifier) { data, _ in
@@ -83,8 +91,8 @@ public final class UPaneDragState {
 
     @ObservationIgnored private var endPollTask: Task<Void, Never>?
 
-    /// 拖拽开始时由标签 chip 的 `.onDrag` 调用。`.onDrag` 没有结束回调，故启动一个
-    /// 鼠标释放轮询，松手即 `end()`。
+    /// 拖拽开始时由标签 chip 的拖拽源调用（拖过死区、会话起来之前）。这里不接会话的
+    /// 结束回调，而是启动一个鼠标释放轮询，松手即 `end()`。
     public func begin(tabID: UUID, groupID: UUID) {
         draggingTabID = tabID
         draggingSourceGroupID = groupID

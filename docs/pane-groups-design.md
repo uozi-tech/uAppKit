@@ -547,6 +547,13 @@ public final class ActivePaneGate { public var isActive: Bool }
    抬起触发读起来像输入延迟）与「chip 可拖拽」这两个需求，在 SwiftUI 手势体系
    里无解。
 
+3. **`.onDrag` 没有位移死区。** 按下后收到第一个 `mouseDragged`（探针实测移动
+   0.5pt）就起 AppKit 拖拽会话、把预览画出来——点标签时手一抖，预览就在点下去的
+   地方闪一下，这次点击的抬起也被拖拽会话吞掉。chip 因此不挂 `.onDrag`，改用
+   `UAppKitBridge/DragSourceProbe.swift` 的 `.dragSource`：同样旁观鼠标事件，按下后
+   拖过 5pt 才自己调 `beginDraggingSession`；落点那头不变，还是 SwiftUI 的
+   `.onDrop`（载荷写在拖拽板上，`DropInfo` 照常认）。
+
 **探针的三个实现细节，照抄别改：**
 
 - `hitTest` 返回 `nil` —— 对命中测试完全透明，AppKit 内容的选中、拖拽、
@@ -571,7 +578,7 @@ public final class ActivePaneGate { public var isActive: Bool }
 | 跳过 no-op 写 | `UTableModel.swift:461-466` | 每次 `@Observable` 变更可能同步 flush 一次窗口布局（`ObservationCenter.invalidate → flushTransactions`），一次点击冗余重写三个属性就付三次布局。`activateTab` 里三个赋值全带 `if != ` 判断。 |
 | 分屏按钮开**空**组，不克隆 | `UTableModel.swift:517-521` | 「克隆当前标签只会把同一张表（连同它的 NSTableView 和一次数据加载）再开一份，既不是想要的内容，也是大表分屏卡顿的一半来源。」注意这是 uTable 的取舍，终端区应保留克隆语义（见 §4.3(c)）。 |
 | 可选链赋值会触发独占性冲突 | `UTableModel.swift:419-421` | `groups[gid]?.x = f(groups[gid])` 先开写访问再求值右侧 → Fatal access conflict。必须本地拷贝、改完写回。 |
-| `.onDrag` 无结束回调 → 鼠标释放轮询 | `UTableTabDrag.swift:84-106` | 30ms 周期（`NSEvent.pressedMouseButtons & 1`），检测到松手后**再等 120ms** 给 drop target 跑完 `performDrop` 才清进程内拖拽源；成功的 drop 会提前 `end()`。uTerm 的 `PaneDragState.begin` 没有这 120ms 宽限，合并时取 uTable 版。 |
+| 拖拽结束靠鼠标释放轮询（当年 `.onDrag` 没有结束回调，换成 `.dragSource` 后沿用） | `UTableTabDrag.swift:84-106` | 30ms 周期（`NSEvent.pressedMouseButtons & 1`），检测到松手后**再等 120ms** 给 drop target 跑完 `performDrop` 才清进程内拖拽源；成功的 drop 会提前 `end()`。uTerm 的 `PaneDragState.begin` 没有这 120ms 宽限，合并时取 uTable 版。 |
 | 分隔条用 `.global` 坐标 | 两边 `SplitterHandle` 注释一致 | 手柄随 `fraction` 变化自己移动，`.local` 拖拽测的是相对移动中视图的位移 → 每步都把原点在光标下推一次 → 比例震荡、面板抖动。 |
 
 ---
