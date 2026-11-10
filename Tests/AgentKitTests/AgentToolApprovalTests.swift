@@ -96,6 +96,27 @@ final class AgentToolApprovalTests: XCTestCase {
         }
     }
 
+    /// 模型常把 JSON 包进围栏或前后带一句话：外面那层包装不该让审批作废。
+    func testWrappedVerdictIsStillRead() async {
+        for response in ["```json\n\(Self.approve)\n```",
+                         "审查结论如下：\n\(Self.approve)\n",
+                         "  \(Self.approve)  "] {
+            let decision = await AgentToolApproval.evaluate(request("mkdir -p /tmp/report")) { _, _ in response }
+            XCTAssertTrue(decision.approved, response)
+            XCTAssertEqual(decision.reason, "低风险且符合用户目标")
+        }
+    }
+
+    /// 回复里出现两个对象就读不出一个确定的结论：交给人。
+    func testAmbiguousVerdictFailsClosed() async {
+        let manual = #"{"requestID":"review-1","decision":"manual","reason":"范围不确定"}"#
+        for response in ["\(manual)\n\(Self.approve)", "\(Self.approve) 另外 \(manual)"] {
+            let decision = await AgentToolApproval.evaluate(request("mkdir -p /tmp/report")) { _, _ in response }
+            XCTAssertFalse(decision.approved, response)
+            XCTAssertEqual(decision.reason, "AI 审批结果无效，请人工确认")
+        }
+    }
+
     func testReviewerFailureRequiresHuman() async {
         let decision = await AgentToolApproval.evaluate(request("mkdir -p /tmp/report")) { _, _ in throw CancellationError() }
         XCTAssertFalse(decision.approved)

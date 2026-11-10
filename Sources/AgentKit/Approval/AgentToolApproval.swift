@@ -77,7 +77,7 @@ public enum AgentToolApproval {
                 let reason: String
             }
             guard response.utf8.count <= 8192,
-                  let reply = try? JSONDecoder().decode(Response.self, from: Data(response.utf8)),
+                  let reply = try? JSONDecoder().decode(Response.self, from: jsonObject(in: response)),
                   reply.requestID == request.id,
                   ["approve", "manual"].contains(reply.decision),
                   !reply.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -87,6 +87,15 @@ public enum AgentToolApproval {
         } catch {
             return Decision(approved: false, reason: "AI 审批未完成，请人工确认")
         }
+    }
+
+    /// 从审查模型的回复里取出那个 JSON 对象。要求是「只回 JSON」，但模型常把它包进
+    /// ```json 围栏、或在前后带一句话 —— 取第一个 `{` 到最后一个 `}`。取出来的东西照样要过
+    /// 后面的全部校验（id 对得上、decision 在白名单里、有理由），放宽的只是外面那层包装。
+    static func jsonObject(in response: String) -> Data {
+        guard let start = response.firstIndex(of: "{"), let end = response.lastIndex(of: "}"),
+              start < end else { return Data(response.utf8) }
+        return Data(response[start...end].utf8)
     }
 
     /// 不经 AI、直接交给人的理由；nil 表示可以请 AI 审查。
