@@ -50,7 +50,8 @@ public extension UD {
         case menu
     }
 
-    /// 模态卡片投影色：暗夜保留浮层深度，日间保持扁平、无 box-shadow。
+    /// 旧的模态卡片投影色：暗夜保留浮层深度，日间透明（靠描边分界）。
+    /// 新写的自绘弹层用 `UDModal` / `udModalCard()`（不描边、四周均匀投影），别再配这个色。
     nonisolated static let modalShadowColor = dyn(.black(0.6), .black(0))
 }
 
