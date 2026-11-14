@@ -6,6 +6,7 @@ import SwiftUI
 /// 用于标题栏、导航、翻页等需要自绘品牌图标的图标钮（复刻 UTitleBarIconButton 语义并泛化）。
 /// `active` → `tint` 填底（`activeFillOpacity`）+ tint 图标；hover → `UD.panelHover` + `UD.text`；
 /// idle → `UD.text3`。宽高、图标尺寸、圆角可调。仅切底/图标色，无位移、无投影。
+/// SF 图标以 `iconSize` 为图标框（见 `USymbol`）：宽符号不会比邻居大一圈，且按墨迹居中。
 ///
 /// 依赖 DesignKit 内的 `UIconRef` / `UIconRefView`（同模块），不依赖任何 domain model。
 public struct UDGlyphButton: View {
@@ -48,7 +49,7 @@ public struct UDGlyphButton: View {
 
     public var body: some View {
         Button(action: action) {
-            UIconRefView(icon, size: iconSize)
+            UIconRefView(icon, size: iconSize, box: iconSize)
                 .foregroundStyle(active ? tint : (hovering ? UD.text : UD.text3))
                 .frame(width: width, height: height)
                 .background(

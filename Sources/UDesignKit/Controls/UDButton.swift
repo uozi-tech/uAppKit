@@ -214,7 +214,10 @@ public struct UDIconButton: View {
 
     public var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage)
+            // 图标框比字号大 1pt：`xmark` / `plus` 这类本来就小的不动，`eye` / `doc.on.doc`
+            // 这类宽或高的收进框里，并按墨迹居中（见 `USymbol`）。
+            let pt: CGFloat = size <= 20 ? 10 : 12
+            USymbol(systemImage, size: pt, box: pt + 1)
         }
         .buttonStyle(UDIconButtonStyle(size: size, style: style))
     }

@@ -65,18 +65,23 @@ public struct UIconElement: Hashable, Sendable {
 // MARK: - Shape 渲染
 
 /// 把一个 `UIconGlyph` 渲染为可填充 `Path`：描边子路径先转轮廓，再统一缩放。
+///
+/// 按**墨迹**居中，而不是按 viewBox：设计稿里不少字形在 viewBox 里本就偏一侧
+/// （`toolUndo` 偏右 1.25pt、`copyRow` 右下各 1pt），原样摆进等大方钮就显得歪。
+/// 缩放比仍按 viewBox 算，所以字形之间的相对大小与描边粗细不变。
 public struct UIconShape: Shape {
     let glyph: UIconGlyph
 
     public func path(in rect: CGRect) -> Path {
         let side = min(rect.width, rect.height)
         let scale = side / glyph.box
-        // 居中（当外框非正方时）。
-        let dx = rect.minX + (rect.width - side) / 2
-        let dy = rect.minY + (rect.height - side) / 2
-        let transform = CGAffineTransform(translationX: dx, y: dy).scaledBy(x: scale, y: scale)
-        // 轮廓只在 viewBox 坐标系里算一次（见 `UIconEngine.outline`），这里只做缩放。
-        return UIconEngine.outline(for: glyph).applying(transform)
+        // 轮廓只在 viewBox 坐标系里算一次（见 `UIconEngine.outline`），这里只做变换。
+        let outline = UIconEngine.outline(for: glyph)
+        let ink = outline.boundingRect
+        let transform = CGAffineTransform(translationX: rect.midX, y: rect.midY)
+            .scaledBy(x: scale, y: scale)
+            .translatedBy(x: -ink.midX, y: -ink.midY)
+        return outline.applying(transform)
     }
 }
 
@@ -105,19 +110,26 @@ public enum UIconRef: Equatable {
 }
 
 /// 渲染 `UIconRef`：SF 用字号+字重，glyph 用 `size`。颜色由外层 `.foregroundStyle`。
+///
+/// `box` 非空时 SF 符号走 `USymbol`：墨迹长边超出 `box` 的等比缩进去、并按墨迹居中
+/// ——用于一排等大图标钮。默认 `nil`，与文字同行时仍按字号排版。
 public struct UIconRefView: View {
     let ref: UIconRef
     var size: CGFloat = 15
     var weight: Font.Weight = .regular
+    var box: CGFloat? = nil
 
-    public init(_ ref: UIconRef, size: CGFloat = 15, weight: Font.Weight = .regular) {
+    public init(_ ref: UIconRef, size: CGFloat = 15, weight: Font.Weight = .regular, box: CGFloat? = nil) {
         self.ref = ref
         self.size = size
         self.weight = weight
+        self.box = box
     }
 
     public var body: some View {
         switch ref {
+        case let .sf(name) where box != nil:
+            USymbol(name, size: size, weight: weight, box: box)
         case let .sf(name):
             Image(systemName: name).font(.system(size: size, weight: weight))
         case let .glyph(g):
