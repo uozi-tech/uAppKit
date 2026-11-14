@@ -75,6 +75,12 @@ public extension UIconGlyph {
         .rect(2, 2.5, 12, 11, r: 1.5, sw: 1.2),
         .path("M8 2.5v11", w: 1.2),
     ])
+    /// 底部面板（SQL 控制台开关）。外框与 `tabSql` 同尺寸同圆角，底部三分之一一道横线——
+    /// 不用 SF 的 `rectangle.bottomthird.inset.filled`：实心条让它在一排细线图标里重一倍。
+    static let panelBottom = UIconGlyph(16, [
+        .rect(1.5, 2.5, 13, 11, r: 2, sw: 1.2),
+        .path("M1.5 10h13", w: 1.2),
+    ])
 
     // MARK: 数据工具栏（设计独有造型）
 

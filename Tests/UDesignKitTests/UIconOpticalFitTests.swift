@@ -49,7 +49,7 @@ final class UIconOpticalFitTests: XCTestCase {
     /// 自绘字形按墨迹居中、缩放比仍按 viewBox（相对大小不变）。
     func testGlyphPathIsInkCentered() {
         let rect = CGRect(x: 3, y: 5, width: 14, height: 14)
-        for glyph in [UIconGlyph.toolUndo, .copyRow, .objCagg, .objFunc, .sendArrow, .setAgent, .lockOutline] {
+        for glyph in [UIconGlyph.toolUndo, .copyRow, .panelBottom, .objCagg, .objFunc, .sendArrow, .setAgent, .lockOutline] {
             let bounds = UIconShape(glyph: glyph).path(in: rect).boundingRect
             XCTAssertEqual(bounds.midX, rect.midX, accuracy: 0.001)
             XCTAssertEqual(bounds.midY, rect.midY, accuracy: 0.001)
