@@ -18,26 +18,48 @@ final class UIconOpticalFitTests: XCTestCase {
             ("eye", 12, 13), ("doc.on.doc", 10, 11),
         ]
         for (name, size, box) in cases {
-            let natural = try XCTUnwrap(USymbolMetrics.measure(name, size: size, weight: .regular), name)
+            let natural = try XCTUnwrap(USymbolMetrics.fitted(name, size: size, weight: .regular, box: nil), name)
             let fit = try XCTUnwrap(USymbolMetrics.fitted(name, size: size, weight: .regular, box: box), name)
             let extent = max(fit.ink.width, fit.ink.height)
-            XCTAssertLessThanOrEqual(extent, box + 0.01, "\(name) 墨迹 \(extent) 超出图标框 \(box)")
-            XCTAssertLessThanOrEqual(extent, max(natural.ink.width, natural.ink.height) + 0.01, "\(name) 被放大了")
+            XCTAssertLessThanOrEqual(extent, box + 0.001, "\(name) 墨迹 \(extent) 超出图标框 \(box)")
+            XCTAssertLessThanOrEqual(extent, max(natural.ink.width, natural.ink.height) + 0.001, "\(name) 被放大了")
         }
-        // 放得下的不动：xmark 12pt 墨迹约 9.5pt。
         let xmark = try XCTUnwrap(USymbolMetrics.fitted("xmark", size: 12, weight: .regular, box: 13))
-        let natural = try XCTUnwrap(USymbolMetrics.measure("xmark", size: 12, weight: .regular))
+        let natural = try XCTUnwrap(USymbolMetrics.fitted("xmark", size: 12, weight: .regular, box: nil))
         XCTAssertEqual(xmark.ink, natural.ink)
     }
 
-    /// 偏移后墨迹中心与图像中心重合（`chevron.left` 原本偏左近 0.9pt）。
+    /// 字号与墨迹严格成比例、不变形：AppKit 按目标字号直接出图时宽高各自取整，
+    /// `tablecells` 15pt 会被拉成 18.5×14.5（SwiftUI 自己画是 17.25×13.5）。
+    func testSizingIsLinearAndUndistorted() throws {
+        for name in ["tablecells", "cylinder", "square.and.arrow.down", "person.2"] {
+            let a = try XCTUnwrap(USymbolMetrics.fitted(name, size: 14, weight: .regular, box: nil))
+            let b = try XCTUnwrap(USymbolMetrics.fitted(name, size: 15, weight: .regular, box: nil))
+            XCTAssertEqual(b.ink.width / a.ink.width, 15 / 14, accuracy: 0.0001, name)
+            XCTAssertEqual(b.ink.height / a.ink.height, 15 / 14, accuracy: 0.0001, name)
+            XCTAssertEqual(b.frame.width / b.frame.height, a.frame.width / a.frame.height, accuracy: 0.0001, name)
+        }
+        let t = try XCTUnwrap(USymbolMetrics.fitted("tablecells", size: 15, weight: .regular, box: nil))
+        XCTAssertEqual(t.ink.width, 17.25, accuracy: 0.5)
+        XCTAssertEqual(t.ink.height, 13.5, accuracy: 0.5)
+    }
+
+    /// 墨迹面积口径：面积命中目标；超框时由 box 截住。
+    func testInkAreaSizing() throws {
+        for name in ["cylinder", "key", "tablecells", "arrow.left.arrow.right.square"] {
+            let fit = try XCTUnwrap(USymbolMetrics.fitted(name, inkArea: 60, weight: .regular, box: nil), name)
+            XCTAssertEqual(fit.inkArea, 60, accuracy: 0.001, name)
+        }
+        let key = try XCTUnwrap(USymbolMetrics.fitted("key", inkArea: 200, weight: .regular, box: 16))
+        XCTAssertEqual(max(key.ink.width, key.ink.height), 16, accuracy: 0.001)
+    }
+
+    /// 偏移后墨迹中心与排版框中心重合（`chevron.left` 原本偏左近 0.9pt）。
     func testSymbolOffsetCentersInk() throws {
         for name in ["chevron.left", "chevron.right", "wand.and.stars", "square.and.arrow.up", "person.badge.plus"] {
             let fit = try XCTUnwrap(USymbolMetrics.fitted(name, size: 12, weight: .regular, box: nil), name)
-            let cx = fit.ink.midX + fit.offset.width
-            let cy = fit.ink.midY + fit.offset.height
-            XCTAssertEqual(cx, fit.image.size.width / 2, accuracy: 0.001, name)
-            XCTAssertEqual(cy, fit.image.size.height / 2, accuracy: 0.001, name)
+            XCTAssertEqual(fit.ink.midX + fit.offset.width, fit.frame.width / 2, accuracy: 0.001, name)
+            XCTAssertEqual(fit.ink.midY + fit.offset.height, fit.frame.height / 2, accuracy: 0.001, name)
         }
     }
 
