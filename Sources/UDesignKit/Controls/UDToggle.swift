@@ -50,11 +50,11 @@ public struct UDToggle: View {
     // MARK: - knob
 
     private var knob: some View {
-        // 旋钮阴影为全局控件阴影上限：0 1px 2px black 18%。
+        // 旋钮：v2 无描边；阴影四周均匀发散（无 y 偏移），见 `knobShadow()`。
         Circle()
             .fill(.white)
             .frame(width: 20, height: 20)
-            .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
+            .knobShadow()
     }
 }
 

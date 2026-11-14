@@ -105,3 +105,13 @@ public extension View {
         modifier(UDShadowModifier(level: level))
     }
 }
+
+public extension View {
+    /// 控件旋钮（Slider / Toggle）阴影：四周均匀发散，无 y 偏移。
+    /// 两层：0.5pt 贴边轮廓让白旋钮在浅色轨道上有边界，3pt 柔光向四周散开。
+    nonisolated func knobShadow() -> some View {
+        self
+            .shadow(color: .black.opacity(0.14), radius: 0.5, x: 0, y: 0)
+            .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 0)
+    }
+}

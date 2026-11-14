@@ -84,11 +84,11 @@ public struct UDSlider: View {
                         .offset(y: trackHeight / 2 + 6)
                 }
 
-                // 旋钮：v2 无描边；阴影对齐控件上限 0 1px 2px black 18%。
+                // 旋钮：v2 无描边；阴影四周均匀发散（无 y 偏移），见 `knobShadow()`。
                 Circle()
                     .fill(Color.white)
                     .frame(width: knobSize, height: knobSize)
-                    .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
+                    .knobShadow()
                     .offset(x: knobX)
             }
             .frame(width: width, height: knobSize)
