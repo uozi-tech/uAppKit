@@ -82,6 +82,42 @@ public extension UIconGlyph {
         .path("M1.5 10h13", w: 1.2),
     ])
 
+    // MARK: 导出 / 导入（Lucide `file-up` / `file-down`，ISC，见 THIRD_PARTY_NOTICES.md）
+    //
+    // 两枚共用同一张文件页，箭头在页内上下镜像——外轮廓、墨迹面积天然一致（SF 的
+    // `square.and.arrow.up/down` 导出箭头伸出托盘、导入在托盘内，怎么调字号都有一枚显大）。
+    // 描边 1.7（viewBox 24）：按导航轨 16.5pt 渲染时 ≈ 1.17pt，与 SF regular 邻居一致。
+    // 实心版（导航轨选中态）= 整页填实，折角线与箭头镂空。
+
+    private static let filePage = "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+    private static let fileFold = "M14 2v5a1 1 0 0 0 1 1h5"
+    private static let fileArrowUp = "M12 18v-6M15 15l-3-3-3 3"
+    private static let fileArrowDown = "M12 12v6M9 15l3 3 3-3"
+    private static let fileStroke: CGFloat = 1.7
+
+    static let fileUp = UIconGlyph(24, [
+        .path(filePage, w: fileStroke, cap: .round, join: .round),
+        .path(fileFold, w: fileStroke, cap: .round, join: .round),
+        .path(fileArrowUp, w: fileStroke, cap: .round, join: .round),
+    ])
+    static let fileDown = UIconGlyph(24, [
+        .path(filePage, w: fileStroke, cap: .round, join: .round),
+        .path(fileFold, w: fileStroke, cap: .round, join: .round),
+        .path(fileArrowDown, w: fileStroke, cap: .round, join: .round),
+    ])
+    static let fileUpFilled = UIconGlyph(24, [
+        .path(filePage, filled: true),
+        .path(filePage, w: fileStroke, cap: .round, join: .round),
+        .cut(fileFold, w: fileStroke),
+        .cut(fileArrowUp, w: fileStroke),
+    ])
+    static let fileDownFilled = UIconGlyph(24, [
+        .path(filePage, filled: true),
+        .path(filePage, w: fileStroke, cap: .round, join: .round),
+        .cut(fileFold, w: fileStroke),
+        .cut(fileArrowDown, w: fileStroke),
+    ])
+
     // MARK: 数据工具栏（设计独有造型）
 
     /// 保存 = 软盘（SF 无对应；且原 `square.and.arrow.down` 与导出箭头撞车）。

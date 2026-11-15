@@ -31,6 +31,8 @@ public struct UIconGlyph: Hashable, Sendable {
 
 /// 单个绘制元素。`filled == true` 走填充（SVG `fill="currentColor"`），否则按
 /// `width` 描边（SVG `stroke`）。`cap` / `join` 对应 stroke-linecap / linejoin。
+/// `cut == true` 的元素不画，而是从其余元素合成的轮廓里**挖掉**（填充或按 `width`
+/// 描边后的形状）——实心图标里的镂空线条（如实心文件页里的箭头）。
 public struct UIconElement: Hashable, Sendable {
     public enum Kind: Hashable, Sendable {
         case path(String)                       // <path d="…">
@@ -44,11 +46,17 @@ public struct UIconElement: Hashable, Sendable {
     let filled: Bool
     let cap: CGLineCap
     let join: CGLineJoin
+    var cut: Bool = false
 
     // 便捷构造器 —— 对齐 SVG 属性默认值。
     static func path(_ d: String, w: CGFloat = 1.2, filled: Bool = false,
                      cap: CGLineCap = .butt, join: CGLineJoin = .miter) -> UIconElement {
         UIconElement(kind: .path(d), width: w, filled: filled, cap: cap, join: join)
+    }
+    /// 镂空：按 `w` 描边（或 `filled` 时按填充）后从字形轮廓里挖掉。
+    static func cut(_ d: String, w: CGFloat = 1.2, filled: Bool = false,
+                    cap: CGLineCap = .round, join: CGLineJoin = .round) -> UIconElement {
+        UIconElement(kind: .path(d), width: w, filled: filled, cap: cap, join: join, cut: true)
     }
     static func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat,
                      r: CGFloat = 0, sw: CGFloat = 1.2) -> UIconElement {
@@ -151,17 +159,22 @@ public extension UIconEngine {
         outlineCacheLock.lock()
         defer { outlineCacheLock.unlock() }
         if let cached = outlineCache[glyph] { return cached }
-        var out = Path()
-        for el in glyph.elements {
+        func shape(_ el: UIconElement) -> Path {
             let raw = subpath(for: el.kind)
-            if el.filled {
-                out.addPath(raw)
-            } else {
-                // 在原生 viewBox 坐标系内描边（宽度随后随整体缩放，保持比例）。
-                out.addPath(raw.strokedPath(
-                    StrokeStyle(lineWidth: el.width, lineCap: el.cap, lineJoin: el.join)
-                ))
-            }
+            if el.filled { return raw }
+            // 在原生 viewBox 坐标系内描边（宽度随后随整体缩放，保持比例）。
+            return raw.strokedPath(StrokeStyle(lineWidth: el.width, lineCap: el.cap, lineJoin: el.join))
+        }
+        var out = Path()
+        for el in glyph.elements where !el.cut { out.addPath(shape(el)) }
+        let cuts = glyph.elements.filter(\.cut)
+        if !cuts.isEmpty {
+            // 有镂空才做布尔运算：先逐个求并成一块，再逐个挖掉。不能把元素拼进一条路径再
+            // normalized()——填充与描边轮廓绕向相反，重叠处绕数相消会漏出一圈细缝。
+            var solid = CGPath(rect: .null, transform: nil)
+            for el in glyph.elements where !el.cut { solid = solid.union(shape(el).cgPath) }
+            for el in cuts { solid = solid.subtracting(shape(el).cgPath) }
+            out = Path(solid)
         }
         outlineCache[glyph] = out
         return out

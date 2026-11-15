@@ -68,10 +68,26 @@ final class UIconOpticalFitTests: XCTestCase {
     }
     #endif
 
+    /// 导出 / 导入一对：同一张页、箭头镜像——外轮廓完全相同；实心版外轮廓不变、镂空确实挖开。
+    func testFilePairSharesOneOutline() {
+        func ink(_ g: UIconGlyph) -> CGRect { UIconEngine.outline(for: g).boundingRect }
+        XCTAssertEqual(ink(.fileUp), ink(.fileDown))
+        XCTAssertEqual(ink(.fileUpFilled), ink(.fileDownFilled))
+        XCTAssertEqual(ink(.fileUpFilled).width, ink(.fileUp).width, accuracy: 0.01)
+        XCTAssertEqual(ink(.fileUpFilled).height, ink(.fileUp).height, accuracy: 0.01)
+        // 箭头中段（12, 15）在实心版里是镂空，页内其他点是实心。
+        let filled = UIconEngine.outline(for: .fileUpFilled)
+        XCTAssertFalse(filled.contains(CGPoint(x: 12, y: 15)), "箭头未挖开")
+        XCTAssertTrue(filled.contains(CGPoint(x: 7, y: 15)), "页面未填实")
+        XCTAssertFalse(UIconEngine.outline(for: .fileDownFilled).contains(CGPoint(x: 12, y: 15)))
+        // 描边版页内是空的。
+        XCTAssertFalse(UIconEngine.outline(for: .fileUp).contains(CGPoint(x: 7, y: 15)))
+    }
+
     /// 自绘字形按墨迹居中、缩放比仍按 viewBox（相对大小不变）。
     func testGlyphPathIsInkCentered() {
         let rect = CGRect(x: 3, y: 5, width: 14, height: 14)
-        for glyph in [UIconGlyph.toolUndo, .copyRow, .panelBottom, .objCagg, .objFunc, .sendArrow, .setAgent, .lockOutline] {
+        for glyph in [UIconGlyph.toolUndo, .copyRow, .panelBottom, .objCagg, .objFunc, .sendArrow, .setAgent, .lockOutline, .fileUp, .fileDownFilled] {
             let bounds = UIconShape(glyph: glyph).path(in: rect).boundingRect
             XCTAssertEqual(bounds.midX, rect.midX, accuracy: 0.001)
             XCTAssertEqual(bounds.midY, rect.midY, accuracy: 0.001)
