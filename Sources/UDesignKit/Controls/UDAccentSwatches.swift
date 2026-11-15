@@ -16,13 +16,16 @@ public struct UDAccentSwatches: View {
     }
 
     public var body: some View {
-        HStack(spacing: spacing) {
+        // 色块之间的间距也归入命中区：每块向四周各让出 spacing/2 作点击范围，
+        // 外层再收回同样的量，视觉尺寸与左缘不变。iPhone 上 size 30 + spacing 14 恰好 44pt。
+        HStack(spacing: 0) {
             ForEach(AccentColor.allCases) { color in
-                Swatch(color: color, selected: color == selection, size: size) {
+                Swatch(color: color, selected: color == selection, size: size, inset: spacing / 2) {
                     withAnimation(.easeOut(duration: 0.14)) { selection = color }
                 }
             }
         }
+        .padding(-spacing / 2)
     }
 }
 
@@ -40,6 +43,7 @@ private struct Swatch: View {
     let color: AccentColor
     let selected: Bool
     let size: CGFloat
+    let inset: CGFloat
     let action: () -> Void
     @State private var hovering = false
 
@@ -57,6 +61,7 @@ private struct Swatch: View {
                     }
                 }
                 .brightness(hovering && !selected ? 0.06 : 0)
+                .padding(inset)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
