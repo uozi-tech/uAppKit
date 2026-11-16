@@ -10,6 +10,7 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包多个产品。
 | `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
 | `UPaneGroups` | 「分屏里装标签」的 VSCode 编辑组（模型 + 区域视图） | 模型 macOS/iOS；视图 macOS 14+ |
+| `UControlKit` | 本机 IPC 外部 agent 通道核心（Unix socket 服务端、请求分发与门禁、开关设置） | macOS 14+ |
 
 ## 为什么单独一个仓库
 
