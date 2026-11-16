@@ -127,12 +127,6 @@ public final class UPaneDragState {
     }
 }
 
-/// 拖动排序时被拖的标签落在哪：插在某个标签前面，或排到组末尾。
-public enum UPaneReorderSlot: Equatable, Sendable {
-    case before(UUID)
-    case end
-}
-
 /// 标签条上实时显示的落位（只在同组排序时有）。
 public struct UPaneReorderPreview: Equatable, Sendable {
     public let groupID: UUID

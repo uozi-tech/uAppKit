@@ -1,0 +1,32 @@
+// 后台登录项 launcher 的模板（来自 uTerm `uTermBackgroundLauncher/main.swift`）。
+//
+// 用法：每个 app 拷一份到自己的 launcher target（如 `uTableBackgroundLauncher/main.swift`），原样使用、不必改名。
+// 它是一个带沙盒的极小 helper，放在 `<App>.app/Contents/Library/LoginItems/<Launcher>.app`，由
+// `SMAppService.loginItem(identifier:)` 注册（见 UControlKit 的 `BackgroundServiceSettings`）。登录时系统拉起它，
+// 它按自己在包里的位置找到主 app，以 `--background --launch-source login-item` 打开后立刻退出。
+//
+// 不链接 uAppKit：helper 要签名、要沙盒，引入整个包不划算。这份文件没有任何 app 专属的东西。
+// 沙盒是硬要求（SMAppService 拒绝注册不带沙盒的 helper），发版前用 `Tools/verify-background-launcher.py` 核。
+
+import AppKit
+
+final class BackgroundLauncherDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let loginItems = Bundle.main.bundleURL.deletingLastPathComponent()
+        let contents = loginItems.deletingLastPathComponent().deletingLastPathComponent()
+        let mainApp = contents.deletingLastPathComponent()
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.arguments = ["--background", "--launch-source", "login-item"]
+        NSWorkspace.shared.openApplication(at: mainApp, configuration: configuration) { _, _ in
+            // 完成回调不保证在主线程，而 NSApp/terminate 是 MainActor 隔离的。
+            Task { @MainActor in NSApp.terminate(nil) }
+        }
+    }
+}
+
+let app = NSApplication.shared
+let delegate = BackgroundLauncherDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.prohibited)
+app.run()

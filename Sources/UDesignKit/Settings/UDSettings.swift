@@ -1,0 +1,690 @@
+import SwiftUI
+
+// 设置页的排版原语：分组卡片范式（对齐系统设置），配色全走 `UD.*`。来自 uTerm 的
+// `SettingsPrimitives.swift`，迁进来时统一加了 `UD` 前缀（`SettingsGroup` → `UDSettingsGroup`，
+// `.settingsDivider(inset:)` → `.udSettingsDivider(inset:)`，余同）。
+//
+// - 页面坐在「设置面」上（`udSettingsSurface`，默认 `UD.bg`），每个分组一张与页面同底色、1pt
+//   `UD.border` 描边的卡片；卡片里不铺灰底。描边是这里唯一的分组边界，属于设计语言 v2 的描边保留例外。
+// - 卡片里一行一项，行间 1pt 淡线，左侧缩进到文字起点（列表行缩进到图标之后）。
+// - 组标题在卡片上方，长说明放卡片下方的脚注，行内说明只放一两句。
+//
+// 用法：
+//     UDSettingsScroll {
+//         UDSettingsPageHeader(title: "通用", subtitle: "启动与更新")
+//         UDSettingsGroup(title: "启动", footer: "…") {
+//             UDSettingsRow(label: "启动时") { … }
+//             UDSettingsListRow(icon: "key", tint: UD.accent, title: "SSH 密钥", subtitle: "3 把") { … }
+//         }
+//     }
+//
+// 设置页嵌在别的底色上（比如 uTable 的设置屏整屏是 `UD.panel`）时，用
+// `.environment(\.udSettingsSurface, UD.panel)` 让卡片跟着页面换底，保持「与页面同底色」。
+//
+// 所有文字参数都是 `String`，按原文显示（不查本地化表）：包内字符串收不进 app 的 String Catalog，
+// 要本地化的文案由调用方本地化好再传进来。
+
+extension EnvironmentValues {
+    /// 设置页所在的面（页面底色，也是分组卡片的填充色）。
+    @Entry public var udSettingsSurface: Color = UD.bg
+}
+
+/// 卡片内各行之间分隔线的左缩进与是否显示，由行自己声明（`udSettingsDivider(inset:)`），分组读取。
+@available(macOS 15.0, iOS 18.0, *)
+extension ContainerValues {
+    /// 这一行上方分隔线的左缩进（相对卡片左缘）。nil = 这一行上方不画分隔线。
+    @Entry public var udSettingsDividerInset: CGFloat? = UDSettingsMetrics.rowInset
+}
+
+@available(macOS 15.0, iOS 18.0, *)
+extension View {
+    /// 改这一行上方分隔线的左缩进；传 nil 不画（如紧跟在上一行之后的二维码展开区）。
+    public func udSettingsDivider(inset: CGFloat?) -> some View {
+        containerValue(\.udSettingsDividerInset, inset)
+    }
+
+    /// 作为上一项的子项：整行右移一级，缩进处放一个「↳」记号（光缩进会像一块空白，
+    /// 竖导轨又像画错的线），分隔线跟着缩进。
+    public func udSettingsNested() -> some View {
+        padding(.leading, UDSettingsMetrics.nestedIndent)
+            .overlay(alignment: .topLeading) {
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(UD.text4)
+                    .frame(width: UDSettingsMetrics.nestedIndent, height: 18)
+                    .padding(.top, 11)
+                    .padding(.leading, UDSettingsMetrics.rowInset)
+                    .accessibilityHidden(true)
+            }
+            .udSettingsDivider(inset: UDSettingsMetrics.rowInset + UDSettingsMetrics.nestedIndent)
+    }
+}
+
+extension View {
+    /// 设置页的卡片底：与页面同底色（`udSettingsSurface`），1pt `UDSettingsLine.card` 描边划出分组边界。
+    public func udSettingsCard() -> some View {
+        modifier(UDSettingsCardModifier())
+    }
+
+    /// 卡片行的统一内边距与最小高。
+    public func udSettingsRowPadding() -> some View {
+        padding(.horizontal, UDSettingsMetrics.rowInset)
+            .padding(.vertical, 8)
+            .frame(minHeight: 44)
+    }
+}
+
+private struct UDSettingsCardModifier: ViewModifier {
+    @Environment(\.udSettingsSurface) private var surface
+
+    func body(content: Content) -> some View {
+        content.background(
+            RoundedRectangle(cornerRadius: UDSettingsMetrics.cardRadius, style: .continuous)
+                .fill(surface)
+                .overlay(RoundedRectangle(cornerRadius: UDSettingsMetrics.cardRadius, style: .continuous)
+                    .strokeBorder(UDSettingsLine.card, lineWidth: 1))
+        )
+    }
+}
+
+/// 设置页里的线。卡片描边直接用全局 `UD.border`，与窗口级的栏间线同一个值；卡片内的行间线再淡一档，
+/// 只起分行提示，不参与层级。
+public enum UDSettingsLine {
+    /// 卡片描边 = 全局描边。
+    public nonisolated static let card = UD.border
+    /// 卡片内行间线。
+    public nonisolated static let row = UD.dyn(.white(0.065), .black(0.045))
+}
+
+/// 设置页的尺寸常量。
+public enum UDSettingsMetrics {
+    /// 卡片内行的左右内边距（也是普通行分隔线的缩进）。
+    public static let rowInset: CGFloat = 14
+    /// 子项缩进。
+    public static let nestedIndent: CGFloat = 24
+    /// 列表行图标方块边长。
+    public static let listIcon: CGFloat = 28
+    /// 列表行分隔线缩进到文字起点：内边距 + 图标 + 间距。
+    public static let listTextInset: CGFloat = rowInset + listIcon + 12
+    /// 内容列最大宽：宽窗不把控件拉到天边。
+    public static let contentMaxWidth: CGFloat = 640
+    public static let cardRadius: CGFloat = 10
+    /// 分组之间的间距。
+    public static let groupSpacing: CGFloat = 24
+}
+
+/// 状态色调。
+public enum UDSettingsTone: Sendable, Equatable {
+    /// 次要灰：未开启 / 未登录 / 空闲等待。
+    case muted
+    /// 正文次级色：停着但不算异常。
+    case neutral
+    /// 主色：进行中 / 正常工作。
+    case active
+    /// 橙：出错但可恢复。
+    case warning
+    case success
+    case danger
+
+    @MainActor public var color: Color {
+        switch self {
+        case .muted:   return UD.text3
+        case .neutral: return UD.text2
+        case .active:  return UD.accent
+        case .warning: return UD.caution
+        case .success: return UD.success
+        case .danger:  return UD.danger
+        }
+    }
+}
+
+/// 行说明的排版：普通说明文字，或可选中的等宽文本（路径、地址这类要复制的值）。
+public enum UDSettingsHintStyle: Sendable {
+    case text
+    case monospaced
+}
+
+// MARK: - 页
+
+/// 设置页容器：设置面底色、内容列 maxWidth 640 左对齐、顶部 24 / 左右 32 / 底 32，分组间距 24。
+public struct UDSettingsScroll<Content: View>: View {
+    /// nil = 用 `udSettingsSurface`。给了就同时把它设成子树的设置面（卡片跟着换底）。
+    private let background: Color?
+    @ViewBuilder private let content: () -> Content
+    @Environment(\.udSettingsSurface) private var surface
+
+    public init(background: Color? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.background = background
+        self.content = content
+    }
+
+    public var body: some View {
+        let fill = background ?? surface
+        ScrollView {
+            VStack(alignment: .leading, spacing: UDSettingsMetrics.groupSpacing) {
+                content()
+            }
+            .frame(maxWidth: UDSettingsMetrics.contentMaxWidth, alignment: .leading)
+            .padding(.top, 24)
+            .padding(.horizontal, 32)
+            .padding(.bottom, 32)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(fill)
+        .environment(\.udSettingsSurface, fill)
+    }
+}
+
+/// 页头：20pt 标题 + 一句话说明这页管什么。
+public struct UDSettingsPageHeader: View {
+    private let title: String
+    private let subtitle: String?
+
+    public init(title: String, subtitle: String? = nil) {
+        self.title = title
+        self.subtitle = subtitle
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(verbatim: title)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(UD.text)
+                .accessibilityAddTraits(.isHeader)
+            if let subtitle {
+                Text(verbatim: subtitle)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(UD.text3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 2)
+        .padding(.bottom, -4)
+    }
+}
+
+/// 分组卡片：标题在上、同底色 + 1pt 描边的圆角卡片、行间自动插分隔线、脚注在下。
+///
+/// 调用点照旧写 `UDSettingsGroup(title:) { UDSettingsRow… }`；`if` 不成立的行不占位也不多画分隔线
+/// （按子视图拆分，见 `Group(subviews:)`）。
+@available(macOS 15.0, iOS 18.0, *)
+public struct UDSettingsGroup<Content: View>: View {
+    private let title: String?
+    private let footer: String?
+    @ViewBuilder private let content: () -> Content
+
+    public init(title: String?, footer: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        self.footer = footer
+        self.content = content
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let title {
+                Text(verbatim: title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(UD.text)
+                    .padding(.horizontal, 2)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Group(subviews: content()) { subviews in
+                if !subviews.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(subviews.enumerated()), id: \.element.id) { index, subview in
+                            if index > 0, let inset = subview.containerValues.udSettingsDividerInset {
+                                Rectangle()
+                                    .fill(UDSettingsLine.row)
+                                    .frame(height: 1)
+                                    .padding(.leading, inset)
+                            }
+                            subview
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .udSettingsCard()
+                }
+            }
+            if let footer {
+                UDSettingsFootnote(footer)
+            }
+        }
+    }
+}
+
+/// 卡片下方的脚注（11.5pt `UD.text3`）。
+public struct UDSettingsFootnote: View {
+    private let text: String
+
+    public init(_ text: String) { self.text = text }
+
+    public var body: some View {
+        Text(verbatim: text)
+            .font(.system(size: 11.5))
+            .foregroundStyle(UD.text3)
+            .lineSpacing(1.5)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 行
+
+/// 卡片行：左侧标签（可带一两句说明、可带图标），右侧控件垂直居中。最小高 44。
+public struct UDSettingsRow<Trailing: View>: View {
+    public typealias HintStyle = UDSettingsHintStyle
+
+    private let label: String
+    private let hint: String?
+    private let icon: String?
+    private let hintStyle: HintStyle
+    @ViewBuilder private let trailing: () -> Trailing
+
+    public init(label: String, hint: String? = nil, icon: String? = nil, hintStyle: HintStyle = .text,
+                @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.label = label
+        self.hint = hint
+        self.icon = icon
+        self.hintStyle = hintStyle
+        self.trailing = trailing
+    }
+
+    public var body: some View {
+        HStack(alignment: .center, spacing: icon == nil ? 16 : 12) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 14))
+                    .foregroundStyle(UD.text2)
+                    .frame(width: 20)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(verbatim: label)
+                    .font(.system(size: 13))
+                    .foregroundStyle(UD.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let hint {
+                    hintText(hint)
+                }
+            }
+            Spacer(minLength: 12)
+            // 把行 label 关联到右侧控件——UDToggle / UDSegmented / Slider 等
+            // 无内建 label，VoiceOver 借此念出「<标签> 开关 / 选择」而非孤立的「开/关」。
+            // 右侧先拿到自己的理想宽度（layoutPriority），长说明再折行；否则「查看事件…」会被挤成竖排。
+            trailing()
+                .layoutPriority(1)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: label))
+        }
+        .udSettingsRowPadding()
+    }
+
+    @ViewBuilder
+    private func hintText(_ hint: String) -> some View {
+        switch hintStyle {
+        case .text:
+            Text(verbatim: hint)
+                .font(.system(size: 11.5))
+                .foregroundStyle(UD.text3)
+                .lineSpacing(1.5)
+                .fixedSize(horizontal: false, vertical: true)
+        case .monospaced:
+            Text(verbatim: hint)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(UD.text3)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// 列表行：28pt 圆角方块图标（tint 14% 底 + tint 符号）、主副文案、右侧状态与动作。
+/// 分隔线缩进到文字起点。用于设备、技能目标、管理窗口入口这类「一项一个对象」的列表。
+@available(macOS 15.0, iOS 18.0, *)
+public struct UDSettingsListRow<Trailing: View>: View {
+    private let icon: UDSettingsListIcon
+    private let title: String
+    private let subtitle: String?
+    private let subtitleStyle: UDSettingsHintStyle
+    @ViewBuilder private let trailing: () -> Trailing
+
+    public init(icon: String, tint: Color, title: String, subtitle: String? = nil,
+                subtitleStyle: UDSettingsHintStyle = .text,
+                @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.icon = .symbol(icon, tint)
+        self.title = title
+        self.subtitle = subtitle
+        self.subtitleStyle = subtitleStyle
+        self.trailing = trailing
+    }
+
+    public init(monogram: String, tint: Color, title: String, subtitle: String? = nil,
+                @ViewBuilder trailing: @escaping () -> Trailing) {
+        self.icon = .monogram(monogram, tint)
+        self.title = title
+        self.subtitle = subtitle
+        self.subtitleStyle = .text
+        self.trailing = trailing
+    }
+
+    public var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            icon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                    .font(.system(size: 13))
+                    .foregroundStyle(UD.text)
+                    .lineLimit(1)
+                if let subtitle {
+                    switch subtitleStyle {
+                    case .text:
+                        Text(verbatim: subtitle)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(UD.text3)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    case .monospaced:
+                        Text(verbatim: subtitle)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(UD.text3)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            Spacer(minLength: 12)
+            // 右侧是按钮 / 菜单 / 开关，按自身宽度排，不让长副文案把「显示二维码」挤成竖排折行。
+            trailing()
+                .fixedSize(horizontal: true, vertical: false)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Text(verbatim: title))
+        }
+        .padding(.horizontal, UDSettingsMetrics.rowInset)
+        .padding(.vertical, 9)
+        .frame(minHeight: 50)
+        .udSettingsDivider(inset: UDSettingsMetrics.listTextInset)
+    }
+}
+
+/// 列表行左侧的圆角方块：SF Symbol 或首字母。
+public enum UDSettingsListIcon: View {
+    case symbol(String, Color)
+    case monogram(String, Color)
+
+    public var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+        switch self {
+        case .symbol(let name, let tint):
+            Image(systemName: name)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: UDSettingsMetrics.listIcon, height: UDSettingsMetrics.listIcon)
+                .background(shape.fill(tint.opacity(0.14)))
+                .accessibilityHidden(true)
+        case .monogram(let text, let tint):
+            Text(verbatim: text)
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(tint)
+                .frame(width: UDSettingsMetrics.listIcon, height: UDSettingsMetrics.listIcon)
+                .background(shape.fill(tint.opacity(0.14)))
+                .accessibilityHidden(true)
+        }
+    }
+}
+
+/// 卡片内的空态：居中符号 + 一句话。
+public struct UDSettingsEmptyRow: View {
+    private let symbol: String
+    private let text: String
+
+    public init(symbol: String, text: String) {
+        self.symbol = symbol
+        self.text = text
+    }
+
+    public var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 20, weight: .light))
+                .foregroundStyle(UD.text4)
+            Text(verbatim: text)
+                .font(.system(size: 12))
+                .foregroundStyle(UD.text3)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, UDSettingsMetrics.rowInset)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, minHeight: 72)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 卡片内居中展开的块（二维码、预览之类）。上方不画分隔线时调用方再加 `.udSettingsDivider(inset: nil)`。
+public struct UDSettingsCenteredBlock<Content: View>: View {
+    private let caption: String?
+    @ViewBuilder private let content: () -> Content
+
+    public init(caption: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.caption = caption
+        self.content = content
+    }
+
+    public var body: some View {
+        VStack(spacing: 10) {
+            content()
+            if let caption {
+                Text(verbatim: caption)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(UD.text3)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, UDSettingsMetrics.rowInset)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - 状态与提示
+
+/// 状态：符号（或圆点）+ 文字，12.5pt。
+public struct UDSettingsStatusLabel: View {
+    private let symbol: String?
+    private let color: Color
+    private let text: String
+
+    public init(symbol: String?, tone: UDSettingsTone, text: String) {
+        self.symbol = symbol
+        self.color = tone.color
+        self.text = text
+    }
+
+    public init(symbol: String?, color: Color, text: String) {
+        self.symbol = symbol
+        self.color = color
+        self.text = text
+    }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 12))
+                    .foregroundStyle(color)
+            } else {
+                Circle().fill(color).frame(width: 7, height: 7)
+            }
+            Text(verbatim: text)
+                .font(.system(size: 12.5))
+                .foregroundStyle(UD.text2)
+                .lineLimit(1)
+        }
+        .fixedSize()
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 卡片里的一行提示（错误、待批准、未注册……）：带色调的符号 + 文字，占一行。
+public struct UDSettingsInlineNote: View {
+    private let tone: UDSettingsTone
+    private let text: String
+
+    public init(tone: UDSettingsTone, text: String) {
+        self.tone = tone
+        self.text = text
+    }
+
+    public var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(tone.color)
+            Text(verbatim: text)
+                .font(.system(size: 11.5))
+                .foregroundStyle(tone == .muted || tone == .neutral ? UD.text3 : tone.color)
+                .lineSpacing(1.5)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, UDSettingsMetrics.rowInset)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var symbol: String {
+        switch tone {
+        case .danger: return "xmark.octagon.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .active, .neutral, .muted: return "info.circle"
+        }
+    }
+}
+
+// MARK: - 控件
+
+/// 设置行里的整数输入框。外观对齐 DesignKit 输入框，用语义色 token（随全局浅 / 深外观变化），
+/// focus 时加 accent 描边。`minValue` / `maxValue` 在提交时钳值，`suffix` 可在框右侧附单位。
+public struct UDSettingsNumberField: View {
+    @Binding private var value: Int
+    private let width: CGFloat
+    private let minValue: Int
+    private let maxValue: Int
+    private let suffix: String?
+
+    @FocusState private var focused: Bool
+
+    public init(value: Binding<Int>, width: CGFloat = 80, minValue: Int = 0, maxValue: Int = .max,
+                suffix: String? = nil) {
+        _value = value
+        self.width = width
+        self.minValue = minValue
+        self.maxValue = maxValue
+        self.suffix = suffix
+    }
+
+    public var body: some View {
+        HStack(spacing: 8) {
+            TextField("", value: Binding(
+                get: { value },
+                set: { value = min(maxValue, max(minValue, $0)) }
+            ), format: .number)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .multilineTextAlignment(.trailing)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundStyle(UD.text)
+                .padding(.horizontal, 10)
+                .frame(width: width, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(UD.inputBg))
+                .overlay(RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(focused ? UD.accent : .clear, lineWidth: 1))
+                .animation(.easeOut(duration: 0.15), value: focused)
+                .accessibilityValue(Text(verbatim: suffix.map { "\(value) \($0)" } ?? "\(value)"))
+            if let suffix {
+                Text(verbatim: suffix)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(UD.text3)
+            }
+        }
+    }
+}
+
+#if os(macOS)
+/// 下拉选择：选项多或文案长时替代一排分段控件（下拉比一排灰段轻）。macOS 专用（`UDDropdown`）。
+public struct UDSettingsPicker<Value: Hashable>: View {
+    @Binding private var selection: Value
+    private let options: [(value: Value, label: String)]
+    private let menuWidth: CGFloat
+
+    public init(selection: Binding<Value>, options: [(value: Value, label: String)], menuWidth: CGFloat = 200) {
+        _selection = selection
+        self.options = options
+        self.menuWidth = menuWidth
+    }
+
+    private var currentLabel: String {
+        options.first { $0.value == selection }?.label ?? ""
+    }
+
+    public var body: some View {
+        UDDropdown(anchor: .trailing) { open in
+            HStack(spacing: 8) {
+                Text(verbatim: currentLabel)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(UD.text)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(UD.text3)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(open ? UD.button2Hover : UD.button2))
+            .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        } content: {
+            UDMenu(width: menuWidth, items: options.map { option in
+                UDMenuItem(label: option.label, active: option.value == selection) {
+                    selection = option.value
+                }
+            })
+        }
+        .fixedSize()
+        .accessibilityValue(Text(verbatim: currentLabel))
+    }
+}
+
+/// 行尾的「更多」菜单：把次要 / 危险动作（移除、撤销、打开系统设置）收进去，不和普通按钮并排挤。
+/// macOS 专用（`UDDropdown`）。
+public struct UDSettingsMoreMenu: View {
+    private let items: [UDMenuItem]
+    private let help: String
+
+    public init(items: [UDMenuItem], help: String = "更多操作") {
+        self.items = items
+        self.help = help
+    }
+
+    public var body: some View {
+        UDDropdown(anchor: .trailing) { open in
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(open ? UD.text : UD.text2)
+                .frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(open ? UD.button2Hover : UD.button2))
+                .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        } content: {
+            UDMenu(width: 200, items: items)
+        }
+        .fixedSize()
+        .help(Text(verbatim: help))
+        .accessibilityLabel(Text(verbatim: help))
+    }
+}
+#endif

@@ -4,19 +4,33 @@ uTable、uTerm 与 uGit 共用的包，一个 SwiftPM 包多个产品。
 
 | 产品 | 用途 | 平台 |
 |---|---|---|
-| `UDesignKit` | 设计语言 token 与 UD 组件 | macOS 14+ / iOS 18+ |
-| `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`、带位移死区的拖拽源 `.dragSource`） | macOS 14+ |
+| `UDesignKit` | 设计语言 token 与 UD 组件；设置页原语 `UDSettings*`（分组卡片、行、列表行、行内提示等，来自 uTerm 的 `SettingsPrimitives`，需 macOS 15+） | macOS 14+ / iOS 18+ |
+| `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`、带位移死区的拖拽源 `.dragSource`）；跨屏拖窗口修正（`WindowMoveBehavior`、`TitlebarDragRegion`） | macOS 14+ |
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
 | `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
 | `UPaneGroups` | 「分屏里装标签」的 VSCode 编辑组（模型 + 区域视图） | 模型 macOS/iOS；视图 macOS 14+ |
-| `UControlKit` | 本机 IPC 外部 agent 通道核心（Unix socket 服务端、请求分发与门禁、开关设置） | macOS 14+ |
+| `UControlKit` | 本机 IPC 外部 agent 通道核心（Unix socket 服务端、请求分发与门禁、开关设置）；AI 技能安装（`SkillCatalog` / `SkillInstaller` / `ClientLinkInstaller` / `SkillManagerModel` / `SkillReconciler`）；后台模式（`BackgroundServiceSettings` / `BackgroundLaunchMode` / `BackgroundWindowController` / `BackgroundLifecycleCommands`） | macOS 14+ |
+| `UControlKitUI` | 「命令行与技能」设置页的三段区块 `UControlSettingsSections`，文案经 `CLISettingsCopy` 传入 | macOS 15+ |
 | `AgentProviders` | 三个 app 共享的 AI provider：SwiftData `LLMProvider`（iCloud 容器 `iCloud.com.uozi.shared`）、共享钥匙串组里的 API Key、模型目录 Source、编辑草稿与测试连接、旧数据导入器 | macOS 14+ / iOS 18+（编辑表单仅 macOS） |
 | `AgentRuntime` | 内置 agent 运行时：工具协议与注册表、审批策略 / 审批门 / 审批队列、agent 循环 `AgentRuntimeSession`、JSONL 审计、会话持久化 codec 与 `AgentChatStore`、`/` 命令匹配、Anthropic / OpenAI 兼容 provider | macOS 14+ / iOS 18+ |
 | `AgentRuntimeUI` | `UDAgentPanel`：把会话与审批队列绑到 UDesignKit 的 agent 视图（`UDAgentTranscript` / `UDAgentApprovalCard` / `UDSlashMenu` / `UDAgentEmptyState` / `UDAgentToolTrace`） | 行映射 macOS/iOS；面板 macOS 14+ |
 
 内置 agent 怎么接（工具、上下文、审批策略、持久化、provider、entitlements）见
 `docs/agent-runtime.md`。
+
+`Tools/` 不是 Swift 产品，是各 app vendor 的模板与客户端公共代码：
+
+| 路径 | 用途 |
+|---|---|
+| `Tools/uctl/uctl_core.py` | 命令行客户端（`utablectl` / `utermctl` / …）的公共区 canonical 版；`sync-core.sh <ctl>` 回写，`selftest.py` 离线自测 |
+| `Tools/xcode/copy-cli-and-skills.sh` | Run Script「Copy <ctl> CLI and Skills」：`CTL SLUG [--resources-copy]`；自测 `build-phases.test.sh` |
+| `Tools/xcode/embed-login-item.sh` | Run Script「Embed Background Login Item」：`LAUNCHER` |
+| `Tools/launcher/main.swift.template` | 后台登录项 launcher（沙盒 helper，不链本包） |
+| `Tools/verify-background-launcher.py` | 发版前核 launcher 签名与沙盒 |
+
+vendor 规则：app 把模板拷到自己仓库（build phase 脚本放 `scripts/build-phases/`），pbxproj 的
+shellScript 只调它；改模板先改这里、再拷回各 app，不在 app 里分叉。
 
 ## 为什么单独一个仓库
 

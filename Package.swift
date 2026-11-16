@@ -28,6 +28,7 @@ let package = Package(
         .library(name: "AgentProviders", targets: ["AgentProviders"]),
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
         .library(name: "AgentRuntimeUI", targets: ["AgentRuntimeUI"]),
+        .library(name: "UControlKitUI", targets: ["UControlKitUI"]),
     ],
     dependencies: [
         // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
@@ -53,12 +54,16 @@ let package = Package(
         // 按下激活走 UAppKitBridge），模型层与投放区归类在 `#if` 之外，纯逻辑
         // 单测在任何平台都能跑。
         .target(name: "UPaneGroups", dependencies: ["UPaneTree", "UDesignKit", "UAppKitBridge"]),
-        // 本机 IPC 的外部 agent 通道核心：Unix socket 服务端、请求分发与门禁、开关设置。
+        // 本机 IPC 的外部 agent 通道核心：Unix socket 服务端、请求分发与门禁、开关设置；
+        // 以及 AI 技能安装（链到 app 包内）与后台模式（登录项、CLI 按需启动、窗口恢复）。
         // 以前 uTerm / uTable 各有一份同源实现（出自 uService 的 `ServiceControlServer`），
         // 这里以 uTerm 版为基准泛型化。macOS 专用，源码整体用 `#if os(macOS)` 包住，
         // 理由同 UAppKitBridge。Swift 6 语言模式；包内没有默认 MainActor 隔离，
         // 每个类型都显式标注了隔离。
         .target(name: "UControlKit"),
+        // 「命令行与技能」设置页的三段区块（接口 / 后台服务 / AI 技能），以 uTerm 的 CLISettingsView 为基准。
+        // macOS 专用；文案全部由调用方经 `CLISettingsCopy` 传入（包内字符串收不进 app 的 String Catalog）。
+        .target(name: "UControlKitUI", dependencies: ["UControlKit", "UDesignKit"]),
         // 原先是 swift-tools-version 5.10，即 Swift 5 语言模式。这里统一到 6.2
         // 是为了 UDesignKit，不该顺手把 AgentKit 拖进 Swift 6 严格并发——
         // 那是一次独立的迁移，要单独做、单独验。
@@ -100,6 +105,7 @@ let package = Package(
         .testTarget(name: "UPaneTreeTests", dependencies: ["UPaneTree"]),
         .testTarget(name: "UPaneGroupsTests", dependencies: ["UPaneGroups", "UPaneTree", "UAppKitBridge"]),
         .testTarget(name: "UControlKitTests", dependencies: ["UControlKit"]),
+        .testTarget(name: "UControlKitUITests", dependencies: ["UControlKitUI", "UControlKit"]),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"],
                     swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "AgentProvidersTests", dependencies: ["AgentProviders", "AgentKit"]),
