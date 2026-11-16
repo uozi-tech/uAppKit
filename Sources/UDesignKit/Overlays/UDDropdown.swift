@@ -65,6 +65,12 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
                 if let t = lastClosedAt, Date().timeIntervalSince(t) < 0.25 { return }
                 open = true
             }
+            // 触发器是 `onTapGesture`，对辅助功能来说原本只是一组静态文字：合成一个按钮元素
+            // （标签取触发器里的文字），默认动作打开浮层。VoiceOver 与进程内
+            // 界面测试（AX `accessibilityPerformPress`）都经这条路按得动。
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { open = true }
             .anchoredPanel(isPresented: presented, gap: gap,
                            alignment: anchor == .leading ? .leading : .trailing,
                            becomesKey: becomesKey) { dismiss in
