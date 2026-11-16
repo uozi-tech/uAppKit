@@ -99,6 +99,14 @@ xcodebuild -workspace path/to/dev.xcworkspace -scheme uTable ...
 > `<workspace>/uAppKit/Sources/...`，没走覆盖时是
 > `DerivedData/SourcePackages/checkouts/uAppKit/Sources/...`。
 
+## 源码不兼容变更
+
+- **1.21.0** `UD.rowSelected` 从固定蓝的 `nonisolated static let` 改成跟随强调色的
+  `@MainActor static var`（与 `UD.accent*` 同一套缓存调色板，深 14% / 日 12% 不变）。
+  nonisolated 上下文（Swift 5 语言模式下的默认参数、存储属性初值等）读它会编译失败，
+  改用新增的 `UD.rowSelectedDefault`（固定蓝、深浅动态，即 1.21.0 前的原值）。
+  没有强调色切换器的 app 两者运行时等价。
+
 ## 语言模式
 
 `AgentProviders` / `AgentRuntime` / `AgentRuntimeUI` 是 Swift 6 语言模式，与 `UControlKit` 一样没有默认

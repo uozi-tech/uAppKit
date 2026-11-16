@@ -140,7 +140,7 @@ public enum UD {
     // MARK: - 强调 Accent（可切换；见 AccentColor / AccentState。getter 同步读 selected →
     // SwiftUI body 求值期访问被 Observation 追踪 → 切色全局自动重渲染。默认蓝 = 原手调值。）
     //
-    // 每个强调色的 9 个槽位在进程启动时一次性建好并缓存，getter 只查表、返回**同一个**
+    // 每个强调色的 10 个槽位在进程启动时一次性建好并缓存，getter 只查表、返回**同一个**
     // `Color` 实例。这不是省几次构造那么简单：`Color` 的 `==` 落到底层 `NSColor` 的
     // **实例同一性**上（同一实例 true / 值相同的两个实例 false），getter 每次新建就意味着
     // 任何把 accent 存进 view value 的视图「这一帧的值永远不等于上一帧」，SwiftUI
@@ -151,12 +151,14 @@ public enum UD {
 
     /// 一个强调色的全部槽位，深浅仍由各 `Color` 自己的动态 provider 决定。
     ///
-    /// 用 `final class` 而不是 `struct`：查表结果每读一次就要复制一遍，9 个 `Color`
-    /// 字段意味着 7 对 retain/release；引用类型只需一次。全部字段 `let` + `Color`
+    /// 用 `final class` 而不是 `struct`：查表结果每读一次就要复制一遍，10 个 `Color`
+    /// 字段意味着 10 对 retain/release；引用类型只需一次。全部字段 `let` + `Color`
     /// 是 `Sendable`，故无需 `@unchecked`。
-    private final class AccentPalette: Sendable {
+    final class AccentPalette: Sendable {
         let accent: Color, hover: Color, ink: Color, soft: Color, pressed: Color
         let tint: Color, tintHover: Color, tintPressed: Color, tintDisabled: Color
+        /// 导航类选中行底（见下方「行态」段的 `rowSelected`）。
+        let rowSelected: Color
 
         init(_ a: AccentColor) {
             accent  = UD.dyn(a.accentSpec(dark: true),  a.accentSpec(dark: false))
@@ -173,6 +175,9 @@ public enum UD {
             tintHover = tinted(a.hoverSpec, 0.22)
             tintPressed = tinted(a.pressedSpec, 0.19)
             tintDisabled = tinted(a.accentSpec, 0.07)
+            // 选中行底：深 14% / 日 12%（调色板 sel），与 `tint` 的深浅同 14% 刻意不同。
+            rowSelected = UD.dyn(a.accentSpec(dark: true).withAlpha(0.14),
+                                 a.accentSpec(dark: false).withAlpha(0.12))
         }
     }
 
@@ -183,9 +188,15 @@ public enum UD {
     /// 表由 `allCases` 建，每个 case 必有条目；这个兜底只是为了不写 `!`。
     private nonisolated static let accentPaletteFallback = AccentPalette(.blue)
 
+    /// 查表本身：同一强调色永远返回同一个 `AccentPalette`（因而同一批 `Color` 实例）。
+    /// 与 `AccentState.shared` 解耦，单测可直接按强调色查，不必改开发机上的真实选色。
+    nonisolated static func accentPalette(for accent: AccentColor) -> AccentPalette {
+        accentPalettes[accent] ?? accentPaletteFallback
+    }
+
     /// 同步读 `selected` —— Observation 依赖照旧在此注册，切换强调色仍全局生效。
     @MainActor private static var accentPalette: AccentPalette {
-        accentPalettes[AccentState.shared.selected] ?? accentPaletteFallback
+        accentPalette(for: AccentState.shared.selected)
     }
 
     @MainActor public static var accent: Color { accentPalette.accent }
@@ -274,10 +285,23 @@ public enum UD {
     // MARK: - 行态 Row / Tab（uTable.dc.html v2 --u-row-hover / --u-row-sel / --u-tab-active）
     // rowHover = 中性 hover（日 黑4%）。导航类选中态（列表行 / pill / ⌘K 行 / 底部导航）
     // = accent 填充（深 14% / 日 12%，调色板 sel）+ accent 文字图标（清单 §4「驾驶舱」样式），
-    // 无 accent 描边；uTable 无强调色切换器，故用 nonisolated `accentDefault` 派生（运行时等价 `accent`）。
+    // 无 accent 描边。选中底与文字同属强调色：1.21.0 起 `rowSelected` 跟随 `AccentState`，
+    // 与 `UD.accent*` 一样从缓存的 `AccentPalette` 取（同一强调色返回同一实例，理由见上）。
     public nonisolated static let rowHover    = dyn(.white(0.035), .black(0.04))
-    public nonisolated static let rowSelected = dyn(AccentColor.blue.accentSpec(dark: true).withAlpha(0.14),
-                                             AccentColor.blue.accentSpec(dark: false).withAlpha(0.12))
+
+    /// 导航类选中行底，跟随用户选的强调色（深 14% / 日 12%）。
+    /// 1.21.0 前是固定蓝的 `nonisolated static let`；nonisolated 上下文请改用 `rowSelectedDefault`。
+    @MainActor public static var rowSelected: Color { accentPalette.rowSelected }
+
+    /// Nonisolated default row-selection fill (fixed blue, still dark/light dynamic;
+    /// 14% dark / 12% light) for use as a **default parameter / stored-property value**
+    /// in nonisolated contexts — e.g. Swift 5 language mode clients such as uTable,
+    /// where default-argument expressions are nonisolated and can't reference the
+    /// `@MainActor` `rowSelected` getter. This is exactly the value `rowSelected` had
+    /// before 1.21.0; apps without an accent switcher see no difference at runtime.
+    /// Views that should follow the user's accent must read `UD.rowSelected` instead.
+    public nonisolated static let rowSelectedDefault = dyn(AccentColor.blue.accentSpec(dark: true).withAlpha(0.14),
+                                                    AccentColor.blue.accentSpec(dark: false).withAlpha(0.12))
     /// 激活 Tab 底（日间 = panelHi；暗夜保持与编辑器正文同底的无缝拼接 = bg 深色）。
     public nonisolated static let tabActive   = dyn(.hex(0x000000), .hex(0xF0F0F0))
 
