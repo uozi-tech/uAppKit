@@ -25,6 +25,9 @@ let package = Package(
         .library(name: "UPaneTree", targets: ["UPaneTree"]),
         .library(name: "UPaneGroups", targets: ["UPaneGroups"]),
         .library(name: "UControlKit", targets: ["UControlKit"]),
+        .library(name: "AgentProviders", targets: ["AgentProviders"]),
+        .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
+        .library(name: "AgentRuntimeUI", targets: ["AgentRuntimeUI"]),
     ],
     dependencies: [
         // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
@@ -60,6 +63,16 @@ let package = Package(
         // 是为了 UDesignKit，不该顺手把 AgentKit 拖进 Swift 6 严格并发——
         // 那是一次独立的迁移，要单独做、单独验。
         .target(name: "AgentKit", swiftSettings: [.swiftLanguageMode(.v5)]),
+        // 三个 app 共享的 AI provider：SwiftData `LLMProvider`（共享 iCloud 容器
+        // `iCloud.com.uozi.shared`）、共享钥匙串组里的 API Key、旧数据导入器。
+        // Swift 6 语言模式；与 UControlKit 一样没有默认 MainActor 隔离，每个类型显式标注。
+        .target(name: "AgentProviders", dependencies: ["AgentKit", "UDesignKit"]),
+        // 内置 agent 运行时：工具协议与注册表、审批、agent 循环、会话 codec、slash 命令。
+        // 以 uTable 的 `Core/Agent` 为蓝本泛型化。Swift 6，显式隔离。
+        .target(name: "AgentRuntime", dependencies: ["AgentKit", "AgentProviders"]),
+        // `UDAgentPanel`：把 `AgentRuntimeSession` / `AgentApprovalQueue` 绑到 UDesignKit 的
+        // 纯展示 agent 视图上。
+        .target(name: "AgentRuntimeUI", dependencies: ["AgentRuntime", "AgentKit", "UDesignKit"]),
         // 同上：原先也是 5.10。
         .target(
             name: "USSHKit",
@@ -89,6 +102,9 @@ let package = Package(
         .testTarget(name: "UControlKitTests", dependencies: ["UControlKit"]),
         .testTarget(name: "AgentKitTests", dependencies: ["AgentKit"],
                     swiftSettings: [.swiftLanguageMode(.v5)]),
+        .testTarget(name: "AgentProvidersTests", dependencies: ["AgentProviders", "AgentKit"]),
+        .testTarget(name: "AgentRuntimeTests", dependencies: ["AgentRuntime", "AgentProviders", "AgentKit"]),
+        .testTarget(name: "AgentRuntimeUITests", dependencies: ["AgentRuntimeUI", "AgentRuntime", "UDesignKit"]),
         .testTarget(
             name: "USSHKitTests",
             dependencies: [

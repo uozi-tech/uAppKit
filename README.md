@@ -1,6 +1,6 @@
 # uAppKit
 
-uTable 与 uTerm 共用的包，一个 SwiftPM 包多个产品。
+uTable、uTerm 与 uGit 共用的包，一个 SwiftPM 包多个产品。
 
 | 产品 | 用途 | 平台 |
 |---|---|---|
@@ -11,6 +11,12 @@ uTable 与 uTerm 共用的包，一个 SwiftPM 包多个产品。
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
 | `UPaneGroups` | 「分屏里装标签」的 VSCode 编辑组（模型 + 区域视图） | 模型 macOS/iOS；视图 macOS 14+ |
 | `UControlKit` | 本机 IPC 外部 agent 通道核心（Unix socket 服务端、请求分发与门禁、开关设置） | macOS 14+ |
+| `AgentProviders` | 三个 app 共享的 AI provider：SwiftData `LLMProvider`（iCloud 容器 `iCloud.com.uozi.shared`）、共享钥匙串组里的 API Key、模型目录 Source、编辑草稿与测试连接、旧数据导入器 | macOS 14+ / iOS 18+（编辑表单仅 macOS） |
+| `AgentRuntime` | 内置 agent 运行时：工具协议与注册表、审批策略 / 审批门 / 审批队列、agent 循环 `AgentRuntimeSession`、JSONL 审计、会话持久化 codec 与 `AgentChatStore`、`/` 命令匹配、Anthropic / OpenAI 兼容 provider | macOS 14+ / iOS 18+ |
+| `AgentRuntimeUI` | `UDAgentPanel`：把会话与审批队列绑到 UDesignKit 的 agent 视图（`UDAgentTranscript` / `UDAgentApprovalCard` / `UDSlashMenu` / `UDAgentEmptyState` / `UDAgentToolTrace`） | 行映射 macOS/iOS；面板 macOS 14+ |
+
+内置 agent 怎么接（工具、上下文、审批策略、持久化、provider、entitlements）见
+`docs/agent-runtime.md`。
 
 ## 为什么单独一个仓库
 
@@ -80,6 +86,9 @@ xcodebuild -workspace path/to/dev.xcworkspace -scheme uTable ...
 > `DerivedData/SourcePackages/checkouts/uAppKit/Sources/...`。
 
 ## 语言模式
+
+`AgentProviders` / `AgentRuntime` / `AgentRuntimeUI` 是 Swift 6 语言模式，与 `UControlKit` 一样没有默认
+MainActor 隔离，每个类型都显式标注了隔离（`@MainActor` / actor / `Sendable` 值类型）。
 
 包整体是 swift-tools-version 6.2（Swift 6 语言模式），但 `AgentKit` 显式钉在
 `.swiftLanguageMode(.v5)` —— 它迁进来之前是 tools-version 5.10。把它拖进 Swift 6
