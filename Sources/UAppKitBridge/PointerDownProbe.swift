@@ -24,6 +24,14 @@ import SwiftUI
 /// 典型症状：分屏工作区里点进某一格的表格 / 终端，"当前分区" 不跟着变，随后的
 /// 开表、分屏、关闭都作用在上一个分区上。
 ///
+/// macOS 27（实测 27.2）的变化：SwiftUI 的点击改由窗口的手势环境驱动
+/// （`NSWindow.sendEvent` 在命中派发前先把鼠标事件交给手势系统），`NSHostingView`
+/// 根上也多了一个私有的 `FocusTapGestureRecognizer`（`buttonMask` 为 0，不认鼠标键，
+/// 与点击手势无关）。于是只要 AppKit 子视图让 mouseUp 走正常派发，祖先上的点击手势
+/// 在 27 上会触发；但 `NSTableView` / `NSTextView` / 终端视图在 `mouseDown` 里自己跑
+/// 跟踪循环、直接取走 mouseUp，手势仍然等不到结束——上表的「手势失效」在这些真实
+/// 内容上依旧成立，本包在所有支持的系统上都还需要。`GesturePremiseTests` 钉着这两条。
+///
 /// 本包用 `NSEvent` 本地监视器**旁观** `leftMouseDown`：不消费事件、`hitTest`
 /// 返回 `nil`（对命中测试完全透明），因此 AppKit 内容的选中、拖拽、first
 /// responder 全部照常工作，同时 SwiftUI 侧也能知道"这块区域被按下了"。
