@@ -15,6 +15,8 @@ public struct UDAgentPanelText: Sendable {
     public var capabilities: [UDAgentEmptyState.Capability]
     public var suggestions: [String]
     public var emptyActionTitle: String?
+    /// 空状态图标块里的 SF Symbol（缺省 `sparkles`；uGit 用消息气泡与标题栏开关统一）。
+    public var emptySystemImage: String
 
     public init(
         placeholder: String = "描述目标，交给 Agent 处理…",
@@ -22,7 +24,8 @@ public struct UDAgentPanelText: Sendable {
         emptyMessage: String = "描述目标即可。需要改动的操作会先请你确认。",
         capabilities: [UDAgentEmptyState.Capability] = [],
         suggestions: [String] = [],
-        emptyActionTitle: String? = nil
+        emptyActionTitle: String? = nil,
+        emptySystemImage: String = "sparkles"
     ) {
         self.placeholder = placeholder
         self.emptyTitle = emptyTitle
@@ -30,6 +33,7 @@ public struct UDAgentPanelText: Sendable {
         self.capabilities = capabilities
         self.suggestions = suggestions
         self.emptyActionTitle = emptyActionTitle
+        self.emptySystemImage = emptySystemImage
     }
 }
 
@@ -95,6 +99,7 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
                 footer
             } empty: {
                 UDAgentEmptyState(
+                    systemImage: text.emptySystemImage,
                     title: text.emptyTitle, message: text.emptyMessage, capabilities: text.capabilities,
                     suggestions: text.suggestions, actionTitle: text.emptyActionTitle,
                     onSuggestion: { draft = $0; inputFocused = true }, onAction: onEmptyAction)

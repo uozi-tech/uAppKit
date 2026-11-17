@@ -56,6 +56,25 @@ final class AgentRuntimeUITests: XCTestCase {
         XCTAssertEqual(String(UDAgentPlainMessage.attributed("**粗** `x`").characters), "粗 x")
     }
 
+    func testPanelTextEmptySystemImage() {
+        XCTAssertEqual(UDAgentPanelText().emptySystemImage, "sparkles", "缺省不变（uTerm / uTable 照旧）")
+        XCTAssertEqual(UDAgentPanelText(emptySystemImage: "bubble.left").emptySystemImage, "bubble.left")
+    }
+
+    /// 只能盯源文本的两条：空状态图标走 `UDAgentPanelText`；历史下拉的内容不自带落影
+    /// （`.anchoredPanel` 已经给了，叠两层会在浮层下方被窗口裁成一条硬边灰块）。
+    func testSourceGuards() throws {
+        let directory = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/AgentRuntimeUI")
+        let panel = try String(contentsOf: directory.appendingPathComponent("UDAgentPanel.swift"), encoding: .utf8)
+        XCTAssertTrue(panel.contains("systemImage: text.emptySystemImage"))
+        let history = try String(contentsOf: directory.appendingPathComponent("UDAgentHistoryMenu.swift"), encoding: .utf8)
+        XCTAssertTrue(history.contains("UDDropdown("), "源码路径不对，守卫失效")
+        let code = history.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+        XCTAssertFalse(code.contains { $0.contains(".udShadow(") }, "历史下拉的内容不要再自带 udShadow")
+    }
+
     #if os(macOS)
     private var windows: [NSWindow] = []
 

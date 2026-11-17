@@ -100,7 +100,8 @@ private struct HistoryList: View {
         .background(UD.overlay)
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1))
-        .udShadow(.md)
+        // 不自带落影：`.anchoredPanel` 已给内容套了 `udShadow(.md)`。再叠一层时外层阴影连内层阴影一起投，
+        // 拖到浮层下方 24pt 透明边之外被窗口裁成一条硬边灰块（uGit 助手面板「历史对话」下方的空白）。
         .onAppear { sessions = store.sessions(scopeID: scopeID, limit: 100) }
     }
 
