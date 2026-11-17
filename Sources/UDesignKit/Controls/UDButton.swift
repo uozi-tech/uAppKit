@@ -30,6 +30,8 @@ public struct UDButton: View {
     var height: CGFloat = 32
     /// 进行中：前置迷你转子、按钮不可点。文案由调用方切换（传「创建中…」）。
     var isLoading: Bool = false
+    /// 底色撑满可用宽度（表单底部的整宽主按钮，如提交框）；默认随内容宽。link 风格忽略。
+    var fillsWidth: Bool = false
     let action: () -> Void
 
     public init(
@@ -39,6 +41,7 @@ public struct UDButton: View {
         trailingHint: String? = nil,
         height: CGFloat = 32,
         isLoading: Bool = false,
+        fillsWidth: Bool = false,
         action: @escaping () -> Void
     ) {
         self.title = title
@@ -47,6 +50,7 @@ public struct UDButton: View {
         self.trailingHint = trailingHint
         self.height = height
         self.isLoading = isLoading
+        self.fillsWidth = fillsWidth
         self.action = action
     }
 
@@ -73,7 +77,7 @@ public struct UDButton: View {
                 }
             }
         }
-        .buttonStyle(UDButtonStyle(style: style, height: height))
+        .buttonStyle(UDButtonStyle(style: style, height: height, fillsWidth: fillsWidth))
         .allowsHitTesting(!isLoading)
     }
 }
@@ -100,6 +104,7 @@ private struct UDButtonKbd: View {
 private struct UDButtonStyle: ButtonStyle {
     let style: UDButton.Style
     let height: CGFloat
+    var fillsWidth = false
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
@@ -119,6 +124,7 @@ private struct UDButtonStyle: ButtonStyle {
                     .foregroundStyle(c.text)
                     .frame(height: height)
                     .padding(.horizontal, 14)
+                    .frame(maxWidth: fillsWidth ? .infinity : nil)
                     .background(
                         RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                             .fill(c.bg)
