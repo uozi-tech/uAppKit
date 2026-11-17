@@ -186,7 +186,7 @@ private struct UDMenuItemRow: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(UD.accent)
             } else if let kbd = item.kbd {
-                Text(kbd)
+                Text(UFormat.shortcut(kbd))
                     .font(UD.mono(10))
                     .foregroundStyle(UD.text4)
             }

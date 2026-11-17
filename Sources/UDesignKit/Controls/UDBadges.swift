@@ -143,7 +143,7 @@ public struct UDKbd: View {
     }
 
     public var body: some View {
-        Text(label)
+        Text(UFormat.shortcut(label))
             .font(UD.monoKbd)
             .foregroundStyle(UD.text2)
             .padding(.horizontal, 5)
