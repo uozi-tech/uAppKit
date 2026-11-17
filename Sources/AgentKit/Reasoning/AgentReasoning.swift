@@ -48,6 +48,9 @@ public struct AgentReasoningSupport: Sendable, Equatable {
         /// OpenAI 兼容：`reasoning_effort`。`offValue` 是「关」在该模型上的取值
         /// （gpt-5 是 `minimal`、gpt-5.1 起是 `none`）；nil = 不能关。
         case openAIReasoningEffort(offValue: String?)
+        /// DeepSeek V4（OpenAI 兼容）：`thinking: {type: enabled|disabled}` + `reasoning_effort: low|high|max`。
+        /// 默认就在思考（high）；关 = `thinking: {type: disabled}`，且不能再带 `reasoning_effort`。
+        case deepSeekThinking
     }
 
     /// adaptive 模型「关闭思考」的写法。
@@ -206,6 +209,11 @@ public struct AgentReasoningSupport: Sendable, Equatable {
         if id.hasPrefix("gemini-2.5") || id.hasPrefix("gemini-3") {
             return .init(style: .openAIReasoningEffort(offValue: nil), levels: [.low, .medium, .high])
         }
+        // DeepSeek V4：deepseek-v4-flash / deepseek-v4-pro，以及官方示例里的 deepseek-flash / deepseek-pro。
+        // 旧 id deepseek-chat / deepseek-reasoner 固定一种模式，不给档位。
+        if id.hasPrefix("deepseek-v4") || id.hasPrefix("deepseek-flash") || id.hasPrefix("deepseek-pro") {
+            return .init(style: .deepSeekThinking, levels: [.off, .low, .high, .max])
+        }
         return nil
     }
 }
@@ -255,7 +263,7 @@ public struct AgentReasoningRequest: Sendable, Equatable {
         case .anthropicBudget:
             guard thinks, let budget = Self.anthropicBudgets[effort] else { return ([:], baseMaxTokens) }
             return (["thinking": ["type": "enabled", "budget_tokens": budget]], baseMaxTokens + budget)
-        case .openAIReasoningEffort:
+        case .openAIReasoningEffort, .deepSeekThinking:
             return ([:], baseMaxTokens)
         }
     }
@@ -266,6 +274,8 @@ public struct AgentReasoningRequest: Sendable, Equatable {
         switch support.style {
         case .anthropicAdaptive, .anthropicBudget: return thinks
         case .openAIReasoningEffort: return true
+        // 思考模式下 DeepSeek 不理 temperature 等（不报错，只是无效）：不带，免得以为生效了。
+        case .deepSeekThinking: return thinks
         }
     }
 
@@ -273,12 +283,23 @@ public struct AgentReasoningRequest: Sendable, Equatable {
     public var replaysThinking: Bool {
         switch support.style {
         case .anthropicAdaptive, .anthropicBudget: return thinks
-        case .openAIReasoningEffort: return false
+        case .openAIReasoningEffort, .deepSeekThinking: return false
         }
     }
 
     /// OpenAI 兼容请求体里要并进去的字段。
     public var openAIBody: [String: Any] {
+        if case .deepSeekThinking = support.style {
+            guard thinks else { return ["thinking": ["type": "disabled"]] }
+            // DeepSeek 只有 low / high / max：medium 按官方映射算 high，xhigh 也是 high。
+            let value: String
+            switch effort {
+            case .low: value = "low"
+            case .max: value = "max"
+            default: value = "high"
+            }
+            return ["thinking": ["type": "enabled"], "reasoning_effort": value]
+        }
         guard case .openAIReasoningEffort(let offValue) = support.style else { return [:] }
         if effort == .off {
             return offValue.map { ["reasoning_effort": $0] } ?? [:]

@@ -126,6 +126,31 @@ final class AgentReasoningTests: XCTestCase {
         XCTAssertTrue(o3.forbidsSamplingParameters)
     }
 
+    func testDeepSeekV4() throws {
+        XCTAssertEqual(levels(.openAICompatible, "deepseek-v4-flash"), [.off, .low, .high, .max])
+        XCTAssertEqual(levels(.openAICompatible, "deepseek-v4-pro"), [.off, .low, .high, .max])
+        XCTAssertEqual(levels(.openAICompatible, "deepseek-flash"), [.off, .low, .high, .max])
+        XCTAssertNil(levels(.openAICompatible, "deepseek-chat"), "旧 id 固定一种模式，不给档位")
+        XCTAssertNil(levels(.openAICompatible, "deepseek-reasoner"))
+
+        let off = try XCTUnwrap(AgentReasoningRequest.make(
+            protocol: .openAICompatible, modelID: "deepseek-v4-flash", effort: .off))
+        XCTAssertEqual(off.openAIBody["thinking"] as? [String: String], ["type": "disabled"])
+        XCTAssertNil(off.openAIBody["reasoning_effort"], "关思考时不能再带 reasoning_effort")
+        XCTAssertFalse(off.forbidsSamplingParameters)
+
+        let max = try XCTUnwrap(AgentReasoningRequest.make(
+            protocol: .openAICompatible, modelID: "deepseek-v4-pro", effort: .max))
+        XCTAssertEqual(max.openAIBody["thinking"] as? [String: String], ["type": "enabled"])
+        XCTAssertEqual(max.openAIBody["reasoning_effort"] as? String, "max")
+        XCTAssertTrue(max.forbidsSamplingParameters)
+        XCTAssertFalse(max.replaysThinking)
+        XCTAssertTrue(max.anthropicBody(baseMaxTokens: 100).fields.isEmpty)
+        let low = try XCTUnwrap(AgentReasoningRequest.make(
+            protocol: .openAICompatible, modelID: "deepseek-v4-flash", effort: .low))
+        XCTAssertEqual(low.openAIBody["reasoning_effort"] as? String, "low")
+    }
+
     @MainActor
     func testPreferencesPersistPerProviderAndModel() throws {
         let suite = "AgentReasoningTests-\(UUID().uuidString)"
