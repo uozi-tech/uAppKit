@@ -83,7 +83,7 @@ public struct UDButton: View {
 private struct UDButtonKbd: View {
     let text: String
     public var body: some View {
-        Text(text)
+        Text(UFormat.shortcut(text))
             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
             .padding(.horizontal, 5)
             .padding(.vertical, 1.5)
