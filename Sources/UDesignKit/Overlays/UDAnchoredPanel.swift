@@ -193,14 +193,25 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         var onRequestDismiss: (() -> Void)?
 
         private var panel: NSPanel?
+        private var hosting: NSHostingView<AnyView>?
+        /// 本次呈现注入内容的可用高度（nil = 自然高度放得下）；刷新内容时沿用，不重新定方向。
+        private var availableHeight: CGFloat?
         private var localMonitor: Any?
 
         func setPresented(_ presented: Bool) {
             if presented {
-                if panel == nil { present() }
+                if panel == nil { present() } else { refreshContent() }
             } else {
                 tearDown()
             }
+        }
+
+        /// 已展开时宿主再次求值（内容依赖的状态变了，如模型列表加载完）：用最新的 content 替换 rootView。
+        /// 视图类型不变，SwiftUI 保留面板里的 @State（搜索框文字、滚动位置）；尺寸变化经
+        /// `contentSizeChanged` 跟上。不刷新的话面板内容定格在展开那一刻（一直显示「加载中」）。
+        private func refreshContent() {
+            guard let hosting, let build = buildContent else { return }
+            hosting.rootView = build(availableHeight)
         }
 
         private func present() {
@@ -216,6 +227,7 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
                 && space.below < anchoredPanelMinComfortHeight
                 && space.above > space.below
             let available = max(opensUpward ? space.above : space.below, 0)
+            availableHeight = natural > available ? available : nil
             if natural > available {
                 hosting.rootView = build(available)
             }
@@ -242,6 +254,7 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             panel.appearance = appearance ?? parent.appearance
             panel.contentView = hosting
             self.panel = panel
+            self.hosting = hosting
 
             parent.addChildWindow(panel, ordered: .above)   // 随父窗口移动自动跟手
             reposition()
@@ -345,6 +358,8 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
                 panel.close()
                 self.panel = nil
             }
+            hosting = nil
+            availableHeight = nil
         }
     }
 }
