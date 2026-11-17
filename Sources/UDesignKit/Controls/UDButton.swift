@@ -159,11 +159,11 @@ private struct UDButtonStyle: ButtonStyle {
             // tint 型主按钮：accent 14% 底 + accent 色文字（非白字）。
             guard isEnabled else {
                 return Palette(bg: UD.accentTintDisabled, border: .clear,
-                               text: UD.accent.opacity(0.45))
+                               text: UD.accentInk.opacity(0.45))
             }
             let bg: Color = down ? UD.accentTintPressed
                                  : (hover ? UD.accentTintHover : UD.accentTint)
-            return Palette(bg: bg, border: .clear, text: UD.accent)
+            return Palette(bg: bg, border: .clear, text: UD.accentInk)
 
         case .secondary, .ghost:
             // 次按钮 / 幽灵：调色板 button2 三态填充、无边。
@@ -190,7 +190,7 @@ private struct UDButtonStyle: ButtonStyle {
                 return Palette(bg: .clear, border: .clear, text: UD.text4)
             }
             return Palette(bg: .clear, border: .clear,
-                           text: down ? UD.accent.opacity(0.7) : UD.accent)
+                           text: down ? UD.accentInk.opacity(0.7) : UD.accentInk)
         }
     }
 }
@@ -268,9 +268,9 @@ private struct UDIconButtonStyle: ButtonStyle {
                                  : (hover ? UD.panelHover : .clear)
             return Palette(bg: bg, border: .clear, text: text)
         case .filled:
-            guard isEnabled else { return Palette(bg: UD.accentTintDisabled, border: .clear, text: UD.accent.opacity(0.45)) }
+            guard isEnabled else { return Palette(bg: UD.accentTintDisabled, border: .clear, text: UD.accentInk.opacity(0.45)) }
             let bg: Color = down ? UD.accentTintPressed : (hover ? UD.accentTintHover : UD.accentTint)
-            return Palette(bg: bg, border: .clear, text: UD.accent)
+            return Palette(bg: bg, border: .clear, text: UD.accentInk)
         case .bordered:
             let text: Color = !isEnabled ? UD.text4 : ((hover || down) ? UD.text : UD.text2)
             let bg: Color = down ? UD.button2Pressed : (hover ? UD.button2Hover : UD.button2)

@@ -414,7 +414,7 @@ private struct UDOptionMenuRow: View {
                 if item.active {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(UD.accent)
+                        .foregroundStyle(UD.accentInk)
                         .frame(height: 16)
                 }
             }

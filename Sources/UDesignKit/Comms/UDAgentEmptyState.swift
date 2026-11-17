@@ -55,7 +55,7 @@ public struct UDAgentEmptyState: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous).fill(UD.accentTint)
                     Image(systemName: systemImage)
                         .font(.system(size: 19, weight: .medium))
-                        .foregroundStyle(UD.accent)
+                        .foregroundStyle(UD.accentInk)
                 }
                 .frame(width: 42, height: 42)
                 .accessibilityHidden(true)
@@ -97,7 +97,7 @@ public struct UDAgentEmptyState: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "arrow.up.right")
                                     .font(.system(size: 9, weight: .semibold))
-                                    .foregroundStyle(UD.accent)
+                                    .foregroundStyle(UD.accentInk)
                                 Text(suggestion)
                                     .font(UD.font(12))
                                     .foregroundStyle(UD.text2)

@@ -156,7 +156,7 @@ public struct UDTransferRow: View {
             HStack(spacing: 6) {
                 Image(systemName: direction == .up ? "arrow.up" : "arrow.down")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(UD.accent)
+                    .foregroundStyle(UD.accentInk)
 
                 Text(name)
                     .font(UD.mono(11.5))

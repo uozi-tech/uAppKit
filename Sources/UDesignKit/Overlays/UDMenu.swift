@@ -184,7 +184,7 @@ private struct UDMenuItemRow: View {
             if item.active {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(UD.accent)
+                    .foregroundStyle(UD.accentInk)
             } else if let kbd = item.kbd {
                 Text(UFormat.shortcut(kbd))
                     .font(UD.mono(10))

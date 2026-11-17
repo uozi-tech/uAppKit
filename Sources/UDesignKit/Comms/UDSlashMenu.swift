@@ -66,7 +66,7 @@ public struct UDSlashMenu: View {
             HStack(spacing: 9) {
                 Image(systemName: item.systemImage)
                     .font(.system(size: 11))
-                    .foregroundStyle(selected ? UD.accent : UD.text3)
+                    .foregroundStyle(selected ? UD.accentInk : UD.text3)
                     .frame(width: 16)
                 Text("/" + item.trigger)
                     .font(UD.mono(11.5, weight: .medium))

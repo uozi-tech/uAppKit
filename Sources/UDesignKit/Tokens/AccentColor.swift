@@ -38,9 +38,9 @@ public enum AccentColor: String, CaseIterable, Identifiable, Sendable {
     }
 
     /// 文字 / 图标用的强调色。日间即主色（调色板 accentInk = primary）；暗夜深底上主色偏暗，
-    /// 文字取 hover 档提亮。
+    /// 文字再提亮一档（蓝 #4C9BF5：在卡面 / 选中行上都 ≥4.5:1）。
     public func inkSpec(dark: Bool) -> UD.ColorSpec {
-        if self == .blue { return dark ? hoverSpec(dark: true) : base(dark: false) }
+        if self == .blue { return dark ? .hex(0x4C9BF5) : base(dark: false) }
         return base(dark: dark).brightened(dark ? 1.22 : 0.84)
     }
 

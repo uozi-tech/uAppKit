@@ -52,12 +52,12 @@ public struct UDSidebarRow: View {
                 // 的调用方（图标本来就是中性灰）照旧走「选中变 accent」。
                 Image(systemName: systemImage)
                     .font(UD.font(12.5))
-                    .foregroundStyle(iconColor ?? (selected ? UD.accent : UD.text3))
+                    .foregroundStyle(iconColor ?? (selected ? UD.accentInk : UD.text3))
                     .frame(width: 14)
 
                 Text(label)
                     .font(UD.font(12.5))
-                    .foregroundStyle(selected ? UD.accent : UD.text2)
+                    .foregroundStyle(selected ? UD.accentInk : UD.text2)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if hovered, let shortcutHint {

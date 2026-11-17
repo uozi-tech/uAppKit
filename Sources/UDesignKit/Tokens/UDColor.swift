@@ -97,22 +97,24 @@ public enum UD {
     // MARK: - 表面 Surfaces（组件库调色板 · Ant Design 预设：body / card / raised / modal / popover）
     // 深色：layout #000 → container #141414 → elevated #1F1F1F → modal #262626。
     // 日间：画布与 panel 纯白，panelHi #F0F0F0，窗口外页底 #F5F5F5。
-    public nonisolated static let bg         = dyn(.hex(0x000000), .hex(0xFFFFFF))
-    public nonisolated static let panel      = dyn(.hex(0x141414), .hex(0xFFFFFF))
-    public nonisolated static let panelHi    = dyn(.hex(0x1F1F1F), .hex(0xF0F0F0))
+    public nonisolated static let bg         = dyn(.hex(0x121212), .hex(0xFFFFFF))
+    public nonisolated static let panel      = dyn(.hex(0x1C1C1E), .hex(0xFFFFFF))
+    public nonisolated static let panelHi    = dyn(.hex(0x262628), .hex(0xF0F0F0))
     /// 悬停填充。**半透明叠加**而不是实色：调色板的实色值（深 #262626 / 浅 #F0F0F0）与
     /// overlayHi、border、panelHi、tabActive 撞同一个值——模态里悬停看不见、带描边的卡片悬停时
     /// 填成边框色而丢边、悬停的 tab 和激活 tab 分不出。叠加在 panel 上与调色板几乎同值，
     /// 叠在任何更亮的面上仍可见。带描边的元素悬停时还要把描边提到 `borderHi`。
     public nonisolated static let panelHover = dyn(.white(0.08), .black(0.04))
     /// 窗口外页底（设计稿 --u-page-bg，仅日间与画布区分）。
-    public nonisolated static let pageBg     = dyn(.hex(0x000000), .hex(0xF5F5F5))
+    // 2026-11-17 暗色层级（uGit 对比度审计后用户定）：页底不用纯黑（近白字眩光、与 macOS 深色窗口不一致），
+    // 各层亮度拉开、越浮越亮：page #121212 → card / panel #1C1C1E → overlay #2A2A2C → overlayHi #323234。
+    public nonisolated static let pageBg     = dyn(.hex(0x121212), .hex(0xF5F5F5))
     /// 卡片面（侧栏 / AI 助手面板 / 状态栏 / 连接卡）——调色板里 card 与 panel 同为 container。
-    public nonisolated static let card       = dyn(.hex(0x141414), .hex(0xFFFFFF))
+    public nonisolated static let card       = dyn(.hex(0x1C1C1E), .hex(0xFFFFFF))
     /// 浮层实体面（下拉 / 菜单 / popover）。浅色用纯白面板。
-    public nonisolated static let overlay    = dyn(.hex(0x1F1F1F), .hex(0xFFFFFF))
+    public nonisolated static let overlay    = dyn(.hex(0x2A2A2C), .hex(0xFFFFFF))
     /// 模态实体面（指标卡 / 菜单栏面板）。
-    public nonisolated static let overlayHi  = dyn(.hex(0x262626), .hex(0xFFFFFF))
+    public nonisolated static let overlayHi  = dyn(.hex(0x323234), .hex(0xFFFFFF))
 
     // MARK: - 描边 Stroke（深=白叠加 / 浅：border 黑 6.5%、borderHi 实色）
     // v2 描边只允许四处：分区 hairline / 浮层 / 白底列表容器 / 状态描边（聚焦环·错误·拖放·同步中）。
@@ -123,12 +125,14 @@ public enum UD {
     public nonisolated static let border     = dyn(.white(0.09), .black(0.065))
     public nonisolated static let borderHi   = dyn(.white(0.20), .hex(0xE0E0E0))
 
-    // MARK: - 文本 Text（调色板 text1–text4：深=白叠加 85 / 65 / 45 / 25% / 浅=实色）
+    // MARK: - 文本 Text（深=白叠加 85 / 65 / 55 / 38% / 浅=实色）
     // text2 正文层 · text3 次要信息层 · text4 仅装饰 / 结构层（分隔线 / 行号 / 禁用图标）。
+    // 2026-11-17：深色 text3 由 45% 提到 55%（对齐 macOS secondaryLabel，在浮层上也 ≥4.5:1），
+    // text4 由 25% 提到 38%（实际常被拿来写计数 / 日期，25% 只有约 2.3:1）。
     public nonisolated static let text       = dyn(.hex(0xD9D9D9), .hex(0x1F1F1F))
     public nonisolated static let text2      = dyn(.white(0.65), .hex(0x595959))   // 正文层
-    public nonisolated static let text3      = dyn(.white(0.45), .hex(0x8C8C8C))   // 次要信息层
-    public nonisolated static let text4      = dyn(.white(0.25), .hex(0xBFBFBF))   // 仅装饰 / 结构层
+    public nonisolated static let text3      = dyn(.white(0.55), .hex(0x8C8C8C))   // 次要信息层
+    public nonisolated static let text4      = dyn(.white(0.38), .hex(0xBFBFBF))   // 仅装饰 / 结构层
 
     // MARK: - 次按钮 Button2（调色板 button2 · default / hover / pressed）
     // 深色白叠加 8 / 12 / 18%；日间黑叠加 4 / 6 / 15%——落在白底上正是调色板的
@@ -175,8 +179,8 @@ public enum UD {
             tintHover = tinted(a.hoverSpec, 0.22)
             tintPressed = tinted(a.pressedSpec, 0.19)
             tintDisabled = tinted(a.accentSpec, 0.07)
-            // 选中行底：深 14% / 日 12%（调色板 sel），与 `tint` 的深浅同 14% 刻意不同。
-            rowSelected = UD.dyn(a.accentSpec(dark: true).withAlpha(0.14),
+            // 选中行底：深 20% / 日 12%（2026-11-17 深色由 14% 提到 20%：14% 在深底上与面几乎分不出）。
+            rowSelected = UD.dyn(a.accentSpec(dark: true).withAlpha(0.20),
                                  a.accentSpec(dark: false).withAlpha(0.12))
         }
     }
@@ -232,13 +236,14 @@ public enum UD {
     // MARK: - 语义状态 Semantic（调色板 success / warning / error / info，取 Ant 色阶）
     // info 与主色同为蓝。caution（断开）不并进 warning：「连接中」与「断开」必须分得出，
     // 取 Ant 橙色阶（深 orange-6 暗色版 / 浅 orange-6）。状态点 / 徽章 / danger 态等全经此 token。
-    public nonisolated static let success = dyn(.hex(0x49AA19), .hex(0x52C41A))   // 已连接
+    // 2026-11-17：深色语义色提亮（叠在自己 14–22% 的底上做文字也要 ≥4.5:1）。
+    public nonisolated static let success = dyn(.hex(0x6ABE39), .hex(0x52C41A))   // 已连接
     public nonisolated static let warning = dyn(.hex(0xD89614), .hex(0xFAAD14))   // 连接中
-    public nonisolated static let caution = dyn(.hex(0xD87A16), .hex(0xFA8C16))   // 断开
-    public nonisolated static let danger  = dyn(.hex(0xDC4446), .hex(0xFF4D4F))   // 失败 / 危险
-    public nonisolated static let info    = dyn(.hex(0x1668DC), .hex(0x1677FF))   // 信息
+    public nonisolated static let caution = dyn(.hex(0xE88B2A), .hex(0xFA8C16))   // 断开
+    public nonisolated static let danger  = dyn(.hex(0xF07070), .hex(0xFF4D4F))   // 失败 / 危险
+    public nonisolated static let info    = dyn(.hex(0x4C9BF5), .hex(0x1677FF))   // 信息
     /// danger 的 hover 色（危险按钮悬停时的文字）。
-    public nonisolated static let dangerHover = dyn(.hex(0xE86E6B), .hex(0xFF7875))
+    public nonisolated static let dangerHover = dyn(.hex(0xF28B82), .hex(0xFF7875))
 
     // MARK: - 文件夹 / 图标色 Folder & Icon（设计稿 --u-folder-1/2 · --u-icon-teal）
     // 暗夜保持原样（鲜艳双色蓝 + 青）；日间文件夹换 macOS Finder 风格鲜亮饱和蓝
@@ -300,7 +305,7 @@ public enum UD {
     /// `@MainActor` `rowSelected` getter. This is exactly the value `rowSelected` had
     /// before 1.21.0; apps without an accent switcher see no difference at runtime.
     /// Views that should follow the user's accent must read `UD.rowSelected` instead.
-    public nonisolated static let rowSelectedDefault = dyn(AccentColor.blue.accentSpec(dark: true).withAlpha(0.14),
+    public nonisolated static let rowSelectedDefault = dyn(AccentColor.blue.accentSpec(dark: true).withAlpha(0.20),
                                                     AccentColor.blue.accentSpec(dark: false).withAlpha(0.12))
     /// 激活 Tab 底（日间 = panelHi；暗夜保持与编辑器正文同底的无缝拼接 = bg 深色）。
     public nonisolated static let tabActive   = dyn(.hex(0x000000), .hex(0xF0F0F0))

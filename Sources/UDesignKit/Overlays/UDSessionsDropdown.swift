@@ -91,7 +91,7 @@ public struct UDSessionsDropdown: View {
             HStack(spacing: 6) {
                 Text(session.title)
                     .font(UD.font(12.5, weight: session.active ? .medium : .regular))
-                    .foregroundStyle(session.active ? UD.accent : UD.text2)
+                    .foregroundStyle(session.active ? UD.accentInk : UD.text2)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)

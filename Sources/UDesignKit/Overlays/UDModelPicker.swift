@@ -321,7 +321,7 @@ private struct UDModelPickerRow: View {
             HStack(spacing: 8) {
                 Text(item.title)
                     .font(UD.font(12.5))
-                    .foregroundStyle(selected ? UD.accent : UD.text2)
+                    .foregroundStyle(selected ? UD.accentInk : UD.text2)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -331,7 +331,7 @@ private struct UDModelPickerRow: View {
                 if selected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(UD.accent)
+                        .foregroundStyle(UD.accentInk)
                 }
             }
             .padding(.vertical, 6)

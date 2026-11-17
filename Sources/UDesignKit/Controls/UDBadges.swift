@@ -56,7 +56,7 @@ public struct UDSelectableGroupChip: View {
         Button(action: action) {
             Text(label)
                 .font(UD.caption)
-                .foregroundStyle(selected ? UD.accent : UD.text3)
+                .foregroundStyle(selected ? UD.accentInk : UD.text3)
                 .padding(.vertical, 4)
                 .padding(.horizontal, 10)
                 .background(
@@ -89,7 +89,7 @@ public struct UDCountBadge: View {
         // v2：accent 14% / 中性 uw03 胶囊底，无边。
         Text(count)
             .font(UD.mono(10.5))
-            .foregroundStyle(accent ? UD.accent : UD.text2)
+            .foregroundStyle(accent ? UD.accentInk : UD.text2)
             .padding(.horizontal, 5)
             .frame(minWidth: 18)
             .frame(height: 18)

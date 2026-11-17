@@ -133,7 +133,7 @@ public struct UDToolCall: View {
     private var commandRow: some View {
         HStack(alignment: .top, spacing: 7) {
             Text("$")
-                .foregroundStyle(UD.accent)
+                .foregroundStyle(UD.accentInk)
             Text(command)
                 .foregroundStyle(UD.text2)
                 .frame(maxWidth: .infinity, alignment: .leading)

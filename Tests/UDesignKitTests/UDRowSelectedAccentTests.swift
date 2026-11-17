@@ -31,7 +31,7 @@ final class UDRowSelectedAccentTests: XCTestCase {
         for accent in AccentColor.allCases {
             state.selected = accent
             let palette = UD.accentPalette(for: state.selected)
-            for (appearance, alpha) in [(NSAppearance.Name.darkAqua, 0.14), (.aqua, 0.12)] {
+            for (appearance, alpha) in [(NSAppearance.Name.darkAqua, 0.20), (.aqua, 0.12)] {
                 let row = try resolve(palette.rowSelected, under: appearance)
                 let base = try resolve(palette.accent, under: appearance)
                 let where_ = "\(accent.rawValue) @ \(appearance.rawValue)"

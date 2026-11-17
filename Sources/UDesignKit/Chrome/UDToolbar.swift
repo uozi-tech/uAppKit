@@ -69,7 +69,7 @@ public struct UDToolbarNewButton: View {
                 Text("新建")
             }
             .font(UD.control)
-            .foregroundStyle(UD.accent)
+            .foregroundStyle(UD.accentInk)
             .padding(.horizontal, 14)
             .frame(height: 32)
             .background(

@@ -87,7 +87,7 @@ private struct Row: View {
         HStack(spacing: 7) {
             Image(systemName: item.sendsAtNextStep ? "arrow.turn.down.right" : "clock")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(item.sendsAtNextStep ? UD.accent : UD.text4)
+                .foregroundStyle(item.sendsAtNextStep ? UD.accentInk : UD.text4)
                 .frame(width: 14)
             Text(item.text)
                 .font(UD.font(12))
