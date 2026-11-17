@@ -332,7 +332,7 @@ private struct UDTabCloseButton: View {
                    alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovered = $0 }
         .help("关闭标签")
     }
@@ -358,7 +358,7 @@ private struct UDTabCloseButton: View {
                     .foregroundStyle(UD.text3)
                     .frame(width: 26, height: 26)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
         }
     }
     .padding(UD.Space.xxxl)

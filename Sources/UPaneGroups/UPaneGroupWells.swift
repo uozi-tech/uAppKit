@@ -143,7 +143,7 @@ struct UPaneCardStripButton<Label: View>: View {
                     .fill(hovering ? UD.panelHover : Color.clear))
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .help(help)
     }

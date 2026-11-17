@@ -636,7 +636,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                         .frame(width: 34, height: stripHeight)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.udPlain)
                 .help("关闭这个空分组（⌘W）")
             }
 
@@ -648,7 +648,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                         .frame(width: 34, height: stripHeight)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.udPlain)
                 .help("拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）")
             }
         }
@@ -857,7 +857,7 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
                     .background(RoundedRectangle(cornerRadius: 5)
                         .fill(hoveringClose ? UD.panelHover : Color.clear))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .onHover { hoveringClose = $0 }
             .help("关闭")
         }
@@ -895,7 +895,7 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
                     .background(RoundedRectangle(cornerRadius: 5)
                         .fill(hoveringClose ? UD.panelHover : Color.clear))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .onHover { hoveringClose = $0 }
             .help("关闭")
         }

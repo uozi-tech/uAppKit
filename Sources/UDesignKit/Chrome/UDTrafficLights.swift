@@ -54,7 +54,7 @@ public struct UDTrafficLights: View {
     private func dot(fill: Color, glyph: String, action: (() -> Void)?) -> some View {
         if let action {
             Button(action: action) { circle(fill: fill, glyph: glyph) }
-                .buttonStyle(.plain)
+                .buttonStyle(.udPlain)
         } else {
             circle(fill: fill, glyph: glyph)
         }

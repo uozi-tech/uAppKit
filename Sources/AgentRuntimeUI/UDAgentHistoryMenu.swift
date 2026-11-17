@@ -93,7 +93,7 @@ private struct HistoryList: View {
                 .padding(.horizontal, 10)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .overlay(alignment: .top) { Rectangle().fill(UD.border).frame(height: 1) }
         }
         .frame(width: 290)
@@ -132,7 +132,7 @@ private struct HistoryList: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
 
             Button {
@@ -143,7 +143,7 @@ private struct HistoryList: View {
                     .frame(width: 20, height: 20)
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .accessibilityLabel("删除对话")
         }
         .padding(.vertical, 7)

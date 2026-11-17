@@ -340,7 +340,7 @@ private struct UDModelPickerRow: View {
                 .fill(selected ? UD.rowSelected : highlighted ? Self.highlightBg : .clear))
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover(perform: onHover)
         .help(item.title)
         .accessibilityLabel(item.title)
@@ -370,7 +370,7 @@ private struct UDModelPickerActionRow: View {
                 .fill(hovering ? UD.panelHover : .clear))
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
     }
 }

@@ -141,7 +141,7 @@ public struct UDSessionsDropdown: View {
             }
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { footerHovered = $0 }
     }
 

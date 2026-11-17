@@ -211,7 +211,7 @@ public struct UDAgentTranscript<Row: Identifiable, RowContent: View, Footer: Vie
                     .background(Capsule().fill(UD.fillSoft))
                     .contentShape(Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.udPlain)
                 Spacer(minLength: 0)
             }
         }

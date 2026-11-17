@@ -78,7 +78,7 @@ public struct UDToolbarNewButton: View {
                     .fill(UD.accentTint)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
     }
 }
 

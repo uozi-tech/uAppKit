@@ -60,7 +60,7 @@ public struct UDPillToggle: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .opacity(isEnabled ? 1 : 0.6)
         .onHover { hovering = $0 }
     }

@@ -109,7 +109,7 @@ public struct UDAgentEmptyState: View {
                             .background(RoundedRectangle(cornerRadius: UD.Radius.md).fill(UD.uw03))
                             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.md))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.udPlain)
                     }
                 }
             }

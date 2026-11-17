@@ -89,7 +89,7 @@ public struct UDSlashMenu: View {
             .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(selected ? UD.accentSoft : Color.clear))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 }

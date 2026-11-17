@@ -205,7 +205,7 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
     private var commandReturnShortcut: some View {
         Button("") { submit(delivery: .nextStep) }
             .keyboardShortcut(.return, modifiers: .command)
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .opacity(0)
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)

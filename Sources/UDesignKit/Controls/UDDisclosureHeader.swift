@@ -54,7 +54,7 @@ public struct UDDisclosureHeader: View {
             )
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
     }
 }

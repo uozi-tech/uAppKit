@@ -76,7 +76,7 @@ public struct UDSidebarRow: View {
             )
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovered = $0 }
     }
 

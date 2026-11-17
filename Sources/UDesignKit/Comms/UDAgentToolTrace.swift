@@ -44,7 +44,7 @@ public struct UDAgentToolTrace: View {
             } label: {
                 header.contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
 
             if expanded {
                 if !arguments.isEmpty, arguments != "{}" {

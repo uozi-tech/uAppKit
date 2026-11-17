@@ -158,7 +158,7 @@ private struct IconButton: View {
                 .background(shape.fill(hovering ? UD.uw06 : .clear))
                 .contentShape(shape)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(label)

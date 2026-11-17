@@ -59,7 +59,7 @@ public struct UDSegmented<Value: Hashable>: View {
         } label: {
             SegmentLabel(label: label, selected: selected, font: labelFont)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
     }
 
     /// 仅当第 `index` 段与其右邻段**都未选中**时，显示二者间的竖分隔。

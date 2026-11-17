@@ -64,7 +64,7 @@ private struct Swatch: View {
                 .padding(inset)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .help(color.label)
         .accessibilityLabel(Text("强调色 \(color.label)"))

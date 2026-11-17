@@ -196,7 +196,7 @@ public struct UDToolCall: View {
                 )
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .disabled(approvalsDisabled)
 
             Button(action: onSkip) {
@@ -212,7 +212,7 @@ public struct UDToolCall: View {
                     )
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.udPlain)
             .disabled(approvalsDisabled)
 
             Spacer(minLength: 0)

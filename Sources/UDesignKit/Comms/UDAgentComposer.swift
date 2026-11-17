@@ -423,7 +423,7 @@ private struct UDOptionMenuRow: View {
             .background(RoundedRectangle(cornerRadius: 6).fill(hovering ? UD.panelHover : .clear))
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .accessibilityLabel(item.title)
         .accessibilityHint(item.detail)

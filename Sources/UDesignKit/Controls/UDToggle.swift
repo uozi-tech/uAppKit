@@ -33,7 +33,7 @@ public struct UDToggle: View {
             .frame(width: 40, height: 24)
             .animation(.easeOut(duration: 0.2), value: isOn)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .opacity(isEnabled ? 1 : 0.45)
         .allowsHitTesting(isEnabled)
     }

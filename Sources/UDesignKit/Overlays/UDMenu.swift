@@ -157,7 +157,7 @@ private struct UDMenuItemRow: View {
     public var body: some View {
         if let action = item.action {
             Button(action: { action(); dismiss() }) { rowBody }
-                .buttonStyle(.plain)
+                .buttonStyle(.udPlain)
         } else {
             rowBody
         }

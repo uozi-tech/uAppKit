@@ -64,7 +64,7 @@ public struct UDSelectableGroupChip: View {
                         .fill(selected ? UD.accentTint : UD.uw03)
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
     }
 }
 

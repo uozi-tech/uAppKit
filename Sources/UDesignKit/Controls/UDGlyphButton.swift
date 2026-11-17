@@ -59,7 +59,7 @@ public struct UDGlyphButton: View {
                 )
                 .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .help(help)
     }

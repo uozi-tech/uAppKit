@@ -64,7 +64,7 @@ public struct UDTriCheckbox: View {
         switch interaction {
         case .button:
             Button(action: action) { visual }
-                .buttonStyle(.plain)
+                .buttonStyle(.udPlain)
         case .dense:
             visual
                 // 门控写在闭包里而不是条件挂手势：条件修饰符会改变视图标识，

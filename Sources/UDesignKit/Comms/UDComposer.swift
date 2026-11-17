@@ -166,7 +166,7 @@ public struct UDModelPill: View {
         Button(action: action) {
             UDModelPillLabel(label)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
     }
 }
 

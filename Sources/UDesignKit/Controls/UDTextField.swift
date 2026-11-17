@@ -131,7 +131,7 @@ public struct UDTextField: View {
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.udPlain)
         .onHover { revealHovering = $0 }
         .help(revealed ? "隐藏" : "查看原文")
         .accessibilityLabel(revealed ? "隐藏原文" : "查看原文")
