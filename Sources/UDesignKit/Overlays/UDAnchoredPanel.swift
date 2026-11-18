@@ -143,7 +143,9 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
     let becomesKey: Bool
     @ViewBuilder let content: (_ dismiss: @escaping () -> Void) -> PanelContent
 
-    func makeNSView(context: Context) -> NSView { NSView() }
+    /// 锚点只用来量位置：对命中测试透明。它铺在使用方的 background / overlay 里，大小随锚定内容走，
+    /// 放进 overlay 时会盖住底下的控件吞掉点击（uGit 历史表：CI 浮层的锚点挡住了一片提交行）。
+    func makeNSView(context: Context) -> NSView { PassthroughAnchorView() }
 
     func updateNSView(_ nsView: NSView, context: Context) {
         let coord = context.coordinator
@@ -368,5 +370,12 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
 /// 放行成 key，`.nonactivatingPanel` 语义保留（成 key 不激活 app、不抢别家前台）。
 private final class UDKeyableBorderlessPanel: NSPanel {
     override var canBecomeKey: Bool { true }
+}
+#endif
+
+#if os(macOS)
+/// `AnchoredPanelPresenter` 的锚点视图：只提供坐标，不接任何鼠标事件。
+final class PassthroughAnchorView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 #endif
