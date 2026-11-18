@@ -151,6 +151,40 @@ final class AgentReasoningTests: XCTestCase {
         XCTAssertEqual(low.openAIBody["reasoning_effort"] as? String, "low")
     }
 
+    /// 按 Anthropic 协议转发 DeepSeek V4 的网关（DeepSeek 官方 `/anthropic` 端点同理）。
+    func testDeepSeekV4OverAnthropic() throws {
+        XCTAssertEqual(levels(.anthropic, "deepseek-v4-flash"), [.off, .low, .high, .max])
+        XCTAssertEqual(levels(.anthropic, "deepseek-v4-pro"), [.off, .low, .high, .max])
+        XCTAssertEqual(levels(.anthropic, "deepseek/deepseek-v4-pro"), [.off, .low, .high, .max])
+        XCTAssertNil(levels(.anthropic, "deepseek-chat"))
+
+        let off = try XCTUnwrap(AgentReasoningRequest.make(protocol: .anthropic, modelID: "deepseek-v4-flash", effort: .off))
+        let offBody = off.anthropicBody(baseMaxTokens: 4_096)
+        XCTAssertEqual(offBody.fields["thinking"] as? [String: String], ["type": "disabled"])
+        XCTAssertNil(offBody.fields["output_config"])
+        XCTAssertEqual(offBody.maxTokens, 4_096)
+        XCTAssertFalse(off.replaysThinking)
+        XCTAssertTrue(off.openAIBody.isEmpty)
+
+        let max = try XCTUnwrap(AgentReasoningRequest.make(protocol: .anthropic, modelID: "deepseek-v4-pro", effort: .max))
+        let body = max.anthropicBody(baseMaxTokens: 4_096)
+        XCTAssertEqual(body.fields["thinking"] as? [String: String], ["type": "enabled"])
+        XCTAssertEqual(body.fields["output_config"] as? [String: String], ["effort": "max"])
+        XCTAssertEqual(body.maxTokens, AgentReasoningRequest.adaptiveMinimumMaxTokens)
+        XCTAssertTrue(max.replaysThinking, "带工具续轮要放回 thinking 块")
+        XCTAssertTrue(max.forbidsSamplingParameters)
+
+        let low = try XCTUnwrap(AgentReasoningRequest.make(protocol: .anthropic, modelID: "deepseek-v4-flash", effort: .low))
+        XCTAssertEqual(low.anthropicBody(baseMaxTokens: 4_096).fields["output_config"] as? [String: String], ["effort": "low"])
+
+        // 走 AnthropicWire 拼出来的请求体里确实带上。
+        let wire = AnthropicWire.requestBody(
+            LLMWireRequest(model: "deepseek-v4-pro", messages: [], temperature: 0.2, maxTokens: 4_096, reasoning: max),
+            stream: false)
+        XCTAssertEqual(wire["output_config"] as? [String: String], ["effort": "max"])
+        XCTAssertNil(wire["temperature"])
+    }
+
     @MainActor
     func testPreferencesPersistPerProviderAndModel() throws {
         let suite = "AgentReasoningTests-\(UUID().uuidString)"

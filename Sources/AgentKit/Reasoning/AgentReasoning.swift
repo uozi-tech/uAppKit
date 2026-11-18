@@ -51,6 +51,10 @@ public struct AgentReasoningSupport: Sendable, Equatable {
         /// DeepSeek V4（OpenAI 兼容）：`thinking: {type: enabled|disabled}` + `reasoning_effort: low|high|max`。
         /// 默认就在思考（high）；关 = `thinking: {type: disabled}`，且不能再带 `reasoning_effort`。
         case deepSeekThinking
+        /// DeepSeek V4 走 Anthropic 协议（官方 `/anthropic` 端点或按 Anthropic 协议转发的网关）：
+        /// `thinking: {type: enabled|disabled}` + `output_config: {effort: low|high|max}`。
+        /// 默认就在思考（high）；带工具续轮要把 thinking 块原样放回去。
+        case deepSeekAnthropic
     }
 
     /// adaptive 模型「关闭思考」的写法。
@@ -155,6 +159,9 @@ public struct AgentReasoningSupport: Sendable, Equatable {
     }
 
     private static func anthropic(_ modelID: String) -> AgentReasoningSupport? {
+        if isDeepSeekV4(modelID) {
+            return .init(style: .deepSeekAnthropic, levels: [.off, .low, .high, .max])
+        }
         guard let model = ClaudeModel(modelID) else { return nil }
         let full: [AgentReasoningEffort] = [.low, .medium, .high, .xhigh, .max]
 
@@ -211,10 +218,18 @@ public struct AgentReasoningSupport: Sendable, Equatable {
         }
         // DeepSeek V4：deepseek-v4-flash / deepseek-v4-pro，以及官方示例里的 deepseek-flash / deepseek-pro。
         // 旧 id deepseek-chat / deepseek-reasoner 固定一种模式，不给档位。
-        if id.hasPrefix("deepseek-v4") || id.hasPrefix("deepseek-flash") || id.hasPrefix("deepseek-pro") {
+        if isDeepSeekV4(id) {
             return .init(style: .deepSeekThinking, levels: [.off, .low, .high, .max])
         }
         return nil
+    }
+
+    /// DeepSeek V4：deepseek-v4-flash / deepseek-v4-pro，以及官方示例里的 deepseek-flash / deepseek-pro
+    /// （可带 `deepseek/` 这类中转前缀）。旧 id deepseek-chat / deepseek-reasoner 固定一种模式，不算。
+    static func isDeepSeekV4(_ modelID: String) -> Bool {
+        var id = modelID.lowercased()
+        if let slash = id.lastIndex(of: "/") { id = String(id[id.index(after: slash)...]) }
+        return id.hasPrefix("deepseek-v4") || id.hasPrefix("deepseek-flash") || id.hasPrefix("deepseek-pro")
     }
 }
 
@@ -263,8 +278,24 @@ public struct AgentReasoningRequest: Sendable, Equatable {
         case .anthropicBudget:
             guard thinks, let budget = Self.anthropicBudgets[effort] else { return ([:], baseMaxTokens) }
             return (["thinking": ["type": "enabled", "budget_tokens": budget]], baseMaxTokens + budget)
+        case .deepSeekAnthropic:
+            guard thinks else { return (["thinking": ["type": "disabled"]], baseMaxTokens) }
+            // 思考 token 计入 max_tokens，同 adaptive 抬到下限。
+            return ([
+                "thinking": ["type": "enabled"],
+                "output_config": ["effort": deepSeekEffort],
+            ], max(baseMaxTokens, Self.adaptiveMinimumMaxTokens))
         case .openAIReasoningEffort, .deepSeekThinking:
             return ([:], baseMaxTokens)
+        }
+    }
+
+    /// DeepSeek 只有 low / high / max：medium 按官方映射算 high，xhigh 也是 high。
+    private var deepSeekEffort: String {
+        switch effort {
+        case .low: "low"
+        case .max: "max"
+        default: "high"
         }
     }
 
@@ -275,14 +306,14 @@ public struct AgentReasoningRequest: Sendable, Equatable {
         case .anthropicAdaptive, .anthropicBudget: return thinks
         case .openAIReasoningEffort: return true
         // 思考模式下 DeepSeek 不理 temperature 等（不报错，只是无效）：不带，免得以为生效了。
-        case .deepSeekThinking: return thinks
+        case .deepSeekThinking, .deepSeekAnthropic: return thinks
         }
     }
 
     /// 续轮请求要不要把本轮 assistant 消息的 thinking 块原样放回去（只有 Anthropic 有）。
     public var replaysThinking: Bool {
         switch support.style {
-        case .anthropicAdaptive, .anthropicBudget: return thinks
+        case .anthropicAdaptive, .anthropicBudget, .deepSeekAnthropic: return thinks
         case .openAIReasoningEffort, .deepSeekThinking: return false
         }
     }
@@ -291,14 +322,7 @@ public struct AgentReasoningRequest: Sendable, Equatable {
     public var openAIBody: [String: Any] {
         if case .deepSeekThinking = support.style {
             guard thinks else { return ["thinking": ["type": "disabled"]] }
-            // DeepSeek 只有 low / high / max：medium 按官方映射算 high，xhigh 也是 high。
-            let value: String
-            switch effort {
-            case .low: value = "low"
-            case .max: value = "max"
-            default: value = "high"
-            }
-            return ["thinking": ["type": "enabled"], "reasoning_effort": value]
+            return ["thinking": ["type": "enabled"], "reasoning_effort": deepSeekEffort]
         }
         guard case .openAIReasoningEffort(let offValue) = support.style else { return [:] }
         if effort == .off {
