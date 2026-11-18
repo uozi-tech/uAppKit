@@ -10,13 +10,18 @@ public struct UDSegmented<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
     let labelFont: Font
+    let fillsWidth: Bool
 
+    /// - Parameter fillsWidth: `true` 时撑满父视图给的宽度、各段等分（列表头的筛选这类）；
+    ///   默认按内容收紧（最宽那段决定段宽）。
     public init(selection: Binding<Value>,
          options: [(value: Value, label: String)],
-         labelFont: Font = UD.font(12, weight: .medium)) {
+         labelFont: Font = UD.font(12, weight: .medium),
+         fillsWidth: Bool = false) {
         self._selection = selection
         self.options = options
         self.labelFont = labelFont
+        self.fillsWidth = fillsWidth
     }
 
     public var body: some View {
@@ -45,7 +50,8 @@ public struct UDSegmented<Value: Hashable>: View {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(.clear, lineWidth: 1)
         )
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize(horizontal: !fillsWidth, vertical: false)
+        .frame(maxWidth: fillsWidth ? .infinity : nil)
     }
 
     // MARK: - 单段

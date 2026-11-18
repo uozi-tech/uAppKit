@@ -45,6 +45,18 @@ final class UDSegmentedTransactionTests: XCTestCase {
         return condition()
     }
 
+    /// `fillsWidth`：撑满给的宽度；默认按内容收紧。
+    func testFillsWidthTakesOfferedWidth() {
+        let options: [(value: String, label: String)] = [("a", "进行中"), ("b", "已合并"), ("c", "已关闭")]
+        let offered = CGSize(width: 400, height: 60)
+        let filled = NSHostingController(rootView: UDSegmented(selection: .constant("a"), options: options, fillsWidth: true))
+            .sizeThatFits(in: offered)
+        let compact = NSHostingController(rootView: UDSegmented(selection: .constant("a"), options: options))
+            .sizeThatFits(in: offered)
+        XCTAssertEqual(filled.width, 400, accuracy: 0.5)
+        XCTAssertLessThan(compact.width, 300)
+    }
+
     func testSwitchingSegmentUpdatesConsumerWithoutAnimation() throws {
         _ = NSApplication.shared
         NSApp.finishLaunching()
