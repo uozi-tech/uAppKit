@@ -52,10 +52,14 @@ public struct UDSegmented<Value: Hashable>: View {
 
     private func segment(_ value: Value, _ label: String) -> some View {
         let selected = value == selection
+        // 选中瞬切，且不带动画写回 binding（同 NSSegmentedControl）：以前包 `withAnimation`，
+        // 动画事务会顺着 binding 传到使用方——分段下面整块内容跟着淡入淡出、新旧叠影，
+        // 锚定浮层里内容高度还在插值而窗口已按目标尺寸改 frame，中间几帧被截断；
+        // 自身两段的强调色底同时半透明，看着像两段都选中。
         return Button {
-            withAnimation(.easeOut(duration: 0.16)) {
-                selection = value
-            }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { selection = value }
         } label: {
             SegmentLabel(label: label, selected: selected, font: labelFont)
         }
