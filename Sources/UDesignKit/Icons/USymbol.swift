@@ -159,6 +159,103 @@ public enum USymbolMetrics {
     nonisolated(unsafe) private static var cache: [Key: Reference] = [:]
     private static let cacheLock = NSLock()
 
+    /// 环形符号（`arrow.clockwise` 这类）原地旋转的轴心：在 `fitted` 排版框里的相对位置（与缩放无关）。
+    ///
+    /// 墨迹框中心不是圆心——`arrow.clockwise` 的箭头把墨迹框往上撑，12pt 时墨迹框中心比圆心高约 0.9pt，
+    /// 绕墨迹框中心转，圆会跟着画小圈（看着晃）。这里对墨迹像素做圆拟合求圆心（剔掉箭头等不在环上的像素后重拟合）。符号不存在或拟合不出（比如不是环形）时返回 nil。
+    public static func rotationAnchor(_ name: String, weight: Font.Weight = .regular) -> UnitPoint? {
+        let key = Key(name: name, weight: nsFontWeight(weight).rawValue)
+        cacheLock.lock()
+        if let hit = anchorCache[key] { cacheLock.unlock(); return hit }
+        cacheLock.unlock()
+        guard let ref = reference(name, weight: weight), let center = circleCenter(of: ref.image) else { return nil }
+        let size = ref.image.size
+        // 排版框内墨迹框中心已被挪到框中心（见 `fit` 的 offset），圆心相对墨迹框中心的偏移按比例换算。
+        let anchor = UnitPoint(x: 0.5 + (center.x - ref.ink.midX) / size.width,
+                               y: 0.5 + (center.y - ref.ink.midY) / size.height)
+        cacheLock.lock(); anchorCache[key] = anchor; cacheLock.unlock()
+        return anchor
+    }
+
+    nonisolated(unsafe) private static var anchorCache: [Key: UnitPoint] = [:]
+
+    /// 墨迹像素的圆心（图像坐标，左上原点，pt）：先对全部墨迹做最小二乘圆拟合（Kåsa），再只留离拟合圆
+    /// 不远的像素（环上的笔画）重拟合几轮，把箭头这类不在环上的部分剔掉。
+    static func circleCenter(of image: NSImage) -> CGPoint? {
+        guard let bitmap = alphaBitmap(of: image) else { return nil }
+        var points: [(x: Double, y: Double)] = []
+        for row in 0..<bitmap.height {
+            for x in 0..<bitmap.width where bitmap.alpha(x, row) > 128 {
+                points.append((Double(x) + 0.5, Double(row) + 0.5))
+            }
+        }
+        guard var circle = fitCircle(points) else { return nil }
+        for _ in 0..<4 {
+            let distances = points.map { hypot($0.x - circle.x, $0.y - circle.y) }
+            let radius = distances.sorted()[distances.count / 2]
+            let tolerance = max(radius * 0.12, 1)
+            let ring = zip(points, distances).filter { abs($0.1 - radius) <= tolerance }.map(\.0)
+            guard ring.count > 3, let refit = fitCircle(ring) else { break }
+            circle = refit
+        }
+        let scale = Double(bitmap.scale)
+        let center = CGPoint(x: circle.x / scale, y: circle.y / scale)
+        return CGRect(origin: .zero, size: image.size).contains(center) ? center : nil
+    }
+
+    /// 最小二乘圆拟合：解 x² + y² = A·x + B·y + C，圆心 (A/2, B/2)。
+    private static func fitCircle(_ points: [(x: Double, y: Double)]) -> (x: Double, y: Double)? {
+        guard points.count > 3 else { return nil }
+        var sx = 0.0, sy = 0.0, sxx = 0.0, syy = 0.0, sxy = 0.0, sxz = 0.0, syz = 0.0, sz = 0.0
+        for p in points {
+            let z = p.x * p.x + p.y * p.y
+            sx += p.x; sy += p.y; sxx += p.x * p.x; syy += p.y * p.y; sxy += p.x * p.y
+            sxz += p.x * z; syz += p.y * z; sz += z
+        }
+        let n = Double(points.count)
+        let m = [[sxx, sxy, sx], [sxy, syy, sy], [sx, sy, n]], r = [sxz, syz, sz]
+        func det(_ m: [[Double]]) -> Double {
+            m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+                - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+                + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+        }
+        func replacing(_ column: Int) -> [[Double]] {
+            var copy = m
+            for i in 0..<3 { copy[i][column] = r[i] }
+            return copy
+        }
+        let d = det(m)
+        guard abs(d) > 1e-9 else { return nil }
+        return (det(replacing(0)) / d / 2, det(replacing(1)) / d / 2)
+    }
+
+    /// 2× 光栅化后的 alpha（首行 = 图像顶行）。
+    private struct AlphaBitmap {
+        let width: Int, height: Int, scale: CGFloat
+        let bytes: [UInt8], bytesPerRow: Int
+        func alpha(_ x: Int, _ row: Int) -> UInt8 { bytes[row * bytesPerRow + x * 4 + 3] }
+    }
+
+    private static func alphaBitmap(of image: NSImage) -> AlphaBitmap? {
+        let scale: CGFloat = 2
+        let w = Int((image.size.width * scale).rounded(.up))
+        let h = Int((image.size.height * scale).rounded(.up))
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return nil }
+        ctx.scaleBy(x: scale, y: scale)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+        guard let data = ctx.data else { return nil }
+        let count = ctx.bytesPerRow * h
+        let bytes = Array(UnsafeBufferPointer(start: data.bindMemory(to: UInt8.self, capacity: count), count: count))
+        return AlphaBitmap(width: w, height: h, scale: scale, bytes: bytes, bytesPerRow: ctx.bytesPerRow)
+    }
+
     /// 2× 光栅化后扫 alpha：墨迹框取 > 约 16% 的像素（滤掉抗锯齿最外圈），面积按覆盖率累计。
     private static func inkBounds(of image: NSImage) -> (CGRect, CGFloat)? {
         let scale: CGFloat = 2

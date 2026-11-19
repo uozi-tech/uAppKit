@@ -178,8 +178,9 @@ public struct UDModelPicker: View {
             if let onRefresh {
                 Button(action: onRefresh) {
                     // 刷新中图标自己转圈（同 `UDRefreshButton`），不换成另一个转圈控件。
-                    UDSpinningIcon(isSpinning: isRefreshing) {
-                        Image(systemName: "arrow.clockwise")
+                    UDSpinningIcon(isSpinning: isRefreshing,
+                                   anchor: USymbolMetrics.rotationAnchor("arrow.clockwise") ?? .center) {
+                        USymbol("arrow.clockwise", size: 12, box: 13)
                     }
                     .frame(width: 14, height: 14)
                 }

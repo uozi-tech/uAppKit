@@ -124,11 +124,18 @@ final class UDModalEscapeTests: XCTestCase {
         XCTAssertEqual(box.dismissed, 0)
     }
 
-    func testSpinningAngleWrapsEverySecond() {
-        let base = Date(timeIntervalSinceReferenceDate: 1000)
-        XCTAssertEqual(UDSpinningIcon<EmptyView>.angle(at: base).degrees, 0, accuracy: 0.001)
-        XCTAssertEqual(UDSpinningIcon<EmptyView>.angle(at: base.addingTimeInterval(0.25)).degrees, 90, accuracy: 0.001)
-        XCTAssertEqual(UDSpinningIcon<EmptyView>.angle(at: base.addingTimeInterval(1.5)).degrees, 180, accuracy: 0.001)
+    func testSpinningStartsAtZeroAndFinishesTheTurn() {
+        typealias Spin = UDSpinningIcon<EmptyView>
+        let start = Date(timeIntervalSinceReferenceDate: 1000.37)
+        XCTAssertEqual(Spin.angle(at: start, since: start).degrees, 0, accuracy: 0.001, "从 0° 起转，不跳到墙钟角度")
+        XCTAssertEqual(Spin.angle(at: start.addingTimeInterval(0.25), since: start).degrees, 90, accuracy: 0.001)
+        XCTAssertEqual(Spin.angle(at: start.addingTimeInterval(1.5), since: start).degrees, 180, accuracy: 0.001)
+
+        XCTAssertEqual(Spin.stopDate(start: start, now: start.addingTimeInterval(1.2)), start.addingTimeInterval(2),
+                       "停下时转完当前这一圈")
+        XCTAssertEqual(Spin.stopDate(start: start, now: start.addingTimeInterval(0.1)), start.addingTimeInterval(1),
+                       "刚开始就停也转满一圈")
+        XCTAssertEqual(Spin.stopDate(start: start, now: start.addingTimeInterval(3)), start.addingTimeInterval(3))
     }
 }
 #endif

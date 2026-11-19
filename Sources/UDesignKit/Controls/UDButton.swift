@@ -227,11 +227,20 @@ public struct UDIconButton: View {
             // 图标框比字号大 1pt：`xmark` / `plus` 这类本来就小的不动，`eye` / `doc.on.doc`
             // 这类宽或高的收进框里，并按墨迹居中（见 `USymbol`）。
             let pt: CGFloat = size <= 20 ? 10 : 12
-            UDSpinningIcon(isSpinning: isSpinning) {
+            UDSpinningIcon(isSpinning: isSpinning, anchor: Self.rotationAnchor(systemImage)) {
                 USymbol(systemImage, size: pt, box: pt + 1)
             }
         }
         .buttonStyle(UDIconButtonStyle(size: size, style: style))
+    }
+
+    /// 环形符号绕圆心转（墨迹框中心会被箭头撑偏，见 `USymbolMetrics.rotationAnchor`）。
+    private static func rotationAnchor(_ name: String) -> UnitPoint {
+        #if canImport(AppKit)
+        USymbolMetrics.rotationAnchor(name) ?? .center
+        #else
+        .center
+        #endif
     }
 }
 
@@ -255,23 +264,60 @@ public struct UDRefreshButton: View {
     }
 }
 
-/// 按墨迹中心匀速旋转（一圈 1 秒）；停下时回到 0°。「减弱动态效果」打开时不转，改为半透明。
+/// 原地匀速旋转（一圈 1 秒）：开始时从 0° 起转；停下时把当前这一圈转完再停，不跳回 0°。
+/// `anchor` 是旋转轴心（环形符号传圆心）。「减弱动态效果」打开时不转，改为半透明。
 struct UDSpinningIcon<Content: View>: View {
     let isSpinning: Bool
+    var anchor: UnitPoint = .center
     @ViewBuilder let content: Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// 这一轮开始转的时刻；转完收尾后清空。
+    @State private var spinStart: Date?
+    /// 不再转了：转到这个时刻（整圈）停。
+    @State private var stopAt: Date?
 
-    static func angle(at date: Date) -> Angle {
-        .degrees(date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360)
+    static var period: TimeInterval { 1 }
+
+    static func angle(at date: Date, since start: Date) -> Angle {
+        let turns = max(date.timeIntervalSince(start), 0) / period
+        return .degrees((turns - turns.rounded(.down)) * 360)
+    }
+
+    /// 停在当前这一圈转完的时刻（刚开始就停也至少转满一圈，让点击有反馈）。
+    static func stopDate(start: Date, now: Date) -> Date {
+        let turns = max(now.timeIntervalSince(start) / period, 0)
+        return start.addingTimeInterval(max(turns.rounded(.up), 1) * period)
     }
 
     var body: some View {
-        if isSpinning, !reduceMotion {
-            TimelineView(.animation) { context in
-                content.rotationEffect(Self.angle(at: context.date))
+        Group {
+            if reduceMotion {
+                content.opacity(isSpinning ? 0.5 : 1)
+            } else if let spinStart {
+                TimelineView(.animation) { context in
+                    let date = stopAt.map { min(context.date, $0) } ?? context.date
+                    content.rotationEffect(Self.angle(at: date, since: spinStart), anchor: anchor)
+                }
+            } else {
+                content
             }
-        } else {
-            content.opacity(isSpinning ? 0.5 : 1)
+        }
+        .onAppear { if isSpinning, spinStart == nil { spinStart = Date() } }
+        .onChange(of: isSpinning) { _, spinning in
+            if spinning {
+                // 收尾那一圈里又开始转：接着转，不重新起步。
+                if spinStart == nil { spinStart = Date() }
+                stopAt = nil
+            } else if let spinStart {
+                stopAt = Self.stopDate(start: spinStart, now: Date())
+            }
+        }
+        .task(id: stopAt) {
+            guard let stopAt else { return }
+            try? await Task.sleep(for: .seconds(max(stopAt.timeIntervalSinceNow, 0)))
+            guard !Task.isCancelled, self.stopAt == stopAt, !isSpinning else { return }
+            spinStart = nil
+            self.stopAt = nil
         }
     }
 }
