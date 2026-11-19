@@ -92,12 +92,13 @@ public struct UDTextArea: View {
 
     private var editor: some View {
         ZStack(alignment: .topLeading) {
-            // 占位：TextEditor 内部文本容器有 ~5pt 内衬，占位对齐水平 14 / 垂直 12。
+            // 占位：TextEditor 没有垂直内衬、左右各有 5pt 行片段留白（lineFragmentPadding），
+            // 所以占位水平 9+5、垂直与编辑器同为 10，光标和占位落在同一位置。
             if text.isEmpty {
                 Text(placeholder)
                     .font(contentFont)
                     .foregroundStyle(UD.text4)
-                    .padding(.horizontal, 14).padding(.vertical, 12)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
                     .allowsHitTesting(false)
             }
             TextEditor(text: $text)
@@ -106,7 +107,7 @@ public struct UDTextArea: View {
                 .scrollContentBackground(.hidden)
                 .focused($focused)
                 .disabled(!isEnabled)
-                .padding(.horizontal, 9).padding(.vertical, 7)
+                .padding(.horizontal, 9).padding(.vertical, 10)
         }
     }
 
