@@ -177,17 +177,14 @@ public struct UDModelPicker: View {
                 .accessibilityLabel(placeholder)
             if let onRefresh {
                 Button(action: onRefresh) {
-                    Group {
-                        if isRefreshing {
-                            ProgressView().controlSize(.small).scaleEffect(0.7)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
+                    // 刷新中图标自己转圈（同 `UDRefreshButton`），不换成另一个转圈控件。
+                    UDSpinningIcon(isSpinning: isRefreshing) {
+                        Image(systemName: "arrow.clockwise")
                     }
                     .frame(width: 14, height: 14)
                 }
                 .buttonStyle(UDComposerGhostIconStyle())
-                .disabled(isRefreshing)
+                .allowsHitTesting(!isRefreshing)
                 .help("重新获取模型列表")
                 .accessibilityLabel("刷新模型列表")
             }
