@@ -16,6 +16,9 @@ import AppKit
 ///   overlay，把转场 / AttributeGraph 卡死（端口转发「连点编辑直接卡页面」的根因）。
 ///
 /// 显式「取消」按钮请直接调用其闭包、绕开本背板，不受武装延迟影响。
+///
+/// 按 ESC 也调 `onDismiss`（只关最上面一层，见 `UDModalEscape`），不受武装延迟影响。
+/// 提交中等不该关的时候由 `onDismiss` 自己判断后忽略。
 public struct UDModalBackdrop: View {
     let onDismiss: () -> Void
 
@@ -35,6 +38,7 @@ public struct UDModalBackdrop: View {
             .ignoresSafeArea()
             .contentShape(Rectangle())
             .onTapGesture { if armed { onDismiss() } }
+            .background(alignment: .topLeading) { UDModalEscapeCatcher(onEscape: onDismiss) }
             .task {
                 try? await Task.sleep(for: .seconds(NSEvent.doubleClickInterval + 0.05))
                 armed = true

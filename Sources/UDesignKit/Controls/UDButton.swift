@@ -209,12 +209,16 @@ public struct UDIconButton: View {
     let systemImage: String
     var size: CGFloat = 28
     var style: Style = .plain
+    var isSpinning = false
     let action: () -> Void
 
-    public init(systemImage: String, size: CGFloat = 28, style: Style = .plain, action: @escaping () -> Void) {
+    /// - Parameter isSpinning: 图标原地匀速旋转（刷新进行中），见 `UDRefreshButton`。
+    public init(systemImage: String, size: CGFloat = 28, style: Style = .plain, isSpinning: Bool = false,
+                action: @escaping () -> Void) {
         self.systemImage = systemImage
         self.size = size
         self.style = style
+        self.isSpinning = isSpinning
         self.action = action
     }
 
@@ -223,9 +227,52 @@ public struct UDIconButton: View {
             // 图标框比字号大 1pt：`xmark` / `plus` 这类本来就小的不动，`eye` / `doc.on.doc`
             // 这类宽或高的收进框里，并按墨迹居中（见 `USymbol`）。
             let pt: CGFloat = size <= 20 ? 10 : 12
-            USymbol(systemImage, size: pt, box: pt + 1)
+            UDSpinningIcon(isSpinning: isSpinning) {
+                USymbol(systemImage, size: pt, box: pt + 1)
+            }
         }
         .buttonStyle(UDIconButtonStyle(size: size, style: style))
+    }
+}
+
+/// 刷新按钮：刷新进行中时 `arrow.clockwise` 自己转圈，不再在旁边另放一个小转圈。
+/// 转圈期间再点不触发（避免叠请求）。
+public struct UDRefreshButton: View {
+    let isRefreshing: Bool
+    var size: CGFloat
+    let action: () -> Void
+
+    public init(isRefreshing: Bool, size: CGFloat = 28, action: @escaping () -> Void) {
+        self.isRefreshing = isRefreshing
+        self.size = size
+        self.action = action
+    }
+
+    public var body: some View {
+        UDIconButton(systemImage: "arrow.clockwise", size: size, isSpinning: isRefreshing) {
+            if !isRefreshing { action() }
+        }
+    }
+}
+
+/// 按墨迹中心匀速旋转（一圈 1 秒）；停下时回到 0°。「减弱动态效果」打开时不转，改为半透明。
+struct UDSpinningIcon<Content: View>: View {
+    let isSpinning: Bool
+    @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static func angle(at date: Date) -> Angle {
+        .degrees(date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1) * 360)
+    }
+
+    var body: some View {
+        if isSpinning, !reduceMotion {
+            TimelineView(.animation) { context in
+                content.rotationEffect(Self.angle(at: context.date))
+            }
+        } else {
+            content.opacity(isSpinning ? 0.5 : 1)
+        }
     }
 }
 
