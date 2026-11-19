@@ -6,7 +6,7 @@ import SwiftUI
 ///
 /// 纯展示组件：仅持有外部传入的文本 `Binding`，不依赖任何 domain model。
 /// 高 32，内边距水平 12，圆角 `UD.Radius.md`，子元素间距 8。聚焦态（`@FocusState`）
-/// 切换背景 / 描边 / 图标色，并叠一圈 3px `accent` 焦点环。`width` 给定则定宽，
+/// 切换 accent 描边与图标色，并叠一圈 3px `accent` 焦点环（`showsFocusRing: false` 只去掉这圈环）。`width` 给定则定宽，
 /// 否则横向撑满。
 public struct UDSearchField: View {
     @Binding var text: String
@@ -68,17 +68,17 @@ public struct UDSearchField: View {
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
         .background(
-            // v2：input-bg 淡灰填充承担边界（两主题），聚焦不换底色。
+            // 暗：白 6% 填充承担边界；日：白底 + `inputBorder` 细边。聚焦不换底色。
             RoundedRectangle(cornerRadius: UD.Radius.md) // 8
-                .fill(UD.inputBg)
+                .fill(UD.inputFill)
         )
         .overlay(
-            // v2：闲置无描边（透明占位防跳动）；聚焦 = accent 描边。
+            // 闲置 `inputBorder`（暗夜透明）；聚焦 = accent 描边（始终有，`showsFocusRing` 只管外圈柔环）。
             RoundedRectangle(cornerRadius: UD.Radius.md)
-                .strokeBorder(showsFocusRing && focused ? UD.accent : .clear, lineWidth: 1)
+                .strokeBorder(focused ? UD.accent : UD.inputBorder, lineWidth: 1)
         )
         .overlay(
-            // 聚焦焦点环：3pt 柔环（强调色 13%），不用粗发光。
+            // 聚焦焦点环：3pt 柔环（强调色 13%）。`showsFocusRing: false`（浮层里）不画，accent 描边照样有。
             RoundedRectangle(cornerRadius: UD.Radius.md)
                 .stroke(UD.accent.opacity(showsFocusRing && focused ? 0.13 : 0), lineWidth: 3)
         )

@@ -7,8 +7,8 @@ import SwiftUI
 /// 纯展示组件：仅持有外部传入的文本 `Binding`，不依赖任何 domain model。
 /// 经由 `@Environment(\.isEnabled)` 响应 `.disabled()`。视觉状态优先级
 /// 错误 > 聚焦 > 禁用 > 闲置。字段高 34，水平内边距 11，圆角 `UD.Radius.md`；
-/// 标签 11 用 `UD.text3`，错误文案 10.5 用 `UD.danger`。聚焦 / 错误态各叠一圈
-/// 3px 焦点环。`isSecure` + `revealable` 时尾部多一个眼睛钮，点一下在掩码与原文之间切。
+/// 标签 11 用 `UD.text3`，错误文案 10.5 用 `UD.danger`。聚焦 / 错误态换成 accent / 红色
+/// 描边并叠一圈 3px 焦点环（`showsFocusRing: false` 不叠）。`isSecure` + `revealable` 时尾部多一个眼睛钮，点一下在掩码与原文之间切。
 public struct UDTextField: View {
     /// 内容框水平内边距。文本裁剪边界与它同源，改一处即可。
     public static let horizontalPadding: CGFloat = 11
@@ -21,6 +21,8 @@ public struct UDTextField: View {
     var monospaced: Bool = false
     var isSecure: Bool = false
     var revealable: Bool = false
+    /// 聚焦 / 错误时外面那圈 3pt 柔环。浮层里的输入框（选择面板的搜索框等）传 false：浮层自带阴影，再叠一圈像重影。
+    var showsFocusRing: Bool = true
 
     @Environment(\.isEnabled) private var isEnabled
     @FocusState private var focused: Bool
@@ -34,7 +36,8 @@ public struct UDTextField: View {
          autoFocus: Bool = false,
          monospaced: Bool = false,
          isSecure: Bool = false,
-         revealable: Bool = false) {
+         revealable: Bool = false,
+         showsFocusRing: Bool = true) {
         self.label = label
         self.placeholder = placeholder
         self._text = text
@@ -43,6 +46,7 @@ public struct UDTextField: View {
         self.monospaced = monospaced
         self.isSecure = isSecure
         self.revealable = revealable
+        self.showsFocusRing = showsFocusRing
     }
 
     private var hasError: Bool { errorMessage != nil }
@@ -84,12 +88,11 @@ public struct UDTextField: View {
                     .fill(fieldBackground)
             )
             .overlay(
-                // v2：闲置无描边（透明占位防聚焦切换跳动）；仅聚焦 accent / 错误红。
+                // 闲置 `inputBorder`（暗夜透明）；聚焦 accent / 错误红。
                 RoundedRectangle(cornerRadius: UD.Radius.md)
                     .strokeBorder(borderColor, lineWidth: 1)
             )
             .overlay(
-                // 聚焦 / 错误焦点环：3pt 柔环（强调色 13% / 错误 12%），不用粗发光。
                 RoundedRectangle(cornerRadius: UD.Radius.md)
                     .stroke(ringColor, lineWidth: 3)
             )
@@ -158,16 +161,18 @@ public struct UDTextField: View {
         if !isEnabled {
             return Self.disabledBg
         }
-        return UD.inputBg   // v2：淡灰填充承担边界（暗 white 5.5% / 日 black 5%）
+        return UD.inputFill   // 暗：白 6% 填充承担边界；日：白底 + `inputBorder` 细边
     }
 
     private var borderColor: Color {
         if hasError { return UD.danger }
         if focused { return UD.accent }
-        return .clear   // v2：闲置无描边，占位防跳动
+        return UD.inputBorder   // 闲置：日间细边、暗夜透明（占位防跳动）
     }
 
+    /// 聚焦 / 错误焦点环：3pt 柔环（强调色 13% / 错误 12%）；`showsFocusRing == false` 时不画。
     private var ringColor: Color {
+        guard showsFocusRing else { return .clear }
         if hasError { return UD.danger.opacity(0.12) }
         if focused { return UD.accent.opacity(0.13) }
         return Color.clear

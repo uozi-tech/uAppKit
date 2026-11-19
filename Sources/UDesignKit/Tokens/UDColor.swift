@@ -287,6 +287,13 @@ public enum UD {
     public nonisolated static let inputBg     = dyn(.white(0.06),  .black(0.05))
     public nonisolated static let inputBgSoft = dyn(.white(0.045), .black(0.04))
 
+    // MARK: - 输入框 Input field（1.22.9 起 DesignKit 自己的输入控件用这一对）
+    // 日间不再用淡灰底：白底 + 一圈细边（黑 12%），放在白卡片和灰画布上都分得清。
+    // 暗夜不变：白叠加 6% 填充承担边界、闲置无边。聚焦仍是 accent 描边 + 3pt 柔环（控件可用 `showsFocusRing` 关掉）。
+    // `inputBg` 保留原值——各 app 里直接拿它铺底、没有描边的自绘输入区改成白底就看不见了。
+    public nonisolated static let inputFill   = dyn(.white(0.06),  .hex(0xFFFFFF))
+    public nonisolated static let inputBorder = dyn(.white(0),     .black(0.12))
+
     // MARK: - 行态 Row / Tab（uTable.dc.html v2 --u-row-hover / --u-row-sel / --u-tab-active）
     // rowHover = 中性 hover（日 黑4%）。导航类选中态（列表行 / pill / ⌘K 行 / 底部导航）
     // = accent 填充（深 14% / 日 12%，调色板 sel）+ accent 文字图标（清单 §4「驾驶舱」样式），

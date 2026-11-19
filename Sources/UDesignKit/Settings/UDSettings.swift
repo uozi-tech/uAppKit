@@ -600,9 +600,9 @@ public struct UDSettingsNumberField: View {
                 .foregroundStyle(UD.text)
                 .padding(.horizontal, 10)
                 .frame(width: width, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(UD.inputBg))
+                .background(RoundedRectangle(cornerRadius: 7).fill(UD.inputFill))
                 .overlay(RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(focused ? UD.accent : .clear, lineWidth: 1))
+                    .strokeBorder(focused ? UD.accent : UD.inputBorder, lineWidth: 1))
                 .animation(.easeOut(duration: 0.15), value: focused)
                 .accessibilityValue(Text(verbatim: suffix.map { "\(value) \($0)" } ?? "\(value)"))
             if let suffix {
