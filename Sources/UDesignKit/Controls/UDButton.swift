@@ -209,15 +209,19 @@ public struct UDIconButton: View {
     let systemImage: String
     var size: CGFloat = 28
     var style: Style = .plain
+    var weight: Font.Weight = .regular
     var isSpinning = false
     let action: () -> Void
 
-    /// - Parameter isSpinning: 图标原地匀速旋转（刷新进行中），见 `UDRefreshButton`。
-    public init(systemImage: String, size: CGFloat = 28, style: Style = .plain, isSpinning: Bool = false,
-                action: @escaping () -> Void) {
+    /// - Parameters:
+    ///   - weight: 图标笔画粗细；单独站着、显得单薄的图标（如标题栏右端的开关）可用 `.medium`。
+    ///   - isSpinning: 图标原地匀速旋转（刷新进行中），见 `UDRefreshButton`。
+    public init(systemImage: String, size: CGFloat = 28, style: Style = .plain, weight: Font.Weight = .regular,
+                isSpinning: Bool = false, action: @escaping () -> Void) {
         self.systemImage = systemImage
         self.size = size
         self.style = style
+        self.weight = weight
         self.isSpinning = isSpinning
         self.action = action
     }
@@ -227,17 +231,17 @@ public struct UDIconButton: View {
             // 图标框比字号大 1pt：`xmark` / `plus` 这类本来就小的不动，`eye` / `doc.on.doc`
             // 这类宽或高的收进框里，并按墨迹居中（见 `USymbol`）。
             let pt: CGFloat = size <= 20 ? 10 : 12
-            UDSpinningIcon(isSpinning: isSpinning, anchor: Self.rotationAnchor(systemImage)) {
-                USymbol(systemImage, size: pt, box: pt + 1)
+            UDSpinningIcon(isSpinning: isSpinning, anchor: Self.rotationAnchor(systemImage, weight: weight)) {
+                USymbol(systemImage, size: pt, weight: weight, box: pt + 1)
             }
         }
         .buttonStyle(UDIconButtonStyle(size: size, style: style))
     }
 
     /// 环形符号绕圆心转（墨迹框中心会被箭头撑偏，见 `USymbolMetrics.rotationAnchor`）。
-    private static func rotationAnchor(_ name: String) -> UnitPoint {
+    private static func rotationAnchor(_ name: String, weight: Font.Weight) -> UnitPoint {
         #if canImport(AppKit)
-        USymbolMetrics.rotationAnchor(name) ?? .center
+        USymbolMetrics.rotationAnchor(name, weight: weight) ?? .center
         #else
         .center
         #endif
