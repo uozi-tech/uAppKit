@@ -150,6 +150,31 @@ final class SkillInstallerTests: XCTestCase {
         XCTAssertEqual(installer.status(for: .claude), .notInstalled, "只装进 CodeBuddy，不波及别的工具")
     }
 
+    func testAntigravityTargetDetectsAppDirAndInstallsIntoConfigSkills() throws {
+        let installer = installer()
+        XCTAssertFalse(installer.isToolPresent(.antigravity))
+        // 仅有 ~/.gemini（如只装了 Gemini CLI）不算装了 Antigravity。
+        try FileManager.default.createDirectory(
+            at: home.appending(path: ".gemini", directoryHint: .isDirectory),
+            withIntermediateDirectories: true
+        )
+        XCTAssertFalse(installer.isToolPresent(.antigravity))
+
+        try makeToolDirectory(.antigravity)
+        XCTAssertTrue(installer.isToolPresent(.antigravity))
+
+        try installer.install(target: .antigravity)
+
+        let link = installer.targetLinkURL(for: .antigravity)
+        XCTAssertEqual(
+            link.path,
+            home.appending(path: ".gemini/config/skills/utable").standardizedFileURL.path
+        )
+        XCTAssertEqual(installer.status(for: .antigravity), .installed)
+        XCTAssertEqual(try linkDestination(of: link), installer.sourceDirectoryURL.path)
+        XCTAssertEqual(installer.status(for: .claude), .notInstalled, "只装进 Antigravity，不波及别的工具")
+    }
+
     // MARK: - 直接链到 app 包内
 
     /// 整个方案的核心：链接**直接**指向包内技能目录，不经过任何 app 写出的副本。
@@ -570,7 +595,10 @@ final class SkillInstallerTests: XCTestCase {
     }
 
     func testEntitlementPathsCoverEveryTarget() {
-        XCTAssertEqual(catalog.homeRelativeEntitlementPaths, ["/.claude/", "/.codex/", "/.cursor/", "/.codebuddy/"])
+        XCTAssertEqual(
+            catalog.homeRelativeEntitlementPaths,
+            ["/.claude/", "/.codex/", "/.cursor/", "/.codebuddy/", "/.gemini/"]
+        )
         XCTAssertEqual(ClientLinkInstaller.homeRelativeEntitlementPath, "/.local/bin/")
     }
 
