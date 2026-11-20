@@ -146,7 +146,7 @@ public struct UDTextArea: View {
 #Preview("UDTextArea") {
     struct PreviewWrapper: View {
         @State private var empty = ""
-        @State private var filled = #"{"GroupName":"build-bot","SenderName":"demo","Message":"hello world"}"#
+        @State private var filled = #"{"group":"build-bot","sender":"demo","message":"hello world"}"#
         @State private var errored = "line one\nline two"
 
         var body: some View {

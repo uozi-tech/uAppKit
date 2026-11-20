@@ -16,4 +16,4 @@
 
 uTerm 的聊天 Agent 和并行 AI 后续命令均使用此入口。审批复用当前 provider/model，但使用独立上下文，只有用户任务和必要服务器上下文，不接收执行 Agent 的审批指令。20 秒总超时、8 KiB 输出上限、工具事件拒绝由宿主实现。每步确认模式完全不调用审批模型。并行执行遇到需人工确认的命令时停止该服务器后续自动步骤，在结果中显示命令及原因。
 
-本地开发使用 `uozi.xcworkspace` 覆盖 uAppKit。发布仍需发布 uAppKit 版本并更新消费方的远程依赖；不要将本地 workspace 验证当作远程 tag 已发布的证据。
+本地开发用 workspace 覆盖 uAppKit（见 README「本地开发」）。发布仍需发布 uAppKit 版本并更新消费方的远程依赖；不要将本地 workspace 验证当作远程 tag 已发布的证据。

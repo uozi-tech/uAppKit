@@ -42,7 +42,7 @@ final class ProviderKeychainTests: XCTestCase {
         }
     }
 
-    private let group = "ABCDE12345.com.uozi.shared"
+    private let group = "ABCDE12345." + ProviderKeychain.accessGroupSuffix
 
     func testSaveWritesSharedSynchronizableDataProtectionItem() throws {
         let backend = FakeBackend()

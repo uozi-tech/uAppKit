@@ -2,8 +2,8 @@
 # 把 canonical 的 uctl 公共区（同目录 uctl_core.py 里 `# BEGIN uctl-core <ver>` 到 `# END uctl-core`
 # 那一段）原样回写进一个 app 的命令行客户端：
 #
-#     <workspace>/uAppKit/Tools/uctl/sync-core.sh scripts/utablectl
-#     <workspace>/uAppKit/Tools/uctl/sync-core.sh --check scripts/utablectl   # 只核不写，不一致退出 1
+#     <uAppKit>/Tools/uctl/sync-core.sh scripts/utablectl
+#     <uAppKit>/Tools/uctl/sync-core.sh --check scripts/utablectl   # 只核不写，不一致退出 1
 #
 # 目标文件里必须恰好有一对标记（第一次接入时手工放一对空标记）；区外的内容一个字节都不动，
 # 文件权限保持不变。回写后记得跑 app 自己的客户端自测与「包内 ctl 与仓库逐字节一致」的测试。

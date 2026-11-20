@@ -55,6 +55,6 @@ bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 ## 来历
 
 2026-06 起这两份源码在 uTerm 的 `vendor/` 里，2026-09 为了让 USSHKit 搬进按 tag 发布的 uAppKit，
-拆成了 `github.com/uozi-tech/Citadel`（1.0.2）与 `github.com/uozi-tech/swift-nio-ssh`（1.0.0）两个 fork 仓库。
+拆成了两个独立的 fork 仓库（Citadel 1.0.2、swift-nio-ssh 1.0.0）。
 2026-11 改成现在这样：两个 fork 仓库不再需要，manifest 上的补丁（改依赖地址、裁掉示例与测试、放宽版本区间、
 导出 `CCitadelBcrypt`）随之全部消失，只剩源码补丁。`Sources/` 与那两个 fork 最后一版的源码逐字相同。

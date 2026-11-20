@@ -75,7 +75,7 @@ public struct ProviderKeychain: ProviderSecretStore {
     private let backend: any KeychainBackend
 
     /// - Parameters:
-    ///   - accessGroup: 完整访问组，如 `"ABCDE12345.com.uozi.shared"`。nil 只用于没有
+    ///   - accessGroup: 完整访问组，即 `"<TEAMID>.com.uozi.shared"`。nil 只用于没有
     ///     keychain 能力的测试宿主（落到 app 的默认组，不共享）。
     public init(accessGroup: String?, service: String = ProviderKeychain.service,
                 backend: any KeychainBackend = SystemKeychainBackend()) {

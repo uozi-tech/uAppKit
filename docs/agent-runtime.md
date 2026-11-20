@@ -49,7 +49,7 @@ monitor.start(storeURL: dir.appendingPathComponent(ProviderStoreContainer.storeF
 let container = try ProviderStoreContainer.make(directory: dir)          // .shared；测试用 .none / makeInMemory()
 monitor.bind(storeURL: dir.appendingPathComponent(ProviderStoreContainer.storeFileName))
 
-let keychain = ProviderKeychain(accessGroup: "ABCDE12345.com.uozi.shared")
+let keychain = ProviderKeychain(accessGroup: "\(teamID).\(ProviderKeychain.accessGroupSuffix)")  // teamID：app 的 Team ID
 let providers = ProviderStore(context: container.mainContext, secrets: keychain)
 ```
 
