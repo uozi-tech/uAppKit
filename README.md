@@ -128,3 +128,10 @@ package 'X' is required using a stable-version but
 来源、补丁清单与升级步骤见 [`ThirdParty/README.md`](ThirdParty/README.md)。
 
 往本包加依赖时记住这条约束——一条 path 依赖就会让两个 app 都解析失败。
+
+## 许可证
+
+[AGPL-3.0](LICENSE)。编进本包的第三方源码各自保留原许可证（Citadel：MIT；swift-nio-ssh：Apache-2.0；
+bcrypt：OpenBSD 的 BSD 许可；Lucide / Feather 图标：ISC / MIT），见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+与 [`ThirdParty/`](ThirdParty/)。
+

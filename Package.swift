@@ -34,13 +34,14 @@ let package = Package(
         .library(name: "Citadel", targets: ["Citadel"]),
     ],
     dependencies: [
-        .package(url: "git@github.com:apple/swift-nio.git", from: "2.81.0"),
-        .package(url: "git@github.com:apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
-        .package(url: "git@github.com:apple/swift-asn1.git", from: "1.3.0"),
-        .package(url: "git@github.com:apple/swift-log.git", from: "1.0.0"),
-        // 下面两个只有包内的 Citadel / NIOSSH 用。swift-atomics 写 https：swift-nio
-        // 自己按 https 引用它，同一个包写两种地址会让 Xcode 解析时卡住。
-        .package(url: "git@github.com:attaswift/BigInt.git", "5.2.0"..<"7.0.0"),
+        // 依赖一律写 https：上游包之间互相引用都是 https，同一个包写成两种地址（https 与
+        // git@github.com:）会让 Xcode 解析时卡住；没配 SSH key 的人和 CI 也只拉得动 https。
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
+        .package(url: "https://github.com/apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
+        .package(url: "https://github.com/apple/swift-asn1.git", from: "1.3.0"),
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
+        // 下面两个只有包内的 Citadel / NIOSSH 用。
+        .package(url: "https://github.com/attaswift/BigInt.git", "5.2.0"..<"7.0.0"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.2"),
     ],
     targets: [

@@ -1,10 +1,10 @@
 {
-  "originHash" : "258a4de2cdafdd6f403d0ecd7f443aac264c3f89c7c5f01dd5d60df50c5a8899",
+  "originHash" : "8540a2d3af2173c23022a879a79338e9f3a559a35f27242e0413b683df19a366",
   "pins" : [
     {
       "identity" : "bigint",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:attaswift/BigInt.git",
+      "location" : "https://github.com/attaswift/BigInt.git",
       "state" : {
         "revision" : "63feef7820abb1a8fb08587d7da56bb0b7db8751",
         "version" : "6.0.1"
@@ -13,7 +13,7 @@
     {
       "identity" : "swift-asn1",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:apple/swift-asn1.git",
+      "location" : "https://github.com/apple/swift-asn1.git",
       "state" : {
         "revision" : "d9a5b37470adc940d22c3bcd5ca6953a516b727f",
         "version" : "1.7.2"
@@ -40,7 +40,7 @@
     {
       "identity" : "swift-crypto",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:apple/swift-crypto.git",
+      "location" : "https://github.com/apple/swift-crypto.git",
       "state" : {
         "revision" : "da9d28d69ebe3894b18376c8f2395c2f37b8448f",
         "version" : "4.5.2"
@@ -49,7 +49,7 @@
     {
       "identity" : "swift-log",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:apple/swift-log.git",
+      "location" : "https://github.com/apple/swift-log.git",
       "state" : {
         "revision" : "3ffafb9722d5d918c614feb496c8789a3b59d222",
         "version" : "1.15.0"
@@ -58,7 +58,7 @@
     {
       "identity" : "swift-nio",
       "kind" : "remoteSourceControl",
-      "location" : "git@github.com:apple/swift-nio.git",
+      "location" : "https://github.com/apple/swift-nio.git",
       "state" : {
         "revision" : "a931f2c1de8dd49381ce3bf2e279d033f68d8865",
         "version" : "2.102.0"
