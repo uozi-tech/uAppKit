@@ -9,8 +9,9 @@ import PackageDescription
 /// 历史发版才能复现。
 ///
 /// 注意：本包按 tag 被消费，因此**不能有任何 path 依赖**——SwiftPM 会拒绝
-/// 「stable-version 的包依赖 unstable-version 的包」。USSHKit 的两个 fork 正是为此
-/// 从 uTerm 的 `vendor/` 里拆成了独立仓库。
+/// 「stable-version 的包依赖 unstable-version 的包」。USSHKit 要的 Citadel 与
+/// swift-nio-ssh 带着补丁，所以不作为依赖引用，而是把上游源码作为本包的 target
+/// 编进来（见下方 `NIOSSH` / `Citadel`），补丁与来源记在 `ThirdParty/`。
 let package = Package(
     name: "uAppKit",
     platforms: [
@@ -29,16 +30,18 @@ let package = Package(
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
         .library(name: "AgentRuntimeUI", targets: ["AgentRuntimeUI"]),
         .library(name: "UControlKitUI", targets: ["UControlKitUI"]),
+        // uTerm 的 iOS target 直接链这个 product（共享源码里 `import Citadel`）。
+        .library(name: "Citadel", targets: ["Citadel"]),
     ],
     dependencies: [
-        // 两个打过补丁的 fork。exact 钉死：它们不走语义化版本演进，每次动都是
-        // 人工重放补丁，不该让解析器自己挑版本。补丁清单见各仓库的 PATCHES.md。
-        .package(url: "https://github.com/uozi-tech/Citadel.git", exact: "1.0.2"),
-        .package(url: "https://github.com/uozi-tech/swift-nio-ssh.git", exact: "1.0.0"),
         .package(url: "git@github.com:apple/swift-nio.git", from: "2.81.0"),
         .package(url: "git@github.com:apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
         .package(url: "git@github.com:apple/swift-asn1.git", from: "1.3.0"),
         .package(url: "git@github.com:apple/swift-log.git", from: "1.0.0"),
+        // 下面两个只有包内的 Citadel / NIOSSH 用。swift-atomics 写 https：swift-nio
+        // 自己按 https 引用它，同一个包写两种地址会让 Xcode 解析时卡住。
+        .package(url: "git@github.com:attaswift/BigInt.git", "5.2.0"..<"7.0.0"),
+        .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.2"),
     ],
     targets: [
         .target(name: "UDesignKit"),
@@ -78,15 +81,56 @@ let package = Package(
         // `UDAgentPanel`：把 `AgentRuntimeSession` / `AgentApprovalQueue` 绑到 UDesignKit 的
         // 纯展示 agent 视图上。
         .target(name: "AgentRuntimeUI", dependencies: ["AgentRuntime", "AgentKit", "UDesignKit"]),
+        // ---- SSH 栈的两个上游（源码来自上游 tag + ThirdParty/<名字>/patches/）----
+        // Sources/NIOSSH、Sources/Citadel、Sources/CCitadelBcrypt 由
+        // `Tools/ssh-stack/sync.sh apply` 生成，**别直接改**：改动写成补丁放进
+        // ThirdParty/，`sync.sh check` 会核对两者一致。来源、补丁清单与升级步骤见
+        // ThirdParty/README.md。模块名保持上游原名，所以同一个构建图里不能再出现
+        // 上游的 Citadel / swift-nio-ssh 包（模块会重名）。
+        //
+        // Wellz26/swift-nio-ssh 0.3.6（Citadel 依赖的 fork，带 cert-auth）。设置照抄
+        // 上游 manifest：5.10 工具版本即 Swift 5 语言模式，加上它的三个 upcoming feature。
+        .target(
+            name: "NIOSSH",
+            dependencies: [
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "Atomics", package: "swift-atomics"),
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .enableUpcomingFeature("StrictConcurrency"),
+                .enableUpcomingFeature("InferSendableFromCaptures"),
+                .enableUpcomingFeature("MemberImportVisibility"),
+            ]
+        ),
+        // orlandos-nl/Citadel 0.12.1。bcrypt_pbkdf 的 C 实现（OpenBSD）。
+        .target(name: "CCitadelBcrypt"),
+        .target(
+            name: "Citadel",
+            dependencies: [
+                "CCitadelBcrypt",
+                "NIOSSH",
+                .product(name: "NIO", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "BigInt", package: "BigInt"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // 同上：原先也是 5.10。
         .target(
             name: "USSHKit",
             dependencies: [
-                .product(name: "Citadel", package: "Citadel"),
+                "Citadel",
                 // bcrypt_pbkdf。解密带口令的 OpenSSH 私钥容器要用，整个 SSH 栈里
-                // 只有这个 C target 有实现；Citadel fork 为此把它导出成了 product。
-                .product(name: "CCitadelBcrypt", package: "Citadel"),
-                .product(name: "NIOSSH", package: "swift-nio-ssh"),
+                // 只有这个 C target 有实现。
+                "CCitadelBcrypt",
+                "NIOSSH",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),

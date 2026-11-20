@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Fri, 20 Nov 2026 10:47:15 +0800
+Subject: [PATCH 2/4] =?UTF-8?q?NIOSSH:=20=E5=AF=B9=E7=AB=AF=E5=85=88?=
+ =?UTF-8?q?=E5=85=B3=EF=BC=88.closedRemotely=EF=BC=89=E6=97=B6=E4=B9=9F?=
+ =?UTF-8?q?=E4=B8=8D=E5=9B=9E=20window-adjust?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上一个补丁只挡住我方先关：sentClose 只对 .closedLocally / .closed 为 true。对端先发
+CHANNEL_CLOSE（网络抖动、远端掉线）时状态是 .closedRemotely，sentClose 为 false，
+isActiveOnChannel 为 true，sendChannelWindowAdjust 照样 preconditionFailure，
+同一个崩溃从这扇门进来。
+
+ChildChannelStateMachine 新增 canSendWindowAdjust，只对 sendChannelWindowAdjust
+接受的 4 个状态（.active / .halfClosedLocal / .halfClosedRemote / .quiescent）返回
+true；deliverSingleRead 改用它判断。apple/swift-nio-ssh 的 main 仍只有 sentClose
+守卫，这个补丁可以提给上游。
+---
+ .../ChildChannelStateMachine.swift            | 17 +++++++++++++++++
+ .../Child Channels/SSHChildChannel.swift      | 19 ++++++++++++-------
+ 2 files changed, 29 insertions(+), 7 deletions(-)
+
+diff --git a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift
+index 732ae17..2c3c292 100644
+--- a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
++++ b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
+@@ -609,6 +609,23 @@ extension ChildChannelStateMachine {
+         }
+     }
+ 
++    // uTerm patch #2: whether sending a CHANNEL_WINDOW_ADJUST is legal in the
++    // current state. This is the EXACT accepting set of `sendChannelWindowAdjust`
++    // and is strictly narrower than `isActiveOnChannel`, which also returns true
++    // for `.closedLocally` and `.closedRemotely` — states in which a window adjust
++    // hits a `preconditionFailure` and aborts the process. `sentClose` (patch #1)
++    // only excluded `.closedLocally`/`.closed`; `.closedRemotely` (peer sent
++    // CHANNEL_CLOSE first — the network-flap case) still leaked through. Gating on
++    // this predicate closes that gap and keeps the legality set in one place.
++    var canSendWindowAdjust: Bool {
++        switch self.state {
++        case .active, .halfClosedLocal, .halfClosedRemote, .quiescent:
++            return true
++        case .idle, .requestedLocally, .requestedRemotely, .closedLocally, .closedRemotely, .closed:
++            return false
++        }
++    }
++
+     /// The local identifier for this channel. We always know this identifier.
+     var localChannelIdentifier: UInt32 {
+         switch self.state {
+diff --git a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift
+index c9c62a3..df4161c 100644
+--- a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
++++ b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
+@@ -649,13 +649,18 @@ private extension SSHChildChannel {
+     private func deliverSingleRead(_ data: PendingContent) {
+         switch data {
+         case .data(let data):
+-            // We only futz with the window manager if the channel is not already closed.
+-            // uTerm patch: also skip when we've sent CHANNEL_CLOSE (state .closedLocally/.closed).
+-            // Draining buffered reads while in a closed-locally state would otherwise emit a
+-            // CHANNEL_WINDOW_ADJUST, which the state machine rejects with a preconditionFailure
+-            // ("Sent channel window adjust on channel in invalid state") and crashes the process.
+-            // This mirrors the `!self.state.sentClose` guard added in upstream apple/swift-nio-ssh.
+-            if !self.didClose, !self.state.sentClose, let increment = self.windowManager.unbufferBytes(data.data.readableBytes) {
++            // We only futz with the window manager if the channel is still in a state that
++            // accepts a CHANNEL_WINDOW_ADJUST. Draining buffered reads while the channel is
++            // closing would otherwise emit a window adjust, which the state machine rejects with
++            // a preconditionFailure ("Sent channel window adjust on channel in invalid state")
++            // and crashes the whole process on the EventLoop thread.
++            //
++            // uTerm patch #1 used `!self.state.sentClose`, which only excluded the WE-closed
++            // direction (.closedLocally/.closed). The peer-closed-first direction (.closedRemotely
++            // — the network-flap case) still passed the guard and crashed. uTerm patch #2 gates on
++            // `canSendWindowAdjust`, the exact accepting set of `sendChannelWindowAdjust`, covering
++            // both directions. See vendor/swift-nio-ssh/UTERM-PATCHES.md.
++            if !self.didClose, self.state.canSendWindowAdjust, let increment = self.windowManager.unbufferBytes(data.data.readableBytes) {
+                 let update = SSHMessage.ChannelWindowAdjustMessage(recipientChannel: self.state.remoteChannelIdentifier!, bytesToAdd: UInt32(increment))
+                 self.processOutboundMessage(.channelWindowAdjust(update), promise: nil)
+             }

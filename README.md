@@ -28,6 +28,7 @@ uTable、uTerm 与 uGit 共用的包，一个 SwiftPM 包多个产品。
 | `Tools/xcode/embed-login-item.sh` | Run Script「Embed Background Login Item」：`LAUNCHER` |
 | `Tools/launcher/main.swift.template` | 后台登录项 launcher（沙盒 helper，不链本包） |
 | `Tools/verify-background-launcher.py` | 发版前核 launcher 签名与沙盒 |
+| `Tools/ssh-stack/sync.sh` | 由上游源码 + `ThirdParty/*/patches/` 生成 `Sources/NIOSSH`、`Sources/Citadel`、`Sources/CCitadelBcrypt`（`check` / `apply` / `finish`）；自测 `sync.test.sh`。见 `ThirdParty/README.md` |
 
 vendor 规则：app 把模板拷到自己仓库（build phase 脚本放 `scripts/build-phases/`），pbxproj 的
 shellScript 只调它；改模板先改这里、再拷回各 app，不在 app 里分叉。
@@ -88,10 +89,6 @@ xcodebuild -workspace path/to/dev.xcworkspace -scheme uTable ...
 把覆盖状态带进任何一个 app 的历史——**发版构建走 `-project uTable.xcodeproj`，
 拿的仍是按 tag 钉住的那一版**。
 
-两个 SSH fork（`Citadel` / `swift-nio-ssh`）也是 `<workspace>` 下的同级目录，
-但默认**不**挂进 workspace：它们用 `exact:` 钉死、只在人工重放补丁时才动。真要改的
-时候再拖进来，改完记得拖出去。
-
 改完之后的正常流程：在 uAppKit 里提交 → 打 tag → 在 app 里把版本要求升上去 →
 用 `.xcodeproj`（不是 workspace）验一遍，确保拿的是发布出去的那一版。
 
@@ -125,13 +122,9 @@ package 'X' is required using a stable-version but
 'X' depends on an unstable-version package 'Y'
 ```
 
-`USSHKit` 迁进来时正是撞上这条：它原先依赖 uTerm 里的 `vendor/Citadel` 和
-`vendor/swift-nio-ssh` 两个 path 包。解法是把那两个 fork 也拆成独立仓库、按 tag 引用：
-
-- `github.com/uozi-tech/swift-nio-ssh` —— 基线 `Wellz26/swift-nio-ssh` 0.3.6 + 补丁
-- `github.com/uozi-tech/Citadel` —— 基线 `orlandos-nl/Citadel` 0.12.1，仅改 manifest
-
-两者都用 `exact:` 钉死：它们不走语义化版本演进，每次动都是人工重放补丁，不该让
-解析器自己挑版本。补丁清单见各仓库的 `PATCHES.md`。
+`USSHKit` 迁进来时正是撞上这条：它依赖打过补丁的 Citadel 和 swift-nio-ssh。现在的
+解法是把这两个上游的源码作为本包的 target（`Citadel` / `CCitadelBcrypt` / `NIOSSH`）
+编进来，补丁存成 `.patch` 文件、由 `Tools/ssh-stack/sync.sh` 重放，不再维护 fork 仓库。
+来源、补丁清单与升级步骤见 [`ThirdParty/README.md`](ThirdParty/README.md)。
 
 往本包加依赖时记住这条约束——一条 path 依赖就会让两个 app 都解析失败。

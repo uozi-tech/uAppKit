@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Fri, 20 Nov 2026 10:47:15 +0800
+Subject: [PATCH 3/4] =?UTF-8?q?NIOSSH:=20closeFuture=20=E6=B0=B8=E4=B8=8D?=
+ =?UTF-8?q?=E5=A4=B1=E8=B4=A5=EF=BC=9B=E5=B7=B2=E5=85=B3=E9=97=AD=20channe?=
+ =?UTF-8?q?l=20=E4=B8=8A=E7=9A=84=E6=89=93=E5=BC=80=E8=AF=B7=E6=B1=82?=
+ =?UTF-8?q?=E7=9B=B4=E6=8E=A5=E5=A4=B1=E8=B4=A5?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- 在已关闭的 channel 上发起打开时，原先用 closeFuture.cascadeFailure 让 promise
+  失败；closeFuture 从不失败，promise 就永远挂着。改成直接以 ioOnClosedChannel 失败。
+- 出错拆除时原先让 closePromise 失败，违反 NIOCore「closeFuture 永不失败」的约定：
+  NIOAsyncChannel.executeThenClose 对失败的 closeFuture 断言，SSH 传输突然断开
+  （parentChannelInactive → tcpShutdown）时，包成 NIOAsyncChannel 的 direct-tcpip
+  channel 在 Debug 构建里崩溃。改成 succeed；错误本身已经经 fireErrorCaught、
+  失败的待写数据和待关闭 promise 报出去了。
+---
+ Sources/NIOSSH/Child Channels/SSHChildChannel.swift | 13 ++++++++++---
+ 1 file changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift
+index df4161c..7733cc2 100644
+--- a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
++++ b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
+@@ -489,8 +489,9 @@ extension SSHChildChannel: Channel, ChannelCore {
+             self.processOutboundMessage(.channelOpen(message), promise: nil)
+             self.writePendingToMultiplexer()
+         } else {
+-            // Already closed, just fail this promise.
+-            self.closeFuture.cascadeFailure(to: userPromise)
++            // Already closed, just fail this promise. (Do not cascade from closeFuture:
++            // it never fails — cascadeFailure would leave the promise forever pending.)
++            userPromise?.fail(ChannelError.ioOnClosedChannel)
+         }
+     }
+ 
+@@ -591,7 +592,13 @@ extension SSHChildChannel: Channel, ChannelCore {
+ 
+         self.eventLoop.execute {
+             self.removeHandlers(pipeline: self.pipeline)
+-            self.closePromise.fail(error)
++            // `Channel.closeFuture` must never fail (NIOCore contract): `NIOAsyncChannel`'s
++            // `executeThenClose` asserts on a failed closeFuture, which turned abrupt SSH
++            // transport teardown (`NIOSSHError.tcpShutdown` via `parentChannelInactive`) into
++            // a debug-build crash for wrapped direct-tcpip channels. The error itself has
++            // already been surfaced via `fireErrorCaught`, failed pending writes, and the
++            // pending close promise above — the closeFuture only reports "closed".
++            self.closePromise.succeed(())
+             self.multiplexer.childChannelErrored(channelID: self.state.localChannelIdentifier, expectClose: !self.state.isClosed)
+         }
+     }

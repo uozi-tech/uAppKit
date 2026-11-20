@@ -1,0 +1,124 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Fri, 20 Nov 2026 10:47:15 +0800
+Subject: [PATCH] =?UTF-8?q?Citadel:=20login=20timeout=20=E5=8F=AF=E9=85=8D?=
+ =?UTF-8?q?=E7=BD=AE=EF=BC=8C=E7=99=BB=E5=BD=95=E5=A4=B1=E8=B4=A5=E6=97=B6?=
+ =?UTF-8?q?=E5=85=B3=E9=97=AD=20channel?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+上游 SSHClientSession.addHandlers 把 ClientHandshakeHandler 的 loginTimeout 写死为
+10 秒，从 handler 装进 pipeline 起算，覆盖 TCP + 版本交换 + KEX + 认证全程；主机
+密钥校验就在 KEX 期，用户在首连确认框上停超过 10 秒，authenticated 以
+ChannelError.connectTimeout 失败、connect 抛错。上游失败后不关 channel，握手在
+后台照常走完、认证成功，socket 泄漏到进程退出。
+
+- SSHClientSettings 新增 loginTimeout（默认 10 秒，与上游一致），addHandlers 改用它。
+- SSHClientSession.connect 与 SSHClient.connect 两个便捷入口加带默认值的
+  loginTimeout 参数，源码兼容。
+- handshakeHandler.authenticated 失败时关闭 channel：超时、拒绝主机密钥、认证失败
+  都把传输层拆掉。errorCaught 路径 NIOSSH 本来就会关，重复 close 无害。
+---
+ Sources/Citadel/Client.swift        |  7 +++++--
+ Sources/Citadel/ClientSession.swift | 26 ++++++++++++++++++++++++--
+ 2 files changed, 29 insertions(+), 4 deletions(-)
+
+diff --git a/Sources/Citadel/Client.swift b/Sources/Citadel/Client.swift
+index a0d0eb3..b16c7fa 100644
+--- a/Sources/Citadel/Client.swift
++++ b/Sources/Citadel/Client.swift
+@@ -274,6 +274,7 @@ public final class SSHClient {
+     /// - group: The event loop group to use. Defaults to a single-threaded event loop group.
+     /// - channelHandlers: Pass in an array of channel prehandlers that execute first. Default empty array
+     /// - connectTimeout: Pass in the time before the connection times out. Default 30 seconds.
++    /// - loginTimeout: Upper bound for connect + handshake (incl. host-key approval) + authentication. Default 10 seconds.
+     /// - Returns: An SSH client.
+     public static func connect(
+         host: String,
+@@ -285,7 +286,8 @@ public final class SSHClient {
+         protocolOptions: Set<SSHProtocolOption> = [],
+         group: MultiThreadedEventLoopGroup = .singleton,
+         channelHandlers: [ChannelHandler] = [],
+-        connectTimeout:TimeAmount = .seconds(30)
++        connectTimeout:TimeAmount = .seconds(30),
++        loginTimeout: TimeAmount = .seconds(10)
+     ) async throws -> SSHClient {
+         let session = try await SSHClientSession.connect(
+             host: host,
+@@ -296,7 +298,8 @@ public final class SSHClient {
+             protocolOptions: protocolOptions,
+             group: group,
+             channelHandlers: channelHandlers,
+-            connectTimeout: connectTimeout
++            connectTimeout: connectTimeout,
++            loginTimeout: loginTimeout
+         )
+         
+         let client = SSHClient(
+diff --git a/Sources/Citadel/ClientSession.swift b/Sources/Citadel/ClientSession.swift
+index c181a25..43a5245 100644
+--- a/Sources/Citadel/ClientSession.swift
++++ b/Sources/Citadel/ClientSession.swift
+@@ -109,6 +109,17 @@ public struct SSHClientSettings: Sendable {
+     internal var channelHandlers: [ChannelHandler & Sendable] = []
+     public var connectTimeout: TimeAmount = .seconds(30)
+ 
++    /// Upper bound for the whole login phase: TCP connect, version exchange, key exchange
++    /// (including any interactive host-key approval the `hostKeyValidator` performs) and
++    /// user authentication. The timer starts when the handlers are installed. If the
++    /// server has not reported `UserAuthSuccess` by then the connection attempt fails
++    /// with `ChannelError.connectTimeout(loginTimeout)` and the channel is closed.
++    ///
++    /// Upstream Citadel hard-codes this to 10 seconds, which is shorter than the time a
++    /// user reasonably needs to read and confirm a host-key prompt (uozi patch #1, see
++    /// PATCHES.md).
++    public var loginTimeout: TimeAmount = .seconds(10)
++
+     public init(
+         host: String,
+         port: Int = 22,
+@@ -169,8 +180,16 @@ final class SSHClientSession: Sendable {
+     ) -> EventLoopFuture<Void> {
+         let handshakeHandler = ClientHandshakeHandler(
+             eventLoop: channel.eventLoop,
+-            loginTimeout: .seconds(10)
++            loginTimeout: settings.loginTimeout
+         )
++        // A failed login (timeout, rejected host key, auth error) must tear the
++        // transport down. Without this the TCP connection kept living on inside
++        // NIOSSH after `connect` had already thrown: the handshake would finish
++        // later, the server would log a successful authentication that nobody
++        // owns, and the socket leaked until process exit (uozi patch #1).
++        handshakeHandler.authenticated.whenFailure { _ in
++            channel.close(promise: nil)
++        }
+         var clientConfiguration = SSHClientConfiguration(
+             userAuthDelegate: settings.authenticationMethod(),
+             serverAuthDelegate: settings.hostKeyValidator
+@@ -247,6 +266,7 @@ final class SSHClientSession: Sendable {
+     /// - group: The event loop group to use, will use a new group with one thread if not specified.
+     /// - channelHandlers: Pass in an array of channel prehandlers that execute first. Default empty array
+     /// - connectTimeout: Pass in the time before the connection times out. Default 30 seconds.
++    /// - loginTimeout: Upper bound for connect + handshake + authentication. Default 10 seconds.
+     static func connect(
+         host: String,
+         port: Int = 22,
+@@ -256,7 +276,8 @@ final class SSHClientSession: Sendable {
+         protocolOptions: Set<SSHProtocolOption> = [],
+         group: EventLoopGroup = MultiThreadedEventLoopGroup.singleton,
+         channelHandlers: [ChannelHandler] = [],
+-        connectTimeout: TimeAmount = .seconds(30)
++        connectTimeout: TimeAmount = .seconds(30),
++        loginTimeout: TimeAmount = .seconds(10)
+     ) async throws -> SSHClientSession {
+         var settings = SSHClientSettings(
+             host: host,
+@@ -270,6 +291,7 @@ final class SSHClientSession: Sendable {
+         settings.group = group
+         settings.channelHandlers = channelHandlers
+         settings.connectTimeout = connectTimeout
++        settings.loginTimeout = loginTimeout
+         
+         return try await connect(
+             settings: settings

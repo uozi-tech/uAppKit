@@ -52,3 +52,39 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## Citadel
+
+`Sources/Citadel`、`Sources/CCitadelBcrypt` 取自 [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) 0.12.1，带本仓库的补丁（`ThirdParty/Citadel/`）。
+`Sources/CCitadelBcrypt` 里的 bcrypt / Blowfish 实现来自 OpenBSD，各文件头部保留了原许可声明。
+
+```
+MIT License
+
+Copyright (c) 2022 Orlandos
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## swift-nio-ssh
+
+`Sources/NIOSSH` 取自 [Wellz26/swift-nio-ssh](https://github.com/Wellz26/swift-nio-ssh) 0.3.6（[apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) 的 fork），带本仓库的补丁（`ThirdParty/swift-nio-ssh/`，被改过的文件头部有修改声明）。
+
+Copyright (c) Apple Inc. and the SwiftNIO project authors.
+Licensed under the Apache License, Version 2.0，全文见 `ThirdParty/swift-nio-ssh/LICENSE.txt`。

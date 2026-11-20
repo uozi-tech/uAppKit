@@ -8,8 +8,8 @@ import CCitadelBcrypt
 /// 带口令的容器用 `bcrypt_pbkdf(口令, salt, rounds)` 一次性派生出 `key || iv`，再用
 /// `ciphername` 声明的对称算法解私钥段。bcrypt_pbkdf 是 OpenSSH 自己的 PBKDF2 变体
 /// （摘要 SHA-512、分组函数是 EksBlowfish），整个 SSH 栈里只有 Citadel 的 C target
-/// `CCitadelBcrypt` 有实现 —— 那个 fork 为此把它导出成 product（见 Citadel 仓库
-/// `PATCHES.md`）。对称算法用 swift-crypto 的 `AES._CTR`，不引新依赖。
+/// `CCitadelBcrypt` 有实现（本包里的 target，见 `ThirdParty/Citadel`）。对称算法用
+/// swift-crypto 的 `AES._CTR`，不引新依赖。
 nonisolated enum OpenSSHKeyDecryption {
 
     /// 容器的对称算法。`ssh-keygen` 默认写 `aes256-ctr`；其余两档是它支持的另两个 CTR

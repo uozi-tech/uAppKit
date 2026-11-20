@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Fri, 20 Nov 2026 10:47:15 +0800
+Subject: [PATCH 1/4] =?UTF-8?q?NIOSSH:=20=E6=88=91=E6=96=B9=E5=B7=B2?=
+ =?UTF-8?q?=E5=8F=91=20CLOSE=20=E5=90=8E=E4=B8=8D=E5=86=8D=E5=9B=9E=20wind?=
+ =?UTF-8?q?ow-adjust?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+远端关 channel 或本地拆除后，状态机进入 .closedLocally / .closed，但缓冲里还有
+入站数据要投递。父 socket 的 channelReadComplete 经 tryToRead（isActiveOnChannel
+对这两个状态返回 true）走到 deliverSingleRead：排空数据腾出窗口，于是构造
+CHANNEL_WINDOW_ADJUST，sendChannelWindowAdjust 对已关闭状态 preconditionFailure，
+在 event-loop 线程上 abort 整个进程（uTerm 1.6.0 线上崩溃）。
+
+deliverSingleRead 的 .data 分支多判断 !state.sentClose。apple/swift-nio-ssh 现行
+实现就是这么修的；Wellz26 的 fork 是修复前的快照。
+---
+ Sources/NIOSSH/Child Channels/SSHChildChannel.swift | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift
+index 0f30423..c9c62a3 100644
+--- a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
++++ b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
+@@ -650,7 +650,12 @@ private extension SSHChildChannel {
+         switch data {
+         case .data(let data):
+             // We only futz with the window manager if the channel is not already closed.
+-            if !self.didClose, let increment = self.windowManager.unbufferBytes(data.data.readableBytes) {
++            // uTerm patch: also skip when we've sent CHANNEL_CLOSE (state .closedLocally/.closed).
++            // Draining buffered reads while in a closed-locally state would otherwise emit a
++            // CHANNEL_WINDOW_ADJUST, which the state machine rejects with a preconditionFailure
++            // ("Sent channel window adjust on channel in invalid state") and crashes the process.
++            // This mirrors the `!self.state.sentClose` guard added in upstream apple/swift-nio-ssh.
++            if !self.didClose, !self.state.sentClose, let increment = self.windowManager.unbufferBytes(data.data.readableBytes) {
+                 let update = SSHMessage.ChannelWindowAdjustMessage(recipientChannel: self.state.remoteChannelIdentifier!, bytesToAdd: UInt32(increment))
+                 self.processOutboundMessage(.channelWindowAdjust(update), promise: nil)
+             }
