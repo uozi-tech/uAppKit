@@ -1,0 +1,17 @@
+# gitleaks 配置：默认规则，加上看过、确认无害的已知项。
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "测试夹具里 ssh-keygen 现生成的测试私钥（口令 testpass123），以及 Citadel 里的私钥格式常量"
+targetRules = ["private-key"]
+paths = [
+  '''^Tests/USSHKitTests/KeyImportFixtures\.swift$''',
+  '''^Sources/Citadel/OpenSSHKey\.swift$''',
+  '''^Sources/Citadel/SSHKeyTypeDetection\.swift$''',
+]
+
+[[allowlists]]
+description = "类型名被当成 key 值：`private let key: RSASHA512PrivateKey`"
+targetRules = ["generic-api-key"]
+regexes = ['''^RSASHA512PrivateKey$''']

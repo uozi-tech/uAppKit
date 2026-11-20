@@ -129,6 +129,10 @@ package 'X' is required using a stable-version but
 
 往本包加依赖时记住这条约束——一条 path 依赖就会让两个 app 都解析失败。
 
+## 参与贡献
+
+见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。合并 PR 之前，每位贡献者要签一次 [CLA](CLA.md)（PR 里自动检查）。
+
 ## 许可证
 
 [AGPL-3.0](LICENSE)。编进本包的第三方源码各自保留原许可证（Citadel：MIT；swift-nio-ssh：Apache-2.0；
