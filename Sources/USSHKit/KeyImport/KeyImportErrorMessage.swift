@@ -15,10 +15,10 @@ public nonisolated enum KeyImportErrorMessage {
 
         var lines = [description]
         if let reason, reason != description {
-            lines.append("原因：\(reason)")
+            lines.append(String(localized: "原因：\(reason)", bundle: .module))
         }
         if let suggestion {
-            lines.append("建议：\(suggestion)")
+            lines.append(String(localized: "建议：\(suggestion)", bundle: .module))
         }
         return lines.joined(separator: "\n")
     }

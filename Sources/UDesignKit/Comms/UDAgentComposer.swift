@@ -64,8 +64,8 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         status: String? = nil,
         canSend: Bool,
         canStop: Bool = false,
-        sendHelp: String = "发送（↩）",
-        stopHelp: String = "停止（esc）",
+        sendHelp: String = String(localized: "发送（↩）", bundle: ModuleBundle.bundle),
+        stopHelp: String = String(localized: "停止（esc）", bundle: ModuleBundle.bundle),
         focus: FocusState<Bool>.Binding? = nil,
         onSend: @escaping () -> Void,
         onStop: @escaping () -> Void = {},
@@ -140,7 +140,7 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
                     Button(action: onStop) { Image(systemName: "stop.fill") }
                         .buttonStyle(UDAgentComposerPrimaryStyle(role: .stop))
                         .help(stopHelp)
-                        .accessibilityLabel("停止")
+                        .accessibilityLabel(String(localized: "停止", bundle: .module))
                 }
                 // 忙碌且不能发时只留停止：同一个位置，发送 ⇄ 停止。
                 if canSend || !canStop {
@@ -148,7 +148,7 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
                         .buttonStyle(UDAgentComposerPrimaryStyle(role: .send))
                         .disabled(!canSend)
                         .help(sendHelp)
-                        .accessibilityLabel("发送")
+                        .accessibilityLabel(String(localized: "发送", bundle: .module))
                 }
             }
         }
@@ -176,8 +176,8 @@ public extension UDAgentComposer where Accessory == EmptyView {
         status: String? = nil,
         canSend: Bool,
         canStop: Bool = false,
-        sendHelp: String = "发送（↩）",
-        stopHelp: String = "停止（esc）",
+        sendHelp: String = String(localized: "发送（↩）", bundle: ModuleBundle.bundle),
+        stopHelp: String = String(localized: "停止（esc）", bundle: ModuleBundle.bundle),
         focus: FocusState<Bool>.Binding? = nil,
         onSend: @escaping () -> Void,
         onStop: @escaping () -> Void = {},
@@ -202,8 +202,8 @@ public extension UDAgentComposer where Accessory == EmptyView, Toolbar == EmptyV
         status: String? = nil,
         canSend: Bool,
         canStop: Bool = false,
-        sendHelp: String = "发送（↩）",
-        stopHelp: String = "停止（esc）",
+        sendHelp: String = String(localized: "发送（↩）", bundle: ModuleBundle.bundle),
+        stopHelp: String = String(localized: "停止（esc）", bundle: ModuleBundle.bundle),
         focus: FocusState<Bool>.Binding? = nil,
         onSend: @escaping () -> Void,
         onStop: @escaping () -> Void = {}

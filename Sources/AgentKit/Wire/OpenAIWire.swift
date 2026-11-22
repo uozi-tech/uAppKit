@@ -189,7 +189,7 @@ public struct OpenAISSEParser: Sendable {
         else { return [] }
         if let error = obj["error"] {
             let message = (error as? [String: Any])?["message"] as? String ?? error as? String
-            streamError = message.flatMap { $0.isEmpty ? nil : $0 } ?? "未知错误"
+            streamError = message.flatMap { $0.isEmpty ? nil : $0 } ?? String(localized: "未知错误", bundle: .module)
             return []
         }
         guard let choices = obj["choices"] as? [[String: Any]],

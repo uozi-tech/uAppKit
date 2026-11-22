@@ -24,12 +24,12 @@ public enum AgentReasoningEffort: String, Sendable, Codable, Hashable, CaseItera
 
     public var label: String {
         switch self {
-        case .off:    return "关闭"
-        case .low:    return "低"
-        case .medium: return "中"
-        case .high:   return "高"
-        case .xhigh:  return "超高"
-        case .max:    return "最高"
+        case .off:    return String(localized: "关闭", bundle: .module, comment: "思考深度：关闭")
+        case .low:    return String(localized: "低", bundle: .module, comment: "思考深度：低")
+        case .medium: return String(localized: "中", bundle: .module, comment: "思考深度：中")
+        case .high:   return String(localized: "高", bundle: .module, comment: "思考深度：高")
+        case .xhigh:  return String(localized: "超高", bundle: .module, comment: "思考深度：超高")
+        case .max:    return String(localized: "最高", bundle: .module, comment: "思考深度：最高")
         }
     }
 }

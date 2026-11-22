@@ -165,7 +165,7 @@ public final class BackgroundWindowController {
 
 /// 把 app 菜单里的「退出」换成两项：转入后台、完全退出（⌘Q）。
 ///
-/// 菜单标题由调用方传入：包内字符串收不进 app 的 String Catalog。
+/// 菜单标题可由调用方传入；不传时用本包文案目录里的默认文案。
 @MainActor
 public struct BackgroundLifecycleCommands: Commands {
     private let moveToBackgroundTitle: String
@@ -178,12 +178,12 @@ public struct BackgroundLifecycleCommands: Commands {
     ///   - quitTitle: 默认「完全退出 <appName>」。
     public init(
         appName: String,
-        moveToBackgroundTitle: String = "转入后台",
+        moveToBackgroundTitle: String = String(localized: "转入后台", bundle: ModuleBundle.bundle),
         quitTitle: String? = nil,
         controller: BackgroundWindowController = .shared
     ) {
         self.moveToBackgroundTitle = moveToBackgroundTitle
-        self.quitTitle = quitTitle ?? "完全退出 \(appName)"
+        self.quitTitle = quitTitle ?? String(localized: "完全退出 \(appName)", bundle: .module)
         self.controller = controller
     }
 

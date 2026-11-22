@@ -52,19 +52,22 @@ public struct CloudKitSyncFailure: Equatable, Sendable {
             shouldRecreateContainer: eventKind == .setup && retryAfter != nil)
     }
 
-    /// 缺省中文说明，如「iCloud 同步失败：当前网络无法访问 CloudKit（约 30 秒后自动重试）」。
+    /// 缺省说明（经 String Catalog 本地化），如「iCloud 同步失败：当前网络无法访问 CloudKit（约 30 秒后自动重试）」。
     public var message: String {
         let text: String
         switch reason {
-        case .serviceUnavailable: text = "CloudKit 服务连接中断"
-        case .networkUnavailable: text = "当前网络无法访问 CloudKit"
-        case .notAuthenticated: text = "iCloud 账号不可用，请先在系统设置中登录 iCloud"
-        case .noPermission: text = "当前构建无权访问共享 iCloud 容器"
-        case .busy: text = "CloudKit 当前繁忙"
+        case .serviceUnavailable: text = String(localized: "CloudKit 服务连接中断", bundle: .module)
+        case .networkUnavailable: text = String(localized: "当前网络无法访问 CloudKit", bundle: .module)
+        case .notAuthenticated: text = String(localized: "iCloud 账号不可用，请先在系统设置中登录 iCloud", bundle: .module)
+        case .noPermission: text = String(localized: "当前构建无权访问共享 iCloud 容器", bundle: .module)
+        case .busy: text = String(localized: "CloudKit 当前繁忙", bundle: .module)
         case .other(let description): text = description
         }
-        let suffix = retryAfter.map { "（约 \(max(1, Int(ceil($0)))) 秒后自动重试）" } ?? ""
-        return "iCloud 同步失败：\(text)\(suffix)"
+        let suffix = retryAfter.map { delay in
+            let seconds = max(1, Int(ceil(delay)))
+            return String(localized: "（约 \(seconds) 秒后自动重试）", bundle: .module)
+        } ?? ""
+        return String(localized: "iCloud 同步失败：\(text)\(suffix)", bundle: .module)
     }
 }
 
@@ -213,7 +216,7 @@ public final class ProviderCloudKitMonitor {
             return
         }
         let failure = event.failure ?? CloudKitSyncFailure(
-            reason: .other("未知错误"), retryAfter: nil, retryNotBefore: nil, shouldRecreateContainer: false)
+            reason: .other(String(localized: "未知错误", bundle: .module)), retryAfter: nil, retryNotBefore: nil, shouldRecreateContainer: false)
         self.failure = failure
         status = .failed(failure)
     }

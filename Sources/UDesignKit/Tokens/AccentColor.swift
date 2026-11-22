@@ -11,11 +11,11 @@ public enum AccentColor: String, CaseIterable, Identifiable, Sendable {
 
     public var label: String {
         switch self {
-        case .blue:   return "蓝"
-        case .purple: return "紫"
-        case .green:  return "绿"
-        case .orange: return "橙"
-        case .red:    return "红"
+        case .blue:   return String(localized: "蓝", bundle: .module, comment: "强调色名")
+        case .purple: return String(localized: "紫", bundle: .module, comment: "强调色名")
+        case .green:  return String(localized: "绿", bundle: .module, comment: "强调色名")
+        case .orange: return String(localized: "橙", bundle: .module, comment: "强调色名")
+        case .red:    return String(localized: "红", bundle: .module, comment: "强调色名")
         }
     }
 

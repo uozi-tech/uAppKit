@@ -1,0 +1,707 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "%@ 命令行接口并发已满（上限 %lld 条连接），稍后重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The %1$@ command-line interface is at capacity (limit: %2$lld connections). Try again later."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ のコマンドラインインターフェイスは同時接続数の上限（%2$lld）に達しています。しばらくしてから再試行してください"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 명령줄 인터페이스의 동시 연결이 가득 찼습니다(한도 %2$lld개). 잠시 후 다시 시도하세요"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 命令列介面的並行連線已滿（上限 %2$lld 條），請稍後重試"
+          }
+        }
+      }
+    },
+    "%@ 正从临时位置运行（磁盘映像，或下载后没拖进「应用程序」），先把 %@.app 移到「应用程序」文件夹再安装。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ is running from a temporary location (a disk image, or it wasn't moved to Applications after downloading). Move %2$@.app to the Applications folder, then install."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ が一時的な場所から実行されています（ディスクイメージ、またはダウンロード後に「アプリケーション」へ移動していない）。%2$@.app を「アプリケーション」フォルダへ移動してからインストールしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@이(가) 임시 위치에서 실행 중입니다(디스크 이미지이거나 다운로드 후 '응용 프로그램'으로 옮기지 않음). %2$@.app을 '응용 프로그램' 폴더로 옮긴 후 설치하세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 正從暫時位置執行（磁碟映像檔，或下載後沒拖進「應用程式」），請先把 %2$@.app 移到「應用程式」檔案夾再安裝。"
+          }
+        }
+      }
+    },
+    "%@ 的长时请求并发已满（上限 %lld 个），稍后重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ has too many long-running requests (limit: %2$lld). Try again later."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ の長時間リクエストが上限（%2$lld 件）に達しています。しばらくしてから再試行してください"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@의 장시간 요청이 가득 찼습니다(한도 %2$lld개). 잠시 후 다시 시도하세요"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 的長時請求並行數已滿（上限 %2$lld 個），請稍後重試"
+          }
+        }
+      }
+    },
+    "%@：%@" : {
+      "comment" : "名称：失败原因",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@"
+          }
+        }
+      }
+    },
+    "%@：无法写入 %@（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: Couldn't write %2$@ (%3$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：%2$@ に書き込めません（%3$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@에 쓸 수 없음(%3$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：無法寫入 %2$@（%3$@）"
+          }
+        }
+      }
+    },
+    "%@：无法删除旧技能链接 %@（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: Couldn't remove the old skill link %2$@ (%3$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：古いスキルのリンク %2$@ を削除できません（%3$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: 이전 스킬 링크 %2$@을(를) 삭제할 수 없음(%3$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：無法刪除舊技能連結 %2$@（%3$@）"
+          }
+        }
+      }
+    },
+    "%@：无法替换旧链接（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: Couldn't replace the old link (%2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：古いリンクを置き換えられません（%2$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: 이전 링크를 교체할 수 없음(%2$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：無法取代舊連結（%2$@）"
+          }
+        }
+      }
+    },
+    "%@：未删除（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: Not removed (%2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：削除しませんでした（%2$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: 삭제하지 않음(%2$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：未刪除（%2$@）"
+          }
+        }
+      }
+    },
+    "%@.app 里缺少 %@，重新安装 %@ 即可。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app is missing %2$@. Reinstall %3$@ to fix it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app に %2$@ がありません。%3$@ を再インストールしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app에 %2$@이(가) 없습니다. %3$@을(를) 다시 설치하세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app 裡缺少 %2$@，重新安裝 %3$@ 即可。"
+          }
+        }
+      }
+    },
+    "%@.app 里缺少技能文件（%@），重新安装 %@ 即可。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app is missing the skill files (%2$@). Reinstall %3$@ to fix it."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app にスキルファイル（%2$@）がありません。%3$@ を再インストールしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app에 스킬 파일(%2$@)이 없습니다. %3$@을(를) 다시 설치하세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@.app 裡缺少技能檔案（%2$@），重新安裝 %3$@ 即可。"
+          }
+        }
+      }
+    },
+    "~/.local/bin/%@ 已被别的文件占用（非 %@ 创建）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%1$@ is already taken by another file (not created by %2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%1$@ は別のファイルが使用しています（%2$@ が作成したものではありません）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%1$@은(는) 이미 다른 파일이 사용 중입니다(%2$@이(가) 만든 파일 아님)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%1$@ 已被其他檔案占用（非 %2$@ 建立）"
+          }
+        }
+      }
+    },
+    "~/.local/bin/%@ 是一个目录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%@ is a directory"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%@ はディレクトリです"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%@은(는) 디렉터리입니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "~/.local/bin/%@ 是一個目錄"
+          }
+        }
+      }
+    },
+    "socket 路径过长（%lld 字节，上限 %lld）：%@。macOS 用户名太长，命令行接口无法启动。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Socket path is too long (%1$lld bytes, limit %2$lld): %3$@. The macOS user name is too long, so the command-line interface can't start."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "socket のパスが長すぎます（%1$lld バイト、上限 %2$lld）：%3$@。macOS のユーザ名が長すぎるため、コマンドラインインターフェイスを起動できません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "소켓 경로가 너무 깁니다(%1$lld바이트, 한도 %2$lld): %3$@. macOS 사용자 이름이 너무 길어 명령줄 인터페이스를 시작할 수 없습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "socket 路徑過長（%1$lld 位元組，上限 %2$lld）：%3$@。macOS 使用者名稱太長，命令列介面無法啟動。"
+          }
+        }
+      }
+    },
+    "删除旧的技能副本失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't delete the old copy of the skills: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "古いスキルのコピーを削除できませんでした：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 스킬 사본을 삭제하지 못함: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除舊的技能副本失敗：%@"
+          }
+        }
+      }
+    },
+    "完全退出 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quit %@ Completely"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を完全に終了"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 완전히 종료"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完全結束 %@"
+          }
+        }
+      }
+    },
+    "已存在同名文件（非 %@ 创建）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A file with the same name already exists (not created by %@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じ名前のファイルがすでにあります（%@ が作成したものではありません）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "같은 이름의 파일이 이미 있습니다(%@이(가) 만든 파일 아님)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已存在同名檔案（非 %@ 建立）"
+          }
+        }
+      }
+    },
+    "已存在同名目录（非 %@ 创建）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A directory with the same name already exists (not created by %@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じ名前のディレクトリがすでにあります（%@ が作成したものではありません）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "같은 이름의 디렉터리가 이미 있습니다(%@이(가) 만든 것 아님)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已存在同名目錄（非 %@ 建立）"
+          }
+        }
+      }
+    },
+    "无法关闭登录后台启动：" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't turn off launching in the background at login: "
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ログイン時のバックグラウンド起動をオフにできません："
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인 시 백그라운드 실행을 끌 수 없음: "
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法關閉登入時在背景啟動："
+          }
+        }
+      }
+    },
+    "无法写入 %@（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't write %1$@ (%2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ に書き込めません（%2$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에 쓸 수 없음(%2$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法寫入 %1$@（%2$@）"
+          }
+        }
+      }
+    },
+    "无法启用登录后台启动：" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't turn on launching in the background at login: "
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ログイン時のバックグラウンド起動をオンにできません："
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인 시 백그라운드 실행을 켤 수 없음: "
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法啟用登入時在背景啟動："
+          }
+        }
+      }
+    },
+    "无法替换既有的 ~/.local/bin/%@（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't replace the existing ~/.local/bin/%1$@ (%2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "既存の ~/.local/bin/%1$@ を置き換えられません（%2$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "기존 ~/.local/bin/%1$@을(를) 교체할 수 없음(%2$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法取代既有的 ~/.local/bin/%1$@（%2$@）"
+          }
+        }
+      }
+    },
+    "无法读取符号链接目标" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read the symbolic link's target"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シンボリックリンクのリンク先を読み取れません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "심볼릭 링크 대상을 읽을 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法讀取符號連結的目標"
+          }
+        }
+      }
+    },
+    "未删除（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not removed (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "削除しませんでした（%@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제하지 않음(%@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未刪除（%@）"
+          }
+        }
+      }
+    },
+    "符号链接指向其它位置：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The symbolic link points elsewhere: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シンボリックリンクは別の場所を指しています：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "심볼릭 링크가 다른 위치를 가리킴: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "符號連結指向其他位置：%@"
+          }
+        }
+      }
+    },
+    "转入后台" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Move to Background"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "バックグラウンドへ移動"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "백그라운드로 전환"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轉入背景"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

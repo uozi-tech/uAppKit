@@ -83,14 +83,14 @@ nonisolated final class HostKeyValidationDelegate:
             switch policy {
             case .strict:
                 throw SSHConnectionError.hostKeyRejected(
-                    "未知主机 \(hostKey.host):\(hostKey.port)（\(hostKey.fingerprint)）"
+                    String(localized: "未知主机 \(hostKey.host):\(String(hostKey.port))（\(hostKey.fingerprint)）", bundle: .module)
                 )
             case .acceptNew, .insecureAcceptAll:
                 try await store.remember(hostKey)
             case .ask:
                 let challenge = SSHHostKeyChallenge(hostKey: hostKey, kind: .unknown)
                 guard await approveWithTimeout(challenge) else {
-                    throw SSHConnectionError.hostKeyRejected("用户拒绝了未知主机密钥")
+                    throw SSHConnectionError.hostKeyRejected(String(localized: "用户拒绝了未知主机密钥", bundle: .module))
                 }
                 try await store.remember(hostKey)
             }
@@ -106,12 +106,12 @@ nonisolated final class HostKeyValidationDelegate:
                     previousFingerprint: previousFingerprint
                 )
                 guard await approveWithTimeout(challenge) else {
-                    throw SSHConnectionError.hostKeyRejected("用户拒绝了变化的主机密钥")
+                    throw SSHConnectionError.hostKeyRejected(String(localized: "用户拒绝了变化的主机密钥", bundle: .module))
                 }
                 try await store.remember(hostKey)
             case .strict, .acceptNew:
                 throw SSHConnectionError.hostKeyRejected(
-                    "主机密钥已变化：原 \(previousFingerprint)，现 \(hostKey.fingerprint)"
+                    String(localized: "主机密钥已变化：原 \(previousFingerprint)，现 \(hostKey.fingerprint)", bundle: .module)
                 )
             }
         }

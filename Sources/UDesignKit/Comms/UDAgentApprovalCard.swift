@@ -24,15 +24,15 @@ public struct UDAgentApprovalCard: View {
     ///   - isDestructive: 允许钮用危险色（写库、强推）。
     ///   - allowForSessionTitle: 非 nil 且给了 `onAllowForSession` 时出现「本会话允许」。
     public init(
-        title: String = "需要确认",
+        title: String = String(localized: "需要确认", bundle: ModuleBundle.bundle),
         toolName: String,
         reason: String? = nil,
         note: String? = nil,
         detail: String,
         isDestructive: Bool = false,
-        denyTitle: String = "拒绝",
-        allowTitle: String = "允许",
-        allowForSessionTitle: String? = "本会话允许",
+        denyTitle: String = String(localized: "拒绝", bundle: ModuleBundle.bundle),
+        allowTitle: String = String(localized: "允许", bundle: ModuleBundle.bundle),
+        allowForSessionTitle: String? = String(localized: "本会话允许", bundle: ModuleBundle.bundle),
         onDeny: @escaping () -> Void,
         onAllow: @escaping () -> Void,
         onAllowForSession: (() -> Void)? = nil
@@ -104,6 +104,6 @@ public struct UDAgentApprovalCard: View {
         .background(RoundedRectangle(cornerRadius: UD.Radius.md).fill(Self.tint))
         .overlay(RoundedRectangle(cornerRadius: UD.Radius.md).stroke(Self.stroke, lineWidth: 1))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(title)：\(toolName)")
+        .accessibilityLabel(String(localized: "\(title)：\(toolName)", bundle: .module, comment: "审批卡片读屏标签：标题：工具名"))
     }
 }

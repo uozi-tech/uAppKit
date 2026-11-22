@@ -7,7 +7,7 @@ import AppKit
 import SwiftUI
 import UDesignKit
 
-/// 面板上由调用方给的文案（包内字符串收不进 app 的 xcstrings，所以都可以替换）。
+/// 面板上的文案。默认值走本包的文案目录（`bundle: .module`），调用方也可以整体替换。
 public struct UDAgentPanelText: Sendable {
     public var placeholder: String
     public var emptyTitle: String
@@ -19,9 +19,9 @@ public struct UDAgentPanelText: Sendable {
     public var emptySystemImage: String
 
     public init(
-        placeholder: String = "描述目标，交给 Agent 处理…",
-        emptyTitle: String = "让 Agent 接手下一步",
-        emptyMessage: String = "描述目标即可。需要改动的操作会先请你确认。",
+        placeholder: String = String(localized: "描述目标，交给 Agent 处理…", bundle: ModuleBundle.bundle),
+        emptyTitle: String = String(localized: "让 Agent 接手下一步", bundle: ModuleBundle.bundle),
+        emptyMessage: String = String(localized: "描述目标即可。需要改动的操作会先请你确认。", bundle: ModuleBundle.bundle),
         capabilities: [UDAgentEmptyState.Capability] = [],
         suggestions: [String] = [],
         emptyActionTitle: String? = nil,
@@ -147,7 +147,7 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case .orphanToolResult(_, let content, let isError):
-            UDAgentToolTrace(name: "结果", arguments: "", result: content, status: isError ? .failed : .done)
+            UDAgentToolTrace(name: String(localized: "结果", bundle: .module, comment: "没有对应工具调用的工具结果的标题"), arguments: "", result: content, status: isError ? .failed : .done)
         }
     }
 

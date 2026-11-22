@@ -19,7 +19,7 @@ public struct UDToolCall: View {
     }
 
     /// 头部标签（如「运行命令」「运行命令 · 需要确认」）。
-    var label: String = "运行命令"
+    var label: String = String(localized: "运行命令", bundle: .module)
     /// 待执行 / 已执行的命令文本。
     let command: String
     var status: Status = .pending
@@ -33,7 +33,7 @@ public struct UDToolCall: View {
     var onSkip: () -> Void = {}
 
     public init(
-        label: String = "运行命令",
+        label: String = String(localized: "运行命令", bundle: ModuleBundle.bundle),
         command: String,
         status: Status = .pending,
         approvalEnabled: Bool = true,
@@ -63,9 +63,9 @@ public struct UDToolCall: View {
 
     private var statusText: String {
         switch status {
-        case .pending: return "待确认"
-        case .running: return "执行中"
-        case .done: return "已完成"
+        case .pending: return String(localized: "待确认", bundle: .module)
+        case .running: return String(localized: "执行中", bundle: .module)
+        case .done: return String(localized: "已完成", bundle: .module)
         }
     }
 
@@ -177,11 +177,11 @@ public struct UDToolCall: View {
                             .controlSize(.small)
                             .scaleEffect(0.62)
                             .frame(width: 12, height: 12)
-                        Text("运行中")
+                        Text("运行中", bundle: .module)
                             .font(UD.font(11.5, weight: .semibold))
                             .foregroundStyle(UD.text3)
                     } else {
-                        Text("运行")
+                        Text("运行", bundle: .module, comment: "按钮：运行命令")
                             .font(UD.font(11.5, weight: .semibold))
                             .foregroundStyle(approvalsDisabled ? UD.text4 : UD.text)
                         UDKbd("⌘↵")
@@ -201,7 +201,7 @@ public struct UDToolCall: View {
 
             Button(action: onSkip) {
                 // v2 次按钮：uw04 灰底、无边（旧幽灵描边形态已废除）。
-                Text("跳过")
+                Text("跳过", bundle: .module, comment: "按钮：跳过命令")
                     .font(UD.font(11.5))
                     .foregroundStyle(approvalsDisabled ? UD.text4 : UD.text3)
                     .padding(.horizontal, 12)
@@ -217,7 +217,7 @@ public struct UDToolCall: View {
 
             Spacer(minLength: 0)
 
-            Text(isRunning ? "命令执行中" : "运行前会请求确认")
+            Text(isRunning ? String(localized: "命令执行中", bundle: .module) : String(localized: "运行前会请求确认", bundle: .module))
                 .font(UD.font(10))
                 .foregroundStyle(UD.text4)
         }

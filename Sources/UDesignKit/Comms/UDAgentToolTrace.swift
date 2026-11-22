@@ -28,7 +28,7 @@ public struct UDAgentToolTrace: View {
     public static let displayCap = 1200
 
     public init(name: String, arguments: String, result: String? = nil, status: Status,
-                resultLabel: @escaping (Int) -> String = { "\($0) 字符" }) {
+                resultLabel: @escaping (Int) -> String = { String(localized: "\($0) 字符", bundle: ModuleBundle.bundle, comment: "工具结果的字符数") }) {
         self.name = name
         self.arguments = arguments
         self.result = result
@@ -115,6 +115,8 @@ public struct UDAgentToolTrace: View {
 
     static func truncated(_ content: String) -> String {
         guard content.count > displayCap else { return content }
-        return String(content.prefix(displayCap)) + "\n… 已截断（全文 \(content.count) 字符，模型可见完整内容）"
+        // 总字数先转成 String 再插：保持原先不带千分位的写法（只在超过 displayCap 时出现，英文恒为复数）。
+        let total = String(content.count)
+        return String(content.prefix(displayCap)) + "\n" + String(localized: "… 已截断（全文 \(total) 字符，模型可见完整内容）", bundle: .module)
     }
 }

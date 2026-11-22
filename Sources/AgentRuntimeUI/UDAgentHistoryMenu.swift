@@ -18,8 +18,8 @@ public struct UDAgentHistoryMenu: View {
     let onNew: () -> Void
     let onDelete: (ChatSession) -> Void
 
-    public init(store: AgentChatStore, scopeID: UUID?, newTitle: String = "新建对话",
-                emptyTitle: String = "还没有历史对话",
+    public init(store: AgentChatStore, scopeID: UUID?, newTitle: String = String(localized: "新建对话", bundle: ModuleBundle.bundle),
+                emptyTitle: String = String(localized: "还没有历史对话", bundle: ModuleBundle.bundle),
                 onSelect: @escaping (ChatSession) -> Void,
                 onNew: @escaping () -> Void,
                 onDelete: @escaping (ChatSession) -> Void) {
@@ -39,7 +39,7 @@ public struct UDAgentHistoryMenu: View {
                 .foregroundStyle(open ? UD.text : UD.text3)
                 .frame(width: 26, height: 26)
                 .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(open ? UD.uw06 : Color.clear))
-                .accessibilityLabel("历史对话")
+                .accessibilityLabel(String(localized: "历史对话", bundle: .module))
         } content: {
             HistoryList(store: store, scopeID: scopeID, newTitle: newTitle, emptyTitle: emptyTitle,
                         onSelect: onSelect, onNew: onNew, onDelete: onDelete)
@@ -114,7 +114,7 @@ private struct HistoryList: View {
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
-                        Text(session.title.isEmpty ? "新对话" : session.title)
+                        Text(session.title.isEmpty ? String(localized: "新对话", bundle: .module, comment: "还没有标题的对话") : session.title)
                             .font(UD.font(12.5, weight: isActive ? .medium : .regular))
                             .foregroundStyle(isActive ? UD.text : UD.text2)
                             .lineLimit(1)
@@ -145,7 +145,7 @@ private struct HistoryList: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.udPlain)
-            .accessibilityLabel("删除对话")
+            .accessibilityLabel(String(localized: "删除对话", bundle: .module))
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)

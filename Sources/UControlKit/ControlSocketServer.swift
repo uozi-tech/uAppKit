@@ -197,8 +197,9 @@ public final class ControlSocketServer<Request: ControlRequestEnvelope, Response
     public func start() -> String? {
         guard ControlSocketLocation.fitsInSunPath(socketURL) else {
             let pathBytes = socketURL.path.utf8.count
-            let message = "socket 路径过长（\(pathBytes) 字节，上限 \(ControlSocketLocation.maxSunPathLength - 1)）："
-                + "\(socketURL.path)。macOS 用户名太长，命令行接口无法启动。"
+            let limit = ControlSocketLocation.maxSunPathLength - 1
+            let path = socketURL.path
+            let message = String(localized: "socket 路径过长（\(pathBytes) 字节，上限 \(limit)）：\(path)。macOS 用户名太长，命令行接口无法启动。", bundle: .module)
             logger.error("\(message, privacy: .public)")
             return message
         }
@@ -451,7 +452,7 @@ public final class ControlSocketServer<Request: ControlRequestEnvelope, Response
         let response = Response.controlFailure(
             id: nil,
             code: ControlFailureCode.serverBusy,
-            message: "\(appName) 命令行接口并发已满（上限 \(maxActiveClients) 条连接），稍后重试"
+            message: String(localized: "\(appName) 命令行接口并发已满（上限 \(maxActiveClients) 条连接），稍后重试", bundle: .module)
         )
         clientQueue.async { [self] in
             writeResponse(response, to: clientFD)
@@ -551,7 +552,7 @@ public final class ControlSocketServer<Request: ControlRequestEnvelope, Response
                 response: .controlFailure(
                     id: request.id,
                     code: ControlFailureCode.serverBusy,
-                    message: "\(appName) 的长时请求并发已满（上限 \(maxLongLivedClients) 个），稍后重试"
+                    message: String(localized: "\(appName) 的长时请求并发已满（上限 \(maxLongLivedClients) 个），稍后重试", bundle: .module)
                 ),
                 clientFD: clientFD,
                 token: token

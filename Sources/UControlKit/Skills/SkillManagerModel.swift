@@ -53,7 +53,9 @@ public final class SkillManagerModel {
     ) -> SkillInstallStatus {
         let pairs = installers.map { ($0.definition.displayName, $0.status(for: target)) }
         if let conflict = pairs.first(where: { $0.1.conflictReason != nil }) {
-            return .conflict(reason: "\(conflict.0)：\(conflict.1.conflictReason ?? "")")
+            let name = conflict.0
+            let reason = conflict.1.conflictReason ?? ""
+            return .conflict(reason: String(localized: "\(name)：\(reason)", bundle: .module, comment: "名称：失败原因"))
         }
         if let first = pairs.first, pairs.allSatisfy({ $0.1 == first.1 }) { return first.1 }
         return .brokenLink

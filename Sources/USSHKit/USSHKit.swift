@@ -222,21 +222,21 @@ public enum SSHConnectionError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .alreadyOpen:
-            return "SSH 隧道已经建立"
+            return String(localized: "SSH 隧道已经建立", bundle: .module)
         case .closed:
-            return "SSH 隧道已关闭"
+            return String(localized: "SSH 隧道已关闭", bundle: .module)
         case .unsupportedAgentAuthentication:
-            return "当前版本尚未支持 ssh-agent 认证"
+            return String(localized: "当前版本尚未支持 ssh-agent 认证", bundle: .module)
         case .authenticationFailed(let message):
-            return "SSH 认证失败：\(message)"
+            return String(localized: "SSH 认证失败：\(message)", bundle: .module)
         case .connectFailed(let message):
-            return "SSH 连接失败：\(message)"
+            return String(localized: "SSH 连接失败：\(message)", bundle: .module)
         case .jumpHostFailed(let message):
-            return "SSH 跳板机连接失败：\(message)"
+            return String(localized: "SSH 跳板机连接失败：\(message)", bundle: .module)
         case .hostKeyRejected(let message):
-            return "SSH 主机密钥被拒绝：\(message)"
+            return String(localized: "SSH 主机密钥被拒绝：\(message)", bundle: .module)
         case .bindFailed(let message):
-            return "SSH 本地转发端口绑定失败：\(message)"
+            return String(localized: "SSH 本地转发端口绑定失败：\(message)", bundle: .module)
         }
     }
 }

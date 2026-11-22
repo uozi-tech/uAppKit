@@ -46,7 +46,7 @@ public struct UDChatMessage<Content: View>: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if showLabel {
-                Text(isUser ? "你" : "Claude")
+                Text(isUser ? String(localized: "你", bundle: .module, comment: "对话里用户消息的署名") : "Claude")
                     .font(UD.font(10.5))
                     .tracking(0.4)
                     .foregroundStyle(UD.text4)

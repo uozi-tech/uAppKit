@@ -23,7 +23,7 @@ nonisolated enum DERKeyDecoder {
     /// 取构造型节点（SEQUENCE 等）的子节点数组。
     static func children(_ node: ASN1Node) throws -> [ASN1Node] {
         guard case .constructed(let collection) = node.content else {
-            throw PrivateKeyImportError.malformedKey(reason: "DER：期望构造型节点")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "DER：期望构造型节点", bundle: .module))
         }
         return Array(collection)
     }
@@ -31,7 +31,7 @@ nonisolated enum DERKeyDecoder {
     /// 取原始型节点（INTEGER / OCTET STRING 等）的内容字节。
     static func primitiveBytes(_ node: ASN1Node) throws -> [UInt8] {
         guard case .primitive(let bytes) = node.content else {
-            throw PrivateKeyImportError.malformedKey(reason: "DER：期望原始型节点")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "DER：期望原始型节点", bundle: .module))
         }
         return Array(bytes)
     }
@@ -49,7 +49,7 @@ nonisolated enum DERKeyDecoder {
             let oid = try ASN1ObjectIdentifier(derEncoded: node, withIdentifier: .objectIdentifier)
             return oid.description
         } catch {
-            throw PrivateKeyImportError.malformedKey(reason: "DER：OID 解析失败")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "DER：OID 解析失败", bundle: .module))
         }
     }
 
@@ -58,7 +58,7 @@ nonisolated enum DERKeyDecoder {
         do {
             return try DER.parse(der)
         } catch {
-            throw PrivateKeyImportError.malformedKey(reason: "DER 解析失败")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "DER 解析失败", bundle: .module))
         }
     }
 }
@@ -89,7 +89,7 @@ nonisolated extension DERKeyDecoder {
         let root = try parse(der)
         let fields = try children(root)
         guard fields.count >= 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: "SEC1 EC：字段不足")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SEC1 EC：字段不足", bundle: .module))
         }
         let scalar = try primitiveBytes(fields[1])      // privateKey OCTET STRING
 
@@ -116,7 +116,7 @@ nonisolated extension DERKeyDecoder {
             }
         }
         guard let oid = curveOID else {
-            throw PrivateKeyImportError.malformedKey(reason: "SEC1 EC：缺少曲线信息")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SEC1 EC：缺少曲线信息", bundle: .module))
         }
         return try makeECKey(curveOID: oid, scalar: scalar)
     }
@@ -127,7 +127,7 @@ nonisolated extension DERKeyDecoder {
             var s = bytes
             while s.count > width, s.first == 0x00 { s.removeFirst() }
             guard s.count <= width else {
-                throw PrivateKeyImportError.malformedKey(reason: "EC 标量超长")
+                throw PrivateKeyImportError.malformedKey(reason: String(localized: "EC 标量超长", bundle: .module))
             }
             return Array(repeating: 0, count: width - s.count) + s
         }
@@ -143,12 +143,12 @@ nonisolated extension DERKeyDecoder {
                 return .p521(try P521.Signing.PrivateKey(
                     rawRepresentation: try padded(scalar, to: 66)))
             default:
-                throw PrivateKeyImportError.unsupportedFormat(label: "EC 曲线 \(curveOID)")
+                throw PrivateKeyImportError.unsupportedFormat(label: String(localized: "EC 曲线 \(curveOID)", bundle: .module))
             }
         } catch let e as PrivateKeyImportError {
             throw e
         } catch {
-            throw PrivateKeyImportError.malformedKey(reason: "EC 私钥构造失败")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "EC 私钥构造失败", bundle: .module))
         }
     }
 
@@ -160,11 +160,11 @@ nonisolated extension DERKeyDecoder {
         let root = try parse(der)
         let fields = try children(root)
         guard fields.count >= 3 else {
-            throw PrivateKeyImportError.malformedKey(reason: "PKCS#8：字段不足")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PKCS#8：字段不足", bundle: .module))
         }
         let algFields = try children(fields[1])
         guard let algOIDNode = algFields.first else {
-            throw PrivateKeyImportError.malformedKey(reason: "PKCS#8：缺少算法标识")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PKCS#8：缺少算法标识", bundle: .module))
         }
         let algOID = try oidString(algOIDNode)
         let inner = try primitiveBytes(fields[2])      // privateKey OCTET STRING 内容
@@ -179,12 +179,12 @@ nonisolated extension DERKeyDecoder {
             let seedNode = try parse(inner)
             let seed = try primitiveBytes(seedNode)
             guard seed.count == 32 else {
-                throw PrivateKeyImportError.malformedKey(reason: "Ed25519 种子长度非 32")
+                throw PrivateKeyImportError.malformedKey(reason: String(localized: "Ed25519 种子长度非 32", bundle: .module))
             }
             do {
                 return .ed25519(try Curve25519.Signing.PrivateKey(rawRepresentation: seed))
             } catch {
-                throw PrivateKeyImportError.malformedKey(reason: "Ed25519 私钥构造失败")
+                throw PrivateKeyImportError.malformedKey(reason: String(localized: "Ed25519 私钥构造失败", bundle: .module))
             }
         case OID.ecPublicKey:
             // algFields[1]（EC 参数）可能是命名曲线 OID（primitive 节点），
@@ -197,7 +197,7 @@ nonisolated extension DERKeyDecoder {
             }
             return try decodeSEC1EC(inner, curveOIDOverride: curveOID)
         default:
-            throw PrivateKeyImportError.unsupportedFormat(label: "算法 OID \(algOID)")
+            throw PrivateKeyImportError.unsupportedFormat(label: String(localized: "算法 OID \(algOID)", bundle: .module))
         }
     }
 

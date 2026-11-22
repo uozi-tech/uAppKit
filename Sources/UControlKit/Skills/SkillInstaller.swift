@@ -115,7 +115,9 @@ public struct SkillInstaller: Sendable {
     public var unavailableReason: String? {
         if let reason = Self.transientBundleReason(bundleURL, appName: catalog.appName) { return reason }
         guard Self.fileType(at: sourceDirectoryURL.appending(path: "SKILL.md")) == S_IFREG else {
-            return "\(catalog.appName).app 里缺少技能文件（\(definition.slug)），重新安装 \(catalog.appName) 即可。"
+            let appName = catalog.appName
+            let slug = definition.slug
+            return String(localized: "\(appName).app 里缺少技能文件（\(slug)），重新安装 \(appName) 即可。", bundle: .module)
         }
         return nil
     }
@@ -127,8 +129,7 @@ public struct SkillInstaller: Sendable {
     /// 两者都是只读卷，`/AppTranslocation/` 再兜一道。
     public static func transientBundleReason(_ bundleURL: URL, appName: String) -> String? {
         guard isTransientBundle(bundleURL) else { return nil }
-        return "\(appName) 正从临时位置运行（磁盘映像，或下载后没拖进「应用程序」），"
-            + "先把 \(appName).app 移到「应用程序」文件夹再安装。"
+        return String(localized: "\(appName) 正从临时位置运行（磁盘映像，或下载后没拖进「应用程序」），先把 \(appName).app 移到「应用程序」文件夹再安装。", bundle: .module)
     }
 
     /// 只读卷，或路径里带 `/AppTranslocation/`。
@@ -145,11 +146,11 @@ public struct SkillInstaller: Sendable {
         }
         guard type == S_IFLNK else {
             return .conflict(reason: type == S_IFDIR
-                ? "已存在同名目录（非 \(catalog.appName) 创建）"
-                : "已存在同名文件（非 \(catalog.appName) 创建）")
+                ? String(localized: "已存在同名目录（非 \(catalog.appName) 创建）", bundle: .module)
+                : String(localized: "已存在同名文件（非 \(catalog.appName) 创建）", bundle: .module))
         }
         guard let resolved = Self.linkDestination(of: link) else {
-            return .conflict(reason: "无法读取符号链接目标")
+            return .conflict(reason: String(localized: "无法读取符号链接目标", bundle: .module))
         }
         // 故意按字面路径比较、不做 resolvingSymlinksInPath：链接是用绝对路径建的，
         // 存的就是这个路径。解析符号链接反而可能在 /var → /private/var 这类前缀上误判。
@@ -160,28 +161,28 @@ public struct SkillInstaller: Sendable {
             resolved, slug: definition.slug, managedDirectoryName: catalog.managedDirectoryName) {
             return .brokenLink
         }
-        return .conflict(reason: "符号链接指向其它位置：\(resolved.path)")
+        return .conflict(reason: String(localized: "符号链接指向其它位置：\(resolved.path)", bundle: .module))
     }
 
     /// 建（或改指）链接。真冲突抛错，不覆盖用户文件；app 在临时位置或包内缺技能时
     /// 抛错且**不动**既有链接。
     public func install(target: SkillTarget) throws {
         if let reason = unavailableReason {
-            throw SkillInstallError.failed("\(target.displayName)：\(reason)")
+            throw SkillInstallError.failed(String(localized: "\(target.displayName)：\(reason)", bundle: .module, comment: "名称：失败原因"))
         }
         let link = targetLinkURL(for: target)
         switch status(for: target) {
         case .installed:
             return // 幂等
         case .conflict(let reason):
-            throw SkillInstallError.failed("\(target.displayName)：\(reason)")
+            throw SkillInstallError.failed(String(localized: "\(target.displayName)：\(reason)", bundle: .module, comment: "名称：失败原因"))
         case .brokenLink:
             // 只删这条已确认是我们建的符号链接，不碰它指向的东西。
             do {
                 try FileManager.default.removeItem(at: link)
             } catch {
                 throw SkillInstallError.failed(
-                    "\(target.displayName)：无法替换旧链接（\(error.localizedDescription)）"
+                    String(localized: "\(target.displayName)：无法替换旧链接（\(error.localizedDescription)）", bundle: .module)
                 )
             }
         case .notInstalled:
@@ -193,7 +194,7 @@ public struct SkillInstaller: Sendable {
             try FileManager.default.createSymbolicLink(at: link, withDestinationURL: sourceDirectoryURL)
         } catch {
             throw SkillInstallError.failed(
-                "\(target.displayName)：无法写入 \(link.path)（\(error.localizedDescription)）"
+                String(localized: "\(target.displayName)：无法写入 \(link.path)（\(error.localizedDescription)）", bundle: .module)
             )
         }
     }
@@ -206,7 +207,7 @@ public struct SkillInstaller: Sendable {
         case .notInstalled:
             return
         case .conflict(let reason):
-            throw SkillInstallError.failed("\(target.displayName)：未删除（\(reason)）")
+            throw SkillInstallError.failed(String(localized: "\(target.displayName)：未删除（\(reason)）", bundle: .module))
         }
     }
 
@@ -317,7 +318,7 @@ extension SkillInstaller {
                 try FileManager.default.removeItem(at: link)
             } catch {
                 throw SkillInstallError.failed(
-                    "\(target.displayName)：无法删除旧技能链接 \(link.lastPathComponent)（\(error.localizedDescription)）"
+                    String(localized: "\(target.displayName)：无法删除旧技能链接 \(link.lastPathComponent)（\(error.localizedDescription)）", bundle: .module)
                 )
             }
         }
@@ -354,7 +355,7 @@ extension SkillInstaller {
             try FileManager.default.removeItem(at: legacyRoot)
             return nil
         } catch {
-            return "删除旧的技能副本失败：\(error.localizedDescription)"
+            return String(localized: "删除旧的技能副本失败：\(error.localizedDescription)", bundle: .module)
         }
     }
 }

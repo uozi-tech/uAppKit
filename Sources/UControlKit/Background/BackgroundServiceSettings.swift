@@ -61,8 +61,8 @@ public final class BackgroundServiceSettings {
         public var disableFailedPrefix: String
 
         public init(
-            enableFailedPrefix: String = "无法启用登录后台启动：",
-            disableFailedPrefix: String = "无法关闭登录后台启动："
+            enableFailedPrefix: String = String(localized: "无法启用登录后台启动：", bundle: ModuleBundle.bundle),
+            disableFailedPrefix: String = String(localized: "无法关闭登录后台启动：", bundle: ModuleBundle.bundle)
         ) {
             self.enableFailedPrefix = enableFailedPrefix
             self.disableFailedPrefix = disableFailedPrefix

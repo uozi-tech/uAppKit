@@ -96,20 +96,20 @@ private struct Row: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if item.sendsAtNextStep {
-                Text("下一步送达")
+                Text("下一步送达", bundle: .module)
                     .font(UD.font(10))
                     .foregroundStyle(UD.text4)
                     .fixedSize()
             }
             HStack(spacing: 0) {
                 if let sendNow {
-                    IconButton(systemImage: "arrow.up", label: "立即发送",
-                               help: "立即发送：不打断当前回复，这一步跑完就送达",
+                    IconButton(systemImage: "arrow.up", label: String(localized: "立即发送", bundle: .module),
+                               help: String(localized: "立即发送：不打断当前回复，这一步跑完就送达", bundle: .module),
                                dimmed: !hovering, action: sendNow)
                 }
-                IconButton(systemImage: "pencil", label: "编辑", help: "编辑",
+                IconButton(systemImage: "pencil", label: String(localized: "编辑", bundle: .module), help: String(localized: "编辑", bundle: .module),
                            dimmed: !hovering, action: onEdit)
-                IconButton(systemImage: "xmark", label: "移除", help: "移除",
+                IconButton(systemImage: "xmark", label: String(localized: "移除", bundle: .module), help: String(localized: "移除", bundle: .module),
                            dimmed: !hovering, action: onRemove)
             }
         }
@@ -125,14 +125,14 @@ private struct Row: View {
         // 读屏与全键盘控制才按得动。
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("排队消息：\(item.text)")
-        .accessibilityValue(item.sendsAtNextStep ? "下一步送达" : "")
-        .accessibilityHint("点按载入到输入框编辑")
+        .accessibilityLabel(String(localized: "排队消息：\(item.text)", bundle: .module))
+        .accessibilityValue(item.sendsAtNextStep ? String(localized: "下一步送达", bundle: .module) : "")
+        .accessibilityHint(String(localized: "点按载入到输入框编辑", bundle: .module))
         .accessibilityAction(.default, onEdit)
         .accessibilityActions {
-            if let sendNow { Button("立即发送", action: sendNow) }
-            Button("编辑", action: onEdit)
-            Button("移除", action: onRemove)
+            if let sendNow { Button(String(localized: "立即发送", bundle: .module), action: sendNow) }
+            Button(String(localized: "编辑", bundle: .module), action: onEdit)
+            Button(String(localized: "移除", bundle: .module), action: onRemove)
         }
     }
 }

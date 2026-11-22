@@ -256,7 +256,7 @@ public struct AnthropicSSEParser: Sendable {
             let error = obj["error"] as? [String: Any]
             let parts = [error?["type"] as? String, error?["message"] as? String]
                 .compactMap { $0 }.filter { !$0.isEmpty }
-            streamError = parts.isEmpty ? "未知错误" : parts.joined(separator: "：")
+            streamError = parts.isEmpty ? String(localized: "未知错误", bundle: .module) : parts.joined(separator: "：")
             return []
         default:
             return []

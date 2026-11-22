@@ -665,7 +665,7 @@ public struct UDSettingsMoreMenu: View {
     private let items: [UDMenuItem]
     private let help: String
 
-    public init(items: [UDMenuItem], help: String = "更多操作") {
+    public init(items: [UDMenuItem], help: String = String(localized: "更多操作", bundle: ModuleBundle.bundle)) {
         self.items = items
         self.help = help
     }

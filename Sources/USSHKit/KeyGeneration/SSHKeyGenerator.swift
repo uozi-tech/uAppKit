@@ -50,7 +50,7 @@ public nonisolated enum SSHKeyGenerator {
         ]
         var error: Unmanaged<CFError>?
         guard let privKey = SecKeyCreateRandomKey(attrs as CFDictionary, &error) else {
-            let msg = (error?.takeRetainedValue()).map { String(describing: $0) } ?? "未知错误"
+            let msg = (error?.takeRetainedValue()).map { String(describing: $0) } ?? String(localized: "未知错误", bundle: .module)
             throw GenerationError.rsaGenerationFailed(msg)
         }
         // 私钥外部表示 = PKCS#1 `RSAPrivateKey` DER。

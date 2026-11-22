@@ -58,7 +58,7 @@ public struct UDSlashMenu: View {
         .clipShape(RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous))
         .udShadow(.md)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("命令")
+        .accessibilityLabel(String(localized: "命令", bundle: .module, comment: "斜杠命令菜单的读屏标签"))
     }
 
     private func row(_ item: UDSlashMenuItem, selected: Bool) -> some View {

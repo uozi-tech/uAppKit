@@ -1,0 +1,120 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "[错误：%@；模型发起的 %lld 个工具调用没有执行]" : {
+      "comment" : "回复中途失败时附在回复末尾的注记",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Error: %1$@; tool calls requested by the model that weren't run: %2$lld]"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[エラー：%1$@；モデルが要求した %2$lld 件のツール呼び出しは実行されませんでした]"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[오류: %1$@; 모델이 요청한 도구 호출 %2$lld개가 실행되지 않음]"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[錯誤：%1$@；模型發起的 %2$lld 個工具呼叫沒有執行]"
+          }
+        }
+      }
+    },
+    "[错误：%@]" : {
+      "comment" : "回复中途失败时附在回复末尾的注记",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Error: %@]"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[エラー：%@]"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[오류: %@]"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[錯誤：%@]"
+          }
+        }
+      }
+    },
+    "工具调用超过 %lld 步上限，已停止。可以接着发消息让它继续。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped after exceeding the %lld-step tool call limit. Send another message to let it continue."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ツール呼び出しが上限の %lld ステップを超えたため停止しました。続けるにはメッセージを送信してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출이 %lld단계 한도를 넘어 중지했습니다. 메시지를 보내 계속하게 할 수 있습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具呼叫超過 %lld 步上限，已停止。可以接著傳訊息讓它繼續。"
+          }
+        }
+      }
+    },
+    "还没有选择模型：在输入区的模型菜单里选一个" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No model selected: choose one from the model menu in the input area"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "モデルが選択されていません：入力欄のモデルメニューから選んでください"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모델을 선택하지 않았습니다: 입력 영역의 모델 메뉴에서 선택하세요"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未選擇模型：在輸入區的模型選單裡選一個"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

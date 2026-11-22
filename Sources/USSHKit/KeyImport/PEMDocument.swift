@@ -12,15 +12,15 @@ nonisolated struct PEMDocument {
     static func parse(_ text: String) throws -> PEMDocument {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         guard let beginRange = normalized.range(of: "-----BEGIN ") else {
-            throw PrivateKeyImportError.malformedPEM(reason: "未找到 -----BEGIN ----- 标记")
+            throw PrivateKeyImportError.malformedPEM(reason: String(localized: "未找到 -----BEGIN ----- 标记", bundle: .module))
         }
         let afterBegin = normalized[beginRange.upperBound...]
         guard let labelEnd = afterBegin.range(of: "-----") else {
-            throw PrivateKeyImportError.malformedPEM(reason: "BEGIN 行格式错误")
+            throw PrivateKeyImportError.malformedPEM(reason: String(localized: "BEGIN 行格式错误", bundle: .module))
         }
         let label = String(afterBegin[..<labelEnd.lowerBound])
         guard let endRange = afterBegin.range(of: "-----END \(label)-----") else {
-            throw PrivateKeyImportError.malformedPEM(reason: "未找到匹配的 -----END \(label)----- 标记")
+            throw PrivateKeyImportError.malformedPEM(reason: String(localized: "未找到匹配的 -----END \(label)----- 标记", bundle: .module))
         }
         let body = afterBegin[labelEnd.upperBound..<endRange.lowerBound]
 
@@ -48,7 +48,7 @@ nonisolated struct PEMDocument {
 
         let base64 = base64Lines.joined()
         guard !base64.isEmpty, let data = Data(base64Encoded: base64) else {
-            throw PrivateKeyImportError.malformedPEM(reason: "base64 正文无法解码")
+            throw PrivateKeyImportError.malformedPEM(reason: String(localized: "base64 正文无法解码", bundle: .module))
         }
         return PEMDocument(label: label, headers: headers, der: [UInt8](data))
     }

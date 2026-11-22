@@ -14,63 +14,63 @@ public nonisolated enum PrivateKeyImportError: Error, LocalizedError, Equatable 
     public var errorDescription: String? {
         switch self {
         case .malformedPEM(let reason):
-            return "私钥内容无法识别：\(reason)"
+            return String(localized: "私钥内容无法识别：\(reason)", bundle: .module)
         case .unsupportedFormat(let label):
-            return "不支持的私钥格式（\(label)）：仅支持 RSA / Ed25519 / ECDSA 私钥"
+            return String(localized: "不支持的私钥格式（\(label)）：仅支持 RSA / Ed25519 / ECDSA 私钥", bundle: .module)
         case .dsaUnsupported:
-            return "DSA 私钥不受支持，请改用 RSA / Ed25519 / ECDSA 密钥"
+            return String(localized: "DSA 私钥不受支持，请改用 RSA / Ed25519 / ECDSA 密钥", bundle: .module)
         case .encryptedKeyNeedsPassphrase:
-            return "私钥已加密，请填写密钥口令"
+            return String(localized: "私钥已加密，请填写密钥口令", bundle: .module)
         case .incorrectPassphrase:
-            return "私钥口令错误，无法解密"
+            return String(localized: "私钥口令错误，无法解密", bundle: .module)
         case .unsupportedCipher(let name):
-            return "不支持的私钥加密算法：\(name)"
+            return String(localized: "不支持的私钥加密算法：\(name)", bundle: .module)
         case .unsupportedKDF(let name):
-            return "不支持的私钥密钥派生算法：\(name)"
+            return String(localized: "不支持的私钥密钥派生算法：\(name)", bundle: .module)
         case .malformedKey(let reason):
-            return "私钥结构损坏：\(reason)"
+            return String(localized: "私钥结构损坏：\(reason)", bundle: .module)
         }
     }
 
     public var failureReason: String? {
         switch self {
         case .malformedPEM:
-            return "文件不是可识别的 PEM 私钥，或 BEGIN/END 标记不完整。"
+            return String(localized: "文件不是可识别的 PEM 私钥，或 BEGIN/END 标记不完整。", bundle: .module)
         case .unsupportedFormat(let label):
-            return "检测到 \(label)，当前只支持 RSA / Ed25519 / ECDSA 私钥。"
+            return String(localized: "检测到 \(label)，当前只支持 RSA / Ed25519 / ECDSA 私钥。", bundle: .module)
         case .dsaUnsupported:
-            return "DSA 已不再作为受支持的 SSH 私钥算法。"
+            return String(localized: "DSA 已不再作为受支持的 SSH 私钥算法。", bundle: .module)
         case .encryptedKeyNeedsPassphrase:
-            return "该私钥受口令保护，导入前需要先解密。"
+            return String(localized: "该私钥受口令保护，导入前需要先解密。", bundle: .module)
         case .incorrectPassphrase:
-            return "输入的私钥口令无法解密此文件。"
+            return String(localized: "输入的私钥口令无法解密此文件。", bundle: .module)
         case .unsupportedCipher(let name):
-            return "加密算法 \(name) 当前未实现。"
+            return String(localized: "加密算法 \(name) 当前未实现。", bundle: .module)
         case .unsupportedKDF(let name):
-            return "密钥派生算法 \(name) 当前未实现。"
+            return String(localized: "密钥派生算法 \(name) 当前未实现。", bundle: .module)
         case .malformedKey:
-            return "文件结构损坏，或内容与声明的私钥算法不匹配。"
+            return String(localized: "文件结构损坏，或内容与声明的私钥算法不匹配。", bundle: .module)
         }
     }
 
     public var recoverySuggestion: String? {
         switch self {
         case .malformedPEM:
-            return "请选择私钥文件（如 id_ed25519、id_rsa），不要选择 .pub 公钥；确认文件以 -----BEGIN ... PRIVATE KEY----- 开头，且一次只导入一把私钥。"
+            return String(localized: "请选择私钥文件（如 id_ed25519、id_rsa），不要选择 .pub 公钥；确认文件以 -----BEGIN ... PRIVATE KEY----- 开头，且一次只导入一把私钥。", bundle: .module)
         case .unsupportedFormat:
-            return "如果这是公钥或证书，请改选对应私钥；如为 PuTTY .ppk，请先转换为 OpenSSH/PEM 格式。"
+            return String(localized: "如果这是公钥或证书，请改选对应私钥；如为 PuTTY .ppk，请先转换为 OpenSSH/PEM 格式。", bundle: .module)
         case .dsaUnsupported:
-            return "请重新生成 Ed25519、RSA 或 ECDSA 密钥，并在服务器上换用新公钥。"
+            return String(localized: "请重新生成 Ed25519、RSA 或 ECDSA 密钥，并在服务器上换用新公钥。", bundle: .module)
         case .encryptedKeyNeedsPassphrase:
-            return "请输入创建该私钥时设置的 passphrase；这不是服务器登录密码。"
+            return String(localized: "请输入创建该私钥时设置的 passphrase；这不是服务器登录密码。", bundle: .module)
         case .incorrectPassphrase:
-            return "请检查大小写和输入法，或在终端用 ssh-keygen -y -f <key> 验证口令。"
+            return String(localized: "请检查大小写和输入法，或在终端用 ssh-keygen -y -f <key> 验证口令。", bundle: .module)
         case .unsupportedCipher:
-            return "请用 ssh-keygen 重新导出为常见 OpenSSH/PEM 格式后再导入。"
+            return String(localized: "请用 ssh-keygen 重新导出为常见 OpenSSH/PEM 格式后再导入。", bundle: .module)
         case .unsupportedKDF:
-            return "请改用 PBES2/PBKDF2 等常见 PEM 加密格式，或重新导出为 OpenSSH 私钥后再导入。"
+            return String(localized: "请改用 PBES2/PBKDF2 等常见 PEM 加密格式，或重新导出为 OpenSSH 私钥后再导入。", bundle: .module)
         case .malformedKey:
-            return "请确认文件未被截断、复制时没有丢行；也不要粘贴 .pub 公钥内容。"
+            return String(localized: "请确认文件未被截断、复制时没有丢行；也不要粘贴 .pub 公钥内容。", bundle: .module)
         }
     }
 

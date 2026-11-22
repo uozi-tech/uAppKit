@@ -55,7 +55,7 @@ public struct UDMetricsPopover: View {
 
                 Spacer(minLength: 0)
 
-                Text("实时")
+                Text("实时", bundle: .module, comment: "指标浮层：实时数据")
                     .font(UD.mono(10.5))
                     .foregroundStyle(UD.text3)
             }

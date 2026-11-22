@@ -173,7 +173,7 @@ public struct UDTransferRow: View {
             UDLinearBar(progress: clamped, height: 4)
 
             HStack {
-                Text("\(direction == .up ? "上传" : "下载") · 2.4 MB/s")
+                Text(verbatim: "\(direction == .up ? String(localized: "上传", bundle: .module) : String(localized: "下载", bundle: .module)) · 2.4 MB/s")
                 Spacer()
                 Text(String(format: "%.1f / 12.8 MB", clamped * 12.8))
             }

@@ -1,0 +1,3127 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "%@ 秒" : {
+      "comment" : "带一位小数的秒数",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ seconds"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 秒"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@초"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 秒"
+          }
+        }
+      }
+    },
+    "%lld 秒" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld second"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld seconds"
+                }
+              }
+            }
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld초"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 秒"
+          }
+        }
+      }
+    },
+    "AES-CTR 解密失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AES-CTR decryption failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AES-CTR の復号に失敗しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AES-CTR 복호화 실패"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AES-CTR 解密失敗"
+          }
+        }
+      }
+    },
+    "base64 正文无法解码" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't decode the base64 body"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "base64 本文をデコードできません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "base64 본문을 디코딩할 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "base64 內文無法解碼"
+          }
+        }
+      }
+    },
+    "bcrypt_pbkdf 失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt_pbkdf failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt_pbkdf に失敗しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt_pbkdf 실패"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt_pbkdf 失敗"
+          }
+        }
+      }
+    },
+    "bcrypt：SHA-512 未就绪" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt: SHA-512 isn't ready"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt：SHA-512 の準備ができていません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt: SHA-512가 준비되지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "bcrypt：SHA-512 尚未就緒"
+          }
+        }
+      }
+    },
+    "BEGIN 行格式错误" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Malformed BEGIN line"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BEGIN 行の形式が正しくありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BEGIN 줄 형식 오류"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "BEGIN 行格式錯誤"
+          }
+        }
+      }
+    },
+    "CBC 运算失败（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CBC operation failed (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CBC 演算に失敗しました（%@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CBC 연산 실패(%@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CBC 運算失敗（%@）"
+          }
+        }
+      }
+    },
+    "DEK-Info 格式错误" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Malformed DEK-Info header"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DEK-Info の形式が正しくありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DEK-Info 형식 오류"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DEK-Info 格式錯誤"
+          }
+        }
+      }
+    },
+    "DER 解析失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER parsing failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER の解析に失敗しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER 구문 분석 실패"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER 解析失敗"
+          }
+        }
+      }
+    },
+    "DER：OID 解析失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER: OID parsing failed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER：OID の解析に失敗しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER: OID 구문 분석 실패"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER：OID 解析失敗"
+          }
+        }
+      }
+    },
+    "DER：期望原始型节点" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER: expected a primitive node"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER：プリミティブ型のノードが必要です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER: 기본형 노드가 필요함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER：預期為原始型節點"
+          }
+        }
+      }
+    },
+    "DER：期望构造型节点" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER: expected a constructed node"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER：構造型のノードが必要です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER: 구조형 노드가 필요함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DER：預期為建構型節點"
+          }
+        }
+      }
+    },
+    "DSA 已不再作为受支持的 SSH 私钥算法。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA is no longer a supported SSH private key algorithm."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA はサポート対象の SSH 秘密鍵アルゴリズムではなくなりました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA는 더 이상 지원되는 SSH 개인 키 알고리즘이 아닙니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA 已不再是受支援的 SSH 私密金鑰演算法。"
+          }
+        }
+      }
+    },
+    "DSA 私钥不受支持，请改用 RSA / Ed25519 / ECDSA 密钥" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA private keys aren't supported. Use an RSA, Ed25519, or ECDSA key instead."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA 秘密鍵には対応していません。RSA / Ed25519 / ECDSA 鍵を使用してください"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DSA 개인 키는 지원되지 않습니다. RSA / Ed25519 / ECDSA 키를 사용하세요"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支援 DSA 私密金鑰，請改用 RSA / Ed25519 / ECDSA 金鑰"
+          }
+        }
+      }
+    },
+    "EC 曲线 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC curve %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 曲線 %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 곡선 %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 曲線 %@"
+          }
+        }
+      }
+    },
+    "EC 标量超长" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC scalar is too long"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC スカラーが長すぎます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 스칼라가 너무 깁니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 純量過長"
+          }
+        }
+      }
+    },
+    "EC 私钥构造失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't construct the EC private key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 秘密鍵を構築できませんでした"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 개인 키를 구성하지 못함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 私密金鑰建構失敗"
+          }
+        }
+      }
+    },
+    "Ed25519 私钥构造失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't construct the Ed25519 private key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 秘密鍵を構築できませんでした"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 개인 키를 구성하지 못함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 私密金鑰建構失敗"
+          }
+        }
+      }
+    },
+    "Ed25519 种子长度非 32" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 seed length isn't 32"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 シードの長さが 32 ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 시드 길이가 32가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519 種子長度不是 32"
+          }
+        }
+      }
+    },
+    "EncryptedPrivateKeyInfo 字段数错误" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EncryptedPrivateKeyInfo has the wrong number of fields"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EncryptedPrivateKeyInfo のフィールド数が正しくありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EncryptedPrivateKeyInfo 필드 수 오류"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EncryptedPrivateKeyInfo 欄位數錯誤"
+          }
+        }
+      }
+    },
+    "encryptionScheme 字段不足" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "encryptionScheme is missing fields"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "encryptionScheme のフィールドが不足しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "encryptionScheme 필드 부족"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "encryptionScheme 欄位不足"
+          }
+        }
+      }
+    },
+    "IV 十六进制长度为奇" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV hex length is odd"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV の 16 進数の長さが奇数です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV 16진수 길이가 홀수임"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV 十六進位長度為奇數"
+          }
+        }
+      }
+    },
+    "IV 含非十六进制字符" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV contains non-hex characters"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV に 16 進数以外の文字が含まれています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV에 16진수가 아닌 문자가 있음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV 含有非十六進位字元"
+          }
+        }
+      }
+    },
+    "IV 长度与块大小不符" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV length doesn't match the block size"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV の長さがブロックサイズと一致しません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV 길이가 블록 크기와 맞지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "IV 長度與區塊大小不符"
+          }
+        }
+      }
+    },
+    "OpenSSH RSA：分量为空" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH RSA: empty component"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH RSA：成分が空です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH RSA: 구성 요소가 비어 있음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH RSA：分量為空"
+          }
+        }
+      }
+    },
+    "OpenSSH：bcrypt 参数非法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: invalid bcrypt parameters"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：bcrypt のパラメータが不正です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: bcrypt 매개변수가 잘못됨"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：bcrypt 參數不合法"
+          }
+        }
+      }
+    },
+    "OpenSSH：checkint 不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: checkint mismatch"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：checkint が一致しません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: checkint 불일치"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：checkint 不一致"
+          }
+        }
+      }
+    },
+    "OpenSSH：密钥数量非 1" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: key count isn't 1"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：鍵の数が 1 ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: 키 개수가 1이 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：金鑰數量不是 1"
+          }
+        }
+      }
+    },
+    "OpenSSH：私钥段长度不是块大小的整数倍" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: private key section length isn't a multiple of the block size"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：秘密鍵セクションの長さがブロックサイズの倍数ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: 개인 키 구간 길이가 블록 크기의 배수가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：私密金鑰段長度不是區塊大小的整數倍"
+          }
+        }
+      }
+    },
+    "OpenSSH：缺少 magic" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: missing magic"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：magic がありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: magic 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：缺少 magic"
+          }
+        }
+      }
+    },
+    "PBES2-params 字段数错误" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2-params has the wrong number of fields"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2-params のフィールド数が正しくありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2-params 필드 수 오류"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2-params 欄位數錯誤"
+          }
+        }
+      }
+    },
+    "PBES2：缺少参数" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2: missing parameters"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2：パラメータがありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2: 매개변수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2：缺少參數"
+          }
+        }
+      }
+    },
+    "PBKDF2 密钥长度与加密算法不符" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 key length doesn't match the cipher"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 の鍵長が暗号アルゴリズムと一致しません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 키 길이가 암호화 알고리즘과 맞지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 金鑰長度與加密演算法不符"
+          }
+        }
+      }
+    },
+    "PBKDF2 迭代次数超出允许范围" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 iteration count is out of range"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 の反復回数が許容範囲外です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 반복 횟수가 허용 범위를 벗어남"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 迭代次數超出允許範圍"
+          }
+        }
+      }
+    },
+    "PBKDF2-params 字段不足" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2-params is missing fields"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2-params のフィールドが不足しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2-params 필드 부족"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2-params 欄位不足"
+          }
+        }
+      }
+    },
+    "PKCS#1 RSA：字段不足（需 9）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#1 RSA: not enough fields (9 required)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#1 RSA：フィールドが不足しています（9 個必要）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#1 RSA: 필드 부족(9개 필요)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#1 RSA：欄位不足（需 9 個）"
+          }
+        }
+      }
+    },
+    "PKCS#8：字段不足" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8: missing fields"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8：フィールドが不足しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8: 필드 부족"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8：欄位不足"
+          }
+        }
+      }
+    },
+    "PKCS#8：缺少算法标识" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8: missing algorithm identifier"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8：アルゴリズム識別子がありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8: 알고리즘 식별자 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PKCS#8：缺少演算法識別碼"
+          }
+        }
+      }
+    },
+    "RSA 私钥构造失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't construct the RSA private key: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 秘密鍵を構築できませんでした：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 개인 키를 구성하지 못함: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 私密金鑰建構失敗：%@"
+          }
+        }
+      }
+    },
+    "RSA 签名线格式损坏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Corrupt RSA signature wire format"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 署名のワイヤ形式が壊れています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 서명 와이어 형식이 손상됨"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 簽章線路格式損壞"
+          }
+        }
+      }
+    },
+    "SEC1 EC：字段不足" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: missing fields"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：フィールドが不足しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: 필드 부족"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：欄位不足"
+          }
+        }
+      }
+    },
+    "SEC1 EC：缺少曲线信息" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: missing curve information"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：曲線情報がありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: 곡선 정보 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：缺少曲線資訊"
+          }
+        }
+      }
+    },
+    "SSH 主机密钥被拒绝：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH host key rejected: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH ホスト鍵が拒否されました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 호스트 키 거부됨: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 主機金鑰被拒絕：%@"
+          }
+        }
+      }
+    },
+    "SSH 本地转发端口绑定失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't bind the SSH local forwarding port: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH ローカル転送ポートをバインドできませんでした：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 로컬 포워딩 포트 바인딩 실패: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 本機轉送連接埠綁定失敗：%@"
+          }
+        }
+      }
+    },
+    "SSH 线格式：读 string 越界" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH wire format: string read out of bounds"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH ワイヤ形式：string の読み取りが範囲外です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 와이어 형식: string 읽기 범위 초과"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 線路格式：讀取 string 越界"
+          }
+        }
+      }
+    },
+    "SSH 线格式：读 uint32 越界" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH wire format: uint32 read out of bounds"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH ワイヤ形式：uint32 の読み取りが範囲外です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 와이어 형식: uint32 읽기 범위 초과"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 線路格式：讀取 uint32 越界"
+          }
+        }
+      }
+    },
+    "SSH 认证失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH authentication failed: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 認証に失敗しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 인증 실패: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 認證失敗：%@"
+          }
+        }
+      }
+    },
+    "SSH 跳板机连接失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH jump host connection failed: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 踏み台サーバへの接続に失敗しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 점프 호스트 연결 실패: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 跳板機連線失敗：%@"
+          }
+        }
+      }
+    },
+    "SSH 连接失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH connection failed: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 接続に失敗しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 연결 실패: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 連線失敗：%@"
+          }
+        }
+      }
+    },
+    "SSH 隧道已关闭" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The SSH tunnel is closed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH トンネルは閉じています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 터널이 닫혔습니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 通道已關閉"
+          }
+        }
+      }
+    },
+    "SSH 隧道已经建立" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The SSH tunnel is already established"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH トンネルはすでに確立されています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 터널이 이미 설정되었습니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 通道已經建立"
+          }
+        }
+      }
+    },
+    "不支持的私钥加密算法：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unsupported private key cipher: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応していない秘密鍵の暗号アルゴリズム：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지원되지 않는 개인 키 암호화 알고리즘: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支援的私密金鑰加密演算法：%@"
+          }
+        }
+      }
+    },
+    "不支持的私钥密钥派生算法：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unsupported private key derivation function: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応していない秘密鍵の鍵導出アルゴリズム：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지원되지 않는 개인 키 키 파생 알고리즘: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支援的私密金鑰金鑰衍生演算法：%@"
+          }
+        }
+      }
+    },
+    "不支持的私钥格式（%@）：仅支持 RSA / Ed25519 / ECDSA 私钥" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unsupported private key format (%@): only RSA, Ed25519, and ECDSA private keys are supported"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応していない秘密鍵の形式（%@）：RSA / Ed25519 / ECDSA 秘密鍵のみ対応しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지원되지 않는 개인 키 형식(%@): RSA / Ed25519 / ECDSA 개인 키만 지원합니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支援的私密金鑰格式（%@）：僅支援 RSA / Ed25519 / ECDSA 私密金鑰"
+          }
+        }
+      }
+    },
+    "主机密钥已变化：原 %@，现 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Host key changed: was %1$@, now %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵が変更されました：変更前 %1$@、変更後 %2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트 키가 변경됨: 이전 %1$@, 현재 %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主機金鑰已變更：原為 %1$@，現為 %2$@"
+          }
+        }
+      }
+    },
+    "加密的 OpenSSH ECDSA（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encrypted OpenSSH ECDSA (%@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号化された OpenSSH ECDSA（%@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호화된 OpenSSH ECDSA(%@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加密的 OpenSSH ECDSA（%@）"
+          }
+        }
+      }
+    },
+    "加密算法 %@ 当前未实现。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cipher %@ isn't implemented yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号アルゴリズム %@ は現在実装されていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호화 알고리즘 %@은(는) 아직 구현되지 않았습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前尚未實作加密演算法 %@。"
+          }
+        }
+      }
+    },
+    "原因：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reason: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原因：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원인: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原因：%@"
+          }
+        }
+      }
+    },
+    "如果这是公钥或证书，请改选对应私钥；如为 PuTTY .ppk，请先转换为 OpenSSH/PEM 格式。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If this is a public key or certificate, choose the matching private key instead. For a PuTTY .ppk file, convert it to OpenSSH/PEM format first."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "公開鍵や証明書の場合は、対応する秘密鍵を選んでください。PuTTY の .ppk の場合は、先に OpenSSH/PEM 形式に変換してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공개 키나 인증서라면 해당 개인 키를 선택하세요. PuTTY .ppk 파일이라면 먼저 OpenSSH/PEM 형식으로 변환하세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果這是公開金鑰或憑證，請改選對應的私密金鑰；如為 PuTTY .ppk，請先轉換為 OpenSSH/PEM 格式。"
+          }
+        }
+      }
+    },
+    "密文长度不是块大小的整数倍" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ciphertext length isn't a multiple of the block size"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号文の長さがブロックサイズの倍数ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호문 길이가 블록 크기의 배수가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密文長度不是區塊大小的整數倍"
+          }
+        }
+      }
+    },
+    "密钥派生算法 %@ 当前未实现。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The key derivation function %@ isn't implemented yet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鍵導出アルゴリズム %@ は現在実装されていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키 파생 알고리즘 %@은(는) 아직 구현되지 않았습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前尚未實作金鑰衍生演算法 %@。"
+          }
+        }
+      }
+    },
+    "建议：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Suggestion: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対処法：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "제안: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建議：%@"
+          }
+        }
+      }
+    },
+    "开通道超时（上游无响应）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timed out opening the channel (no response upstream)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャネルを開く際にタイムアウトしました（上流から応答なし）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 열기 시간 초과(업스트림 응답 없음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟通道逾時（上游無回應）"
+          }
+        }
+      }
+    },
+    "当前版本尚未支持 ssh-agent 认证" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh-agent authentication isn't supported in this version yet"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このバージョンは ssh-agent 認証にまだ対応していません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 버전은 아직 ssh-agent 인증을 지원하지 않습니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前版本尚未支援 ssh-agent 認證"
+          }
+        }
+      }
+    },
+    "整数过大" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Integer is too large"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整数が大きすぎます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "정수가 너무 큼"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整數過大"
+          }
+        }
+      }
+    },
+    "文件不是可识别的 PEM 私钥，或 BEGIN/END 标记不完整。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file isn't a recognizable PEM private key, or its BEGIN/END markers are incomplete."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルが認識できる PEM 秘密鍵ではないか、BEGIN/END マーカーが不完全です。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일이 인식 가능한 PEM 개인 키가 아니거나 BEGIN/END 표시가 불완전합니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案不是可辨識的 PEM 私密金鑰，或 BEGIN/END 標記不完整。"
+          }
+        }
+      }
+    },
+    "文件结构损坏，或内容与声明的私钥算法不匹配。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file structure is corrupt, or the contents don't match the declared private key algorithm."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイル構造が壊れているか、内容が宣言された秘密鍵アルゴリズムと一致しません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일 구조가 손상되었거나 내용이 선언된 개인 키 알고리즘과 일치하지 않습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案結構損壞，或內容與宣告的私密金鑰演算法不符。"
+          }
+        }
+      }
+    },
+    "无法解析 %@：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't resolve %1$@: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ の名前を解決できません：%2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@을(를) 확인할 수 없음: %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法解析 %1$@：%2$@"
+          }
+        }
+      }
+    },
+    "无法访问本地文件：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't access the local file: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ローカルファイルにアクセスできません：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로컬 파일에 접근할 수 없음: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法存取本機檔案：%@"
+          }
+        }
+      }
+    },
+    "无法识别 OpenSSH 私钥类型" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unrecognized OpenSSH private key type"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH 秘密鍵の種類を認識できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH 개인 키 유형을 인식할 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法辨識 OpenSSH 私密金鑰類型"
+          }
+        }
+      }
+    },
+    "无法连接 %@：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't connect to %1$@: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ に接続できません：%2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@에 연결할 수 없음: %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連線 %1$@：%2$@"
+          }
+        }
+      }
+    },
+    "无法连接 %@:%@ —— %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't connect to %1$@:%2$@ — %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@:%2$@ に接続できません — %3$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@:%2$@에 연결할 수 없음 — %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連線 %1$@:%2$@ —— %3$@"
+          }
+        }
+      }
+    },
+    "无法连接 %@（NIOPosix.NIOConnectionError）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't connect to %@ (NIOPosix.NIOConnectionError)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ に接続できません（NIOPosix.NIOConnectionError）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 연결할 수 없음(NIOPosix.NIOConnectionError)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法連線 %@（NIOPosix.NIOConnectionError）"
+          }
+        }
+      }
+    },
+    "服务器不支持公钥认证" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server doesn't support public key authentication"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバは公開鍵認証に対応していません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 공개 키 인증을 지원하지 않습니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器不支援公開金鑰認證"
+          }
+        }
+      }
+    },
+    "未找到 -----BEGIN ----- 标记" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No -----BEGIN ----- marker found"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "-----BEGIN ----- マーカーが見つかりません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "-----BEGIN ----- 표시를 찾을 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到 -----BEGIN ----- 標記"
+          }
+        }
+      }
+    },
+    "未找到 -----BEGIN ...----- 标记" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No -----BEGIN ...----- marker found"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "-----BEGIN ...----- マーカーが見つかりません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "-----BEGIN ...----- 표시를 찾을 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到 -----BEGIN ...----- 標記"
+          }
+        }
+      }
+    },
+    "未找到匹配的 -----END %@----- 标记" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No matching -----END %@----- marker found"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "対応する -----END %@----- マーカーが見つかりません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "일치하는 -----END %@----- 표시를 찾을 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到相符的 -----END %@----- 標記"
+          }
+        }
+      }
+    },
+    "未知主机 %@:%@（%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown host %1$@:%2$@ (%3$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不明なホスト %1$@:%2$@（%3$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알 수 없는 호스트 %1$@:%2$@(%3$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知主機 %1$@:%2$@（%3$@）"
+          }
+        }
+      }
+    },
+    "未知错误" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown error"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不明なエラー"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알 수 없는 오류"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未知錯誤"
+          }
+        }
+      }
+    },
+    "检测到 %@，当前只支持 RSA / Ed25519 / ECDSA 私钥。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detected %@. Only RSA, Ed25519, and ECDSA private keys are supported."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を検出しました。現在は RSA / Ed25519 / ECDSA 秘密鍵のみ対応しています。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@이(가) 감지되었습니다. 현재 RSA / Ed25519 / ECDSA 개인 키만 지원합니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偵測到 %@，目前只支援 RSA / Ed25519 / ECDSA 私密金鑰。"
+          }
+        }
+      }
+    },
+    "派生密钥长度非法" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid derived key length"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "導出された鍵の長さが不正です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파생 키 길이가 잘못됨"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "衍生金鑰長度不合法"
+          }
+        }
+      }
+    },
+    "用户拒绝了变化的主机密钥" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The user rejected the changed host key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ユーザが変更されたホスト鍵を拒否しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자가 변경된 호스트 키를 거부함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用者拒絕了已變更的主機金鑰"
+          }
+        }
+      }
+    },
+    "用户拒绝了未知主机密钥" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The user rejected the unknown host key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ユーザが不明なホスト鍵を拒否しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용자가 알 수 없는 호스트 키를 거부함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用者拒絕了未知的主機金鑰"
+          }
+        }
+      }
+    },
+    "登录阶段超时：%@ 内未完成握手与认证（ChannelError.connectTimeout）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Login timed out: the handshake and authentication didn't finish within %@ (ChannelError.connectTimeout)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ログイン段階でタイムアウトしました：%@ 以内にハンドシェイクと認証が完了しませんでした（ChannelError.connectTimeout）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인 단계 시간 초과: %@ 안에 핸드셰이크와 인증을 완료하지 못함(ChannelError.connectTimeout)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登入階段逾時：%@ 內未完成交握與認證（ChannelError.connectTimeout）"
+          }
+        }
+      }
+    },
+    "私钥内容无法识别：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unrecognized private key contents: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵の内容を認識できません：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 내용을 인식할 수 없음: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無法辨識私密金鑰內容：%@"
+          }
+        }
+      }
+    },
+    "私钥口令错误，无法解密" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Incorrect private key passphrase, so it couldn't be decrypted"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵のパスフレーズが正しくないため復号できません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 암호 문구가 올바르지 않아 복호화할 수 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰密語錯誤，無法解密"
+          }
+        }
+      }
+    },
+    "私钥导入失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't import the private key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵を読み込めませんでした"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키를 가져오지 못함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰匯入失敗"
+          }
+        }
+      }
+    },
+    "私钥已加密，请填写密钥口令" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The private key is encrypted. Enter its passphrase."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵は暗号化されています。パスフレーズを入力してください"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키가 암호화되어 있습니다. 암호 문구를 입력하세요"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰已加密，請填寫金鑰密語"
+          }
+        }
+      }
+    },
+    "私钥结构损坏：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Corrupt private key structure: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵の構造が壊れています：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 구조 손상: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰結構損壞：%@"
+          }
+        }
+      }
+    },
+    "算法 OID %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Algorithm OID %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アルゴリズム OID %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알고리즘 OID %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "演算法 OID %@"
+          }
+        }
+      }
+    },
+    "经跳板机连接 %@:%@ 失败 —— %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't connect to %1$@:%2$@ through the jump host — %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバ経由で %1$@:%2$@ に接続できません — %3$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트를 통해 %1$@:%2$@에 연결하지 못함 — %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "經跳板機連線 %1$@:%2$@ 失敗 —— %3$@"
+          }
+        }
+      }
+    },
+    "缺少 DEK-Info 头" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Missing DEK-Info header"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DEK-Info ヘッダがありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DEK-Info 헤더 없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缺少 DEK-Info 標頭"
+          }
+        }
+      }
+    },
+    "认证失败：服务器拒绝了 RSA 公钥" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authentication failed: the server rejected the RSA public key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "認証に失敗しました：サーバが RSA 公開鍵を拒否しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "인증 실패: 서버가 RSA 공개 키를 거부함"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "認證失敗：伺服器拒絕了 RSA 公開金鑰"
+          }
+        }
+      }
+    },
+    "该私钥受口令保护，导入前需要先解密。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This private key is protected by a passphrase and must be decrypted before importing."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この秘密鍵はパスフレーズで保護されているため、読み込む前に復号する必要があります。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 개인 키는 암호 문구로 보호되어 있어 가져오기 전에 복호화해야 합니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此私密金鑰受密語保護，匯入前需要先解密。"
+          }
+        }
+      }
+    },
+    "请改用 PBES2/PBKDF2 等常见 PEM 加密格式，或重新导出为 OpenSSH 私钥后再导入。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use a common PEM encryption format such as PBES2/PBKDF2, or re-export it as an OpenSSH private key and import it again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2/PBKDF2 などの一般的な PEM 暗号化形式を使うか、OpenSSH 秘密鍵として書き出し直してから読み込んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2/PBKDF2 같은 일반적인 PEM 암호화 형식을 사용하거나 OpenSSH 개인 키로 다시 내보낸 후 가져오세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請改用 PBES2/PBKDF2 等常見的 PEM 加密格式，或重新匯出為 OpenSSH 私密金鑰後再匯入。"
+          }
+        }
+      }
+    },
+    "请检查大小写和输入法，或在终端用 ssh-keygen -y -f <key> 验证口令。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check capitalization and your input method, or verify the passphrase in Terminal with ssh-keygen -y -f <key>."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "大文字・小文字と入力モードを確認するか、ターミナルで ssh-keygen -y -f <key> を実行してパスフレーズを確認してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "대소문자와 입력기를 확인하거나 터미널에서 ssh-keygen -y -f <key>로 암호 문구를 확인하세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請檢查大小寫和輸入法，或在終端機用 ssh-keygen -y -f <key> 驗證密語。"
+          }
+        }
+      }
+    },
+    "请用 ssh-keygen 重新导出为常见 OpenSSH/PEM 格式后再导入。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-export it in a common OpenSSH/PEM format with ssh-keygen, then import it again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh-keygen で一般的な OpenSSH/PEM 形式に書き出し直してから読み込んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ssh-keygen으로 일반적인 OpenSSH/PEM 형식으로 다시 내보낸 후 가져오세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請用 ssh-keygen 重新匯出為常見的 OpenSSH/PEM 格式後再匯入。"
+          }
+        }
+      }
+    },
+    "请确认文件未被截断、复制时没有丢行；也不要粘贴 .pub 公钥内容。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Make sure the file isn't truncated and no lines were lost when copying. Don't paste the contents of a .pub public key."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルが途中で切れていないか、コピー時に行が抜けていないか確認してください。.pub 公開鍵の内容は貼り付けないでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일이 잘리지 않았는지, 복사할 때 줄이 빠지지 않았는지 확인하세요. .pub 공개 키 내용은 붙여넣지 마세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請確認檔案未被截斷、拷貝時沒有遺漏行；也不要貼上 .pub 公開金鑰的內容。"
+          }
+        }
+      }
+    },
+    "请输入创建该私钥时设置的 passphrase；这不是服务器登录密码。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter the passphrase you set when creating this private key. It's not the server login password."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この秘密鍵の作成時に設定した passphrase を入力してください。サーバのログインパスワードではありません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 개인 키를 만들 때 설정한 passphrase를 입력하세요. 서버 로그인 암호가 아닙니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請輸入建立此私密金鑰時設定的 passphrase；這不是伺服器登入密碼。"
+          }
+        }
+      }
+    },
+    "请选择私钥文件（如 id_ed25519、id_rsa），不要选择 .pub 公钥；确认文件以 -----BEGIN ... PRIVATE KEY----- 开头，且一次只导入一把私钥。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a private key file (such as id_ed25519 or id_rsa), not a .pub public key. Make sure the file starts with -----BEGIN ... PRIVATE KEY----- and import only one private key at a time."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵ファイル（id_ed25519、id_rsa など）を選んでください。.pub 公開鍵は選ばないでください。ファイルが -----BEGIN ... PRIVATE KEY----- で始まっていること、一度に 1 つの秘密鍵だけを読み込むことを確認してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 파일(예: id_ed25519, id_rsa)을 선택하고 .pub 공개 키는 선택하지 마세요. 파일이 -----BEGIN ... PRIVATE KEY-----로 시작하는지 확인하고 한 번에 개인 키 하나만 가져오세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請選擇私密金鑰檔案（如 id_ed25519、id_rsa），不要選擇 .pub 公開金鑰；確認檔案以 -----BEGIN ... PRIVATE KEY----- 開頭，且一次只匯入一把私密金鑰。"
+          }
+        }
+      }
+    },
+    "请重新生成 Ed25519、RSA 或 ECDSA 密钥，并在服务器上换用新公钥。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Generate a new Ed25519, RSA, or ECDSA key and switch to the new public key on the server."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519、RSA、または ECDSA の鍵を作り直し、サーバ側も新しい公開鍵に切り替えてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ed25519, RSA 또는 ECDSA 키를 새로 생성하고 서버에서 새 공개 키로 바꾸세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請重新產生 Ed25519、RSA 或 ECDSA 金鑰，並在伺服器上改用新的公開金鑰。"
+          }
+        }
+      }
+    },
+    "跳板机拒绝端口转发（sshd 可能配置了 AllowTcpForwarding no）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The jump host refused port forwarding (sshd may be configured with AllowTcpForwarding no)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバがポート転送を拒否しました（sshd に AllowTcpForwarding no が設定されている可能性があります）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트가 포트 포워딩을 거부함(sshd에 AllowTcpForwarding no가 설정되었을 수 있음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳板機拒絕連接埠轉送（sshd 可能設定了 AllowTcpForwarding no）"
+          }
+        }
+      }
+    },
+    "跳板机无法连接目标 %@（连接被拒绝或地址不可达）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The jump host couldn't connect to the target %@ (connection refused or address unreachable)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバから接続先 %@ に接続できません（接続拒否、またはアドレスに到達できません）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트가 대상 %@에 연결할 수 없음(연결 거부 또는 주소에 도달할 수 없음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳板機無法連線目標 %@（連線被拒絕或位址無法連線）"
+          }
+        }
+      }
+    },
+    "跳板机连不上目标 %@：开通道超时（多为目标的白名单/安全组未放行跳板机）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The jump host can't reach the target %@: timed out opening the channel (usually the target's allowlist or security group doesn't allow the jump host)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバから接続先 %@ に到達できません：チャネルを開く際にタイムアウトしました（多くの場合、接続先の許可リストやセキュリティグループで踏み台サーバが許可されていません）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트가 대상 %@에 연결하지 못함: 채널 열기 시간 초과(대개 대상의 허용 목록/보안 그룹이 점프 호스트를 허용하지 않음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳板機連不上目標 %@：開啟通道逾時（多半是目標的白名單/安全群組未放行跳板機）"
+          }
+        }
+      }
+    },
+    "转发到 %@ 的通道打开失败：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't open the forwarding channel to %1$@: %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ への転送チャネルを開けませんでした：%2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@(으)로 가는 포워딩 채널을 열지 못함: %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轉送到 %1$@ 的通道開啟失敗：%2$@"
+          }
+        }
+      }
+    },
+    "输入的私钥口令无法解密此文件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The passphrase you entered can't decrypt this file."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "入力したパスフレーズではこのファイルを復号できません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "입력한 암호 문구로 이 파일을 복호화할 수 없습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入的私密金鑰密語無法解密此檔案。"
+          }
+        }
+      }
+    },
+    "远程文件过大（%lld 字节，超过上限 %lld 字节）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The remote file is too large (%1$lld bytes; the limit is %2$lld bytes)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リモートファイルが大きすぎます（%1$lld バイト、上限 %2$lld バイト）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "원격 파일이 너무 큽니다(%1$lld바이트, 한도 %2$lld바이트)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "遠端檔案過大（%1$lld 位元組，超過上限 %2$lld 位元組）"
+          }
+        }
+      }
+    },
+    "非 OpenSSH 私钥" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not an OpenSSH private key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH 秘密鍵ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH 개인 키가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是 OpenSSH 私密金鑰"
+          }
+        }
+      }
+    },
+    "非 PBES2（不支持 PBES1）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not PBES2 (PBES1 isn't supported)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2 ではありません（PBES1 には非対応）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBES2가 아님(PBES1은 지원 안 함)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是 PBES2（不支援 PBES1）"
+          }
+        }
+      }
+    },
+    "非 PBKDF2" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not PBKDF2"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2 ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PBKDF2가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不是 PBKDF2"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}

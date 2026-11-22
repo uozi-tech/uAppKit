@@ -33,7 +33,7 @@ nonisolated enum OpenSSHRSADecoder {
             let p = try body.readMPInt()
             let q = try body.readMPInt()
             guard !n.isEmpty, !e.isEmpty, !d.isEmpty, !p.isEmpty, !q.isEmpty else {
-                throw PrivateKeyImportError.malformedKey(reason: "OpenSSH RSA：分量为空")
+                throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: .module))
             }
             return RSAKeyComponents(
                 modulus: n, publicExponent: e, privateExponent: d, prime1: p, prime2: q)

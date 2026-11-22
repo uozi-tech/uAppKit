@@ -140,7 +140,7 @@ public struct UDAgentTranscript<Row: Identifiable, RowContent: View, Footer: Vie
         spacing: CGFloat = 18,
         insets: EdgeInsets = EdgeInsets(top: 16, leading: 14, bottom: 0, trailing: 14),
         resetToken: AnyHashable? = nil,
-        earlierLabel: @escaping (Int) -> String = { "显示更早的 \($0) 条" },
+        earlierLabel: @escaping (Int) -> String = { String(localized: "显示更早的 \($0) 条", bundle: ModuleBundle.bundle) },
         @ViewBuilder row: @escaping (Row) -> RowContent,
         @ViewBuilder footer: @escaping () -> Footer,
         @ViewBuilder empty: @escaping () -> Empty

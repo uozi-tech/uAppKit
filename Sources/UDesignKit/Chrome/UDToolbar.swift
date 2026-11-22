@@ -66,7 +66,7 @@ public struct UDToolbarNewButton: View {
         Button(action: onNew) {
             HStack(spacing: 6) {
                 Image(systemName: "plus")
-                Text("新建")
+                Text("新建", bundle: .module)
             }
             .font(UD.control)
             .foregroundStyle(UD.accentInk)

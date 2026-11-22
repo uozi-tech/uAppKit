@@ -27,7 +27,7 @@ nonisolated enum OpenSSHContainer {
         // AUTH_MAGIC "openssh-key-v1\0"（16 字节，含 NUL）
         let magic = Array("openssh-key-v1\u{0}".utf8)
         guard der.count >= magic.count, Array(der.prefix(magic.count)) == magic else {
-            throw PrivateKeyImportError.malformedKey(reason: "OpenSSH：缺少 magic")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：缺少 magic", bundle: .module))
         }
         var reader = SSHWireReader(Array(der.dropFirst(magic.count)))
 
@@ -36,7 +36,7 @@ nonisolated enum OpenSSHContainer {
         let kdfOptions = try reader.readString()
         let keyCount = try reader.readUInt32()
         guard keyCount == 1 else {
-            throw PrivateKeyImportError.malformedKey(reason: "OpenSSH：密钥数量非 1")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：密钥数量非 1", bundle: .module))
         }
         _ = try reader.readString()                    // 公钥段（跳过）
         let blob = try reader.readString()             // 私钥段：cipher=none 时即明文
@@ -59,7 +59,7 @@ nonisolated enum OpenSSHContainer {
             // 解过密才走到这里的话几乎必然是口令错了：派生出的 key 不对，解出来就是
             // 随机字节，两个 checkint 还能撞上的概率是 2^-32。
             if encrypted { throw PrivateKeyImportError.incorrectPassphrase }
-            throw PrivateKeyImportError.malformedKey(reason: "OpenSSH：checkint 不一致")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：checkint 不一致", bundle: .module))
         }
         let keyType = String(decoding: try priv.readString(), as: UTF8.self)
         return .plaintext(keyType: keyType, body: priv)
@@ -69,7 +69,7 @@ nonisolated enum OpenSSHContainer {
     private static func extractBase64Body(_ text: String) throws -> [UInt8] {
         let doc = try PEMDocument.parse(text)
         guard doc.label == "OPENSSH PRIVATE KEY" else {
-            throw PrivateKeyImportError.malformedKey(reason: "非 OpenSSH 私钥")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "非 OpenSSH 私钥", bundle: .module))
         }
         return doc.der
     }

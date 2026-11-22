@@ -24,11 +24,11 @@ public struct ProviderEditorForm: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            UDTextField(label: "名称", placeholder: "例如 Anthropic", text: $model.draft.name,
+            UDTextField(label: String(localized: "名称", bundle: .module), placeholder: String(localized: "例如 Anthropic", bundle: .module), text: $model.draft.name,
                         errorMessage: model.draft.nameError)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("类型").font(UD.font(11.5, weight: .medium)).foregroundStyle(UD.text2)
+                Text("类型", bundle: .module, comment: "模型服务的协议类型").font(UD.font(11.5, weight: .medium)).foregroundStyle(UD.text2)
                 UDSegmented(selection: Binding(get: { model.draft.kind }, set: { model.draft.setKind($0) }),
                             options: ProviderKind.allCases.map { ($0, $0.displayName) })
             }
@@ -38,17 +38,17 @@ public struct ProviderEditorForm: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 UDTextField(label: "API Key",
-                            placeholder: model.hasSavedKey ? "已保存（留空不改）" : "粘贴 API Key",
+                            placeholder: model.hasSavedKey ? String(localized: "已保存（留空不改）", bundle: .module) : String(localized: "粘贴 API Key", bundle: .module),
                             text: $model.keyDraft, errorMessage: model.keySaveError,
                             monospaced: true, isSecure: true, revealable: true)
                 HStack(spacing: 8) {
-                    UDButton(title: "保存 Key", style: .secondary) { model.saveKey() }
+                    UDButton(title: String(localized: "保存 Key", bundle: .module), style: .secondary) { model.saveKey() }
                         .disabled(!model.canSaveKey)
                     if model.hasSavedKey {
-                        UDButton(title: "移除 Key", style: .ghost) { model.removeKey() }
+                        UDButton(title: String(localized: "移除 Key", bundle: .module), style: .ghost) { model.removeKey() }
                     }
                     Spacer(minLength: 0)
-                    UDButton(title: model.testInFlight ? "测试中…" : "测试连接", style: .secondary,
+                    UDButton(title: model.testInFlight ? String(localized: "测试中…", bundle: .module) : String(localized: "测试连接", bundle: .module), style: .secondary,
                              isLoading: model.testInFlight) {
                         Task { await model.testConnection(requiresAPIKey: requiresAPIKey) }
                     }
@@ -62,7 +62,7 @@ public struct ProviderEditorForm: View {
 
             HStack {
                 Spacer(minLength: 0)
-                UDButton(title: "保存") { onSave(model.draft) }
+                UDButton(title: String(localized: "保存", bundle: .module)) { onSave(model.draft) }
                     .disabled(!model.draft.isValid)
             }
         }

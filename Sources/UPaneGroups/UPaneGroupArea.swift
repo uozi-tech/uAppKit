@@ -593,7 +593,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
             stripAccessory(groupID)
 
             if (group?.tabs.isEmpty ?? true), model.groupCount > 1 {
-                UPaneCardStripButton(help: "关闭这个空分组（⌘W）",
+                UPaneCardStripButton(help: String(localized: "关闭这个空分组（⌘W）", bundle: .module),
                                      action: { model.closeEmptyGroup(groupID: groupID) }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
@@ -601,7 +601,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
             }
 
             if showsSplitButton, splitAllowed {
-                UPaneCardStripButton(help: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）",
+                UPaneCardStripButton(help: String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: .module),
                                      action: { model.splitGroup(groupID, direction: resolvedSplitDirection()) }) {
                     UPaneTabIconView(icon: splitButtonIcon, size: 14)
                 }
@@ -637,7 +637,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.udPlain)
-                .help("关闭这个空分组（⌘W）")
+                .help(String(localized: "关闭这个空分组（⌘W）", bundle: .module))
             }
 
             if showsSplitButton, splitAllowed {
@@ -649,7 +649,7 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.udPlain)
-                .help("拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）")
+                .help(String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: .module))
             }
         }
         .frame(height: stripHeight)
@@ -859,7 +859,7 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
             }
             .buttonStyle(.udPlain)
             .onHover { hoveringClose = $0 }
-            .help("关闭")
+            .help(String(localized: "关闭", bundle: .module, comment: "关闭标签页"))
         }
         .padding(.leading, 10).padding(.trailing, 4)
         .frame(height: UPaneGroupStyle.pillHeight)
@@ -897,7 +897,7 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
             }
             .buttonStyle(.udPlain)
             .onHover { hoveringClose = $0 }
-            .help("关闭")
+            .help(String(localized: "关闭", bundle: .module, comment: "关闭标签页"))
         }
         .padding(.leading, 12).padding(.trailing, 7)
         .frame(height: stripHeight)

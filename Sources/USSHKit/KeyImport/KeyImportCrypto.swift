@@ -44,7 +44,7 @@ nonisolated enum KeyImportCrypto {
                        iterations: Int, keyLength: Int, prf: PRF) throws -> [UInt8] {
         // keyLength 可能源自不可信密钥文件；分配缓冲前先夹紧到合理上限。
         guard keyLength > 0, keyLength <= maxDerivedKeyLength else {
-            throw PrivateKeyImportError.malformedKey(reason: "派生密钥长度非法")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "派生密钥长度非法", bundle: .module))
         }
         var derived = [UInt8](repeating: 0, count: keyLength)
         // CCKeyDerivationPBKDF 的 password 参数类型为 `const char *`（UnsafePointer<Int8>）。
@@ -87,10 +87,10 @@ nonisolated enum KeyImportCrypto {
         // CCCrypt 按 blockSize 读取 IV；IV 来自不可信密钥文件，必须先校验长度，
         // 否则短 IV（如 DEK-Info "AES-128-CBC,01" 的 1 字节 IV）会触发堆越界读。
         guard iv.count == cipher.blockSize else {
-            throw PrivateKeyImportError.malformedKey(reason: "IV 长度与块大小不符")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "IV 长度与块大小不符", bundle: .module))
         }
         guard input.count % cipher.blockSize == 0, !input.isEmpty else {
-            throw PrivateKeyImportError.malformedKey(reason: "密文长度不是块大小的整数倍")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "密文长度不是块大小的整数倍", bundle: .module))
         }
         var output = [UInt8](repeating: 0, count: input.count + cipher.blockSize)
         var moved = 0
@@ -112,7 +112,7 @@ nonisolated enum KeyImportCrypto {
             }
         }
         guard status == kCCSuccess else {
-            throw PrivateKeyImportError.malformedKey(reason: "CBC 運算失敗（\(status)）")
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "CBC 运算失败（\(String(status))）", bundle: .module))
         }
         return Array(output.prefix(moved))
     }

@@ -92,8 +92,8 @@ public struct UDConfirmModal<Message: View>: View {
     let message: Message
 
     public init(title: String,
-                confirmTitle: String = "删除",
-                cancelTitle: String = "取消",
+                confirmTitle: String = String(localized: "删除", bundle: ModuleBundle.bundle),
+                cancelTitle: String = String(localized: "取消", bundle: ModuleBundle.bundle),
                 width: CGFloat = 380,
                 onCancel: @escaping () -> Void,
                 onConfirm: @escaping () -> Void,

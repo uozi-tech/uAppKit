@@ -31,7 +31,7 @@ public struct UDAgentEmptyState: View {
         title: String,
         message: String,
         capabilities: [Capability] = [],
-        suggestionsTitle: String = "可以从这里开始",
+        suggestionsTitle: String = String(localized: "可以从这里开始", bundle: ModuleBundle.bundle),
         suggestions: [String] = [],
         actionTitle: String? = nil,
         onSuggestion: @escaping (String) -> Void = { _ in },
