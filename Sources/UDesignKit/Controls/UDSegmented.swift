@@ -3,9 +3,9 @@ import SwiftUI
 /// uTerm DesignKit 分段控制 —— 设计稿 `Components.html` 分段控制组。
 ///
 /// `DarkSegmented` 的 drop-in 替代：泛型选项（`Value: Hashable`），等宽分段，
-/// 选中段 = 纯 `UD.accent` 填充 + 白字（无内高光）；未选段悬停浅底；相邻**均未选**的
-/// 两段之间显示 1px 竖分隔。纯展示组件，只读 `UD` token + 普通值输入，不依赖
-/// 任何 domain model。
+/// 选中段 = 中性的浮起底 + 正文色（日间白色、暗夜提亮一档，都不带色相）；未选段是三级文字色、
+/// 悬停浅底。不用强调色实底：一屏里的强调色留给主动作，分段控件只表示「现在看的是哪一段」。
+/// 纯展示组件，只读 `UD` token + 普通值输入，不依赖任何 domain model。
 public struct UDSegmented<Value: Hashable>: View {
     @Binding var selection: Value
     let options: [(value: Value, label: String)]
@@ -26,23 +26,15 @@ public struct UDSegmented<Value: Hashable>: View {
 
     public var body: some View {
         HStack(spacing: 0) {
-            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
                 segment(option.value, option.label)
-                    .overlay(alignment: .trailing) {
-                        if showsDivider(after: index) {
-                            Rectangle()
-                                .fill(UD.border)
-                                .frame(width: 1)
-                                .padding(.vertical, 6)
-                        }
-                    }
             }
         }
         .padding(3)
         .frame(height: 30)
         .background(
             // v2「填充即边界」：容器 uw04 淡灰底、无边（透明描边占位防跳动）；
-            // 选中段实心 accent 白字（唯一允许实心 accent 的控件）。
+            // 选中段是浮在上面的中性底。
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(UD.uw04)
         )
@@ -61,7 +53,7 @@ public struct UDSegmented<Value: Hashable>: View {
         // 选中瞬切，且不带动画写回 binding（同 NSSegmentedControl）：以前包 `withAnimation`，
         // 动画事务会顺着 binding 传到使用方——分段下面整块内容跟着淡入淡出、新旧叠影，
         // 锚定浮层里内容高度还在插值而窗口已按目标尺寸改 frame，中间几帧被截断；
-        // 自身两段的强调色底同时半透明，看着像两段都选中。
+        // 自身两段的选中底同时半透明，看着像两段都选中。
         return Button {
             var transaction = Transaction()
             transaction.disablesAnimations = true
@@ -70,14 +62,7 @@ public struct UDSegmented<Value: Hashable>: View {
             SegmentLabel(label: label, selected: selected, font: labelFont)
         }
         .buttonStyle(.udPlain)
-    }
-
-    /// 仅当第 `index` 段与其右邻段**都未选中**时，显示二者间的竖分隔。
-    private func showsDivider(after index: Int) -> Bool {
-        guard index + 1 < options.count else { return false }
-        let left = options[index].value
-        let right = options[index + 1].value
-        return left != selection && right != selection
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
@@ -91,20 +76,24 @@ private struct SegmentLabel: View {
 
     /// 未选中段的 hover 底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
     private static let hoverBg = UD.dyn(.white(0.05), .black(0.05))
+    /// 选中段的底：日间白色浮起、暗夜提亮一档，都不带色相。
+    private static let selectedBg = UD.dyn(.white(0.13), .white(1.0))
 
     public var body: some View {
         Text(label)
             .font(font)
-            .foregroundStyle(selected ? Color.white : UD.text2)
+            .foregroundStyle(selected ? UD.text : UD.text3)
+            .lineLimit(1)
             .padding(.horizontal, 16)
             .frame(minWidth: 56)
             .frame(maxWidth: .infinity)
             .frame(maxHeight: .infinity)
             .background {
                 if selected {
-                    // 选中段 = 纯强调色填充（无内高光）。
+                    // 选中段 = 中性浮起底 + 一点接触阴影（不带色相、无内高光）。
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(UD.accent)
+                        .fill(Self.selectedBg)
+                        .shadow(color: .black.opacity(0.08), radius: 1, x: 0, y: 0.5)
                 } else if hovering {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(Self.hoverBg)
