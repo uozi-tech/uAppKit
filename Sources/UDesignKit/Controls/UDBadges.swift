@@ -146,6 +146,8 @@ public struct UDKbd: View {
         Text(UFormat.shortcut(label))
             .font(UD.monoKbd)
             .foregroundStyle(UD.text2)
+            .lineLimit(1)
+            .fixedSize()   // 键帽不折行（宽度不够时整体让别的元素去缩）
             .padding(.horizontal, 5)
             .frame(minWidth: 18)
             .frame(height: 20)

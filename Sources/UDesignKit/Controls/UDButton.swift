@@ -96,6 +96,8 @@ private struct UDButtonKbd: View {
                     .fill(Color.primary.opacity(0.14))
             )
             .opacity(0.9)
+            // 按钮拿到的宽度比理想宽度少一点时（CJK 标题量宽偏差），别把 "esc" 折成两行。
+            .fixedSize()
     }
 }
 
