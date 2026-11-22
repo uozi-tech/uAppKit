@@ -117,6 +117,6 @@ public struct UDAgentToolTrace: View {
         guard content.count > displayCap else { return content }
         // 总字数先转成 String 再插：保持原先不带千分位的写法（只在超过 displayCap 时出现，英文恒为复数）。
         let total = String(content.count)
-        return String(content.prefix(displayCap)) + "\n" + String(localized: "… 已截断（全文 \(total) 字符，模型可见完整内容）", bundle: .module)
+        return String(content.prefix(displayCap)) + "\n" + String(localized: "… 已截断（全文 \(total) 字符，模型可见完整内容）", bundle: ModuleBundle.bundle)
     }
 }

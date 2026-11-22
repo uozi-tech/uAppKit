@@ -56,18 +56,18 @@ public struct CloudKitSyncFailure: Equatable, Sendable {
     public var message: String {
         let text: String
         switch reason {
-        case .serviceUnavailable: text = String(localized: "CloudKit 服务连接中断", bundle: .module)
-        case .networkUnavailable: text = String(localized: "当前网络无法访问 CloudKit", bundle: .module)
-        case .notAuthenticated: text = String(localized: "iCloud 账号不可用，请先在系统设置中登录 iCloud", bundle: .module)
-        case .noPermission: text = String(localized: "当前构建无权访问共享 iCloud 容器", bundle: .module)
-        case .busy: text = String(localized: "CloudKit 当前繁忙", bundle: .module)
+        case .serviceUnavailable: text = String(localized: "CloudKit 服务连接中断", bundle: ModuleBundle.bundle)
+        case .networkUnavailable: text = String(localized: "当前网络无法访问 CloudKit", bundle: ModuleBundle.bundle)
+        case .notAuthenticated: text = String(localized: "iCloud 账号不可用，请先在系统设置中登录 iCloud", bundle: ModuleBundle.bundle)
+        case .noPermission: text = String(localized: "当前构建无权访问共享 iCloud 容器", bundle: ModuleBundle.bundle)
+        case .busy: text = String(localized: "CloudKit 当前繁忙", bundle: ModuleBundle.bundle)
         case .other(let description): text = description
         }
         let suffix = retryAfter.map { delay in
             let seconds = max(1, Int(ceil(delay)))
-            return String(localized: "（约 \(seconds) 秒后自动重试）", bundle: .module)
+            return String(localized: "（约 \(seconds) 秒后自动重试）", bundle: ModuleBundle.bundle)
         } ?? ""
-        return String(localized: "iCloud 同步失败：\(text)\(suffix)", bundle: .module)
+        return String(localized: "iCloud 同步失败：\(text)\(suffix)", bundle: ModuleBundle.bundle)
     }
 }
 
@@ -216,7 +216,7 @@ public final class ProviderCloudKitMonitor {
             return
         }
         let failure = event.failure ?? CloudKitSyncFailure(
-            reason: .other(String(localized: "未知错误", bundle: .module)), retryAfter: nil, retryNotBefore: nil, shouldRecreateContainer: false)
+            reason: .other(String(localized: "未知错误", bundle: ModuleBundle.bundle)), retryAfter: nil, retryNotBefore: nil, shouldRecreateContainer: false)
         self.failure = failure
         status = .failed(failure)
     }

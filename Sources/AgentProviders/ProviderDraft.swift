@@ -29,12 +29,12 @@ public struct ProviderDraft: Equatable, Sendable {
 
     /// 名称必填。
     public var nameError: String? {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "名称不能为空", bundle: .module) : nil
+        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? String(localized: "名称不能为空", bundle: ModuleBundle.bundle) : nil
     }
 
     /// Base URL 必填；远程端点须 HTTPS，本机开发服务可用 HTTP。
     public var baseURLError: String? {
-        if baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return String(localized: "Base URL 不能为空", bundle: .module) }
+        if baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return String(localized: "Base URL 不能为空", bundle: ModuleBundle.bundle) }
         return endpoint.validationError.map { LLMServiceError.invalidEndpoint($0).description }
     }
 
@@ -79,7 +79,7 @@ public enum ProviderConnectionTest {
                            fetch: Fetch = liveFetch) async -> ProviderConnectionResult {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         if requiresAPIKey, key.isEmpty, !isLoopback(endpoint) {
-            return ProviderConnectionResult(ok: false, message: String(localized: "先填写或保存 API Key", bundle: .module))
+            return ProviderConnectionResult(ok: false, message: String(localized: "先填写或保存 API Key", bundle: ModuleBundle.bundle))
         }
         if let error = endpoint.validationError {
             return ProviderConnectionResult(ok: false, message: LLMServiceError.invalidEndpoint(error).description)
@@ -88,7 +88,7 @@ public enum ProviderConnectionTest {
             let ids = try await fetch(endpoint, key)
             return ProviderConnectionResult(
                 ok: true,
-                message: ids.isEmpty ? String(localized: "连接成功，但该端点没有列出任何模型", bundle: .module) : String(localized: "连接成功 · \(ids.count) 个可用模型", bundle: .module),
+                message: ids.isEmpty ? String(localized: "连接成功，但该端点没有列出任何模型", bundle: ModuleBundle.bundle) : String(localized: "连接成功 · \(ids.count) 个可用模型", bundle: ModuleBundle.bundle),
                 models: ids)
         } catch {
             return ProviderConnectionResult(ok: false, message: LLMServiceError.describe(error))
@@ -144,7 +144,7 @@ public final class ProviderEditorModel {
             hasSavedKey = true
             return true
         } catch {
-            keySaveError = String(localized: "保存到钥匙串失败：\(LLMServiceError.describe(error))", bundle: .module)
+            keySaveError = String(localized: "保存到钥匙串失败：\(LLMServiceError.describe(error))", bundle: ModuleBundle.bundle)
             return false
         }
     }

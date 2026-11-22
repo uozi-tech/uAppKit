@@ -26,21 +26,21 @@ public enum LLMServiceError: Error, Sendable, Equatable, CustomStringConvertible
 
     public var description: String {
         switch self {
-        case .unauthenticated: return String(localized: "认证失败，请检查 API Key", bundle: .module)
+        case .unauthenticated: return String(localized: "认证失败，请检查 API Key", bundle: ModuleBundle.bundle)
         case .rateLimited(let retryAfter):
             if let retryAfter {
                 let seconds = max(1, Int(retryAfter.rounded(.up)))
-                return String(localized: "请求过于频繁，约 \(seconds) 秒后再试", bundle: .module)
+                return String(localized: "请求过于频繁，约 \(seconds) 秒后再试", bundle: ModuleBundle.bundle)
             }
-            return String(localized: "请求过于频繁，请稍后再试", bundle: .module)
-        case .invalidResponse(let message): return String(localized: "模型服务返回了无法处理的响应：\(message)", bundle: .module)
-        case .network(let message): return String(localized: "网络错误：\(message)", bundle: .module)
-        case .unimplemented: return String(localized: "该服务不支持这个操作", bundle: .module)
-        case .invalidEndpoint(let error): return String(localized: "Base URL 无效：\(Self.endpointMessage(error))", bundle: .module)
-        case .streamError(let message): return String(localized: "模型服务在回复途中报错：\(message)", bundle: .module)
-        case .incompleteStream: return String(localized: "连接中途断开，回复不完整", bundle: .module)
-        case .outputLimitReached: return String(localized: "达到单次输出上限，回复被截断", bundle: .module)
-        case .streamIdleTimeout: return String(localized: "模型服务长时间没有输出，已停止等待", bundle: .module)
+            return String(localized: "请求过于频繁，请稍后再试", bundle: ModuleBundle.bundle)
+        case .invalidResponse(let message): return String(localized: "模型服务返回了无法处理的响应：\(message)", bundle: ModuleBundle.bundle)
+        case .network(let message): return String(localized: "网络错误：\(message)", bundle: ModuleBundle.bundle)
+        case .unimplemented: return String(localized: "该服务不支持这个操作", bundle: ModuleBundle.bundle)
+        case .invalidEndpoint(let error): return String(localized: "Base URL 无效：\(Self.endpointMessage(error))", bundle: ModuleBundle.bundle)
+        case .streamError(let message): return String(localized: "模型服务在回复途中报错：\(message)", bundle: ModuleBundle.bundle)
+        case .incompleteStream: return String(localized: "连接中途断开，回复不完整", bundle: ModuleBundle.bundle)
+        case .outputLimitReached: return String(localized: "达到单次输出上限，回复被截断", bundle: ModuleBundle.bundle)
+        case .streamIdleTimeout: return String(localized: "模型服务长时间没有输出，已停止等待", bundle: ModuleBundle.bundle)
         }
     }
 
@@ -84,17 +84,17 @@ public enum LLMServiceError: Error, Sendable, Equatable, CustomStringConvertible
     /// 给人看的一句话（任意错误）。设置页「测试连接」、模型目录的失败原因都用它。
     public static func describe(_ error: Error) -> String {
         if let service = map(error) as? LLMServiceError { return service.description }
-        if error is CancellationError { return String(localized: "已取消", bundle: .module) }
+        if error is CancellationError { return String(localized: "已取消", bundle: ModuleBundle.bundle) }
         return (error as? LocalizedError)?.errorDescription ?? String(describing: error)
     }
 
     private static func endpointMessage(_ error: AgentEndpointPolicy.ValidationError) -> String {
         switch error {
-        case .invalidURL: return String(localized: "地址为空或格式不对", bundle: .module)
-        case .unsupportedScheme: return String(localized: "只支持 HTTPS（本机地址可用 HTTP）", bundle: .module)
-        case .embeddedCredentials: return String(localized: "地址里不能带用户名或密码", bundle: .module)
-        case .queryOrFragment: return String(localized: "地址里不能带 ? 查询参数或 # 片段", bundle: .module)
-        case .insecureHTTP: return String(localized: "远程地址必须用 HTTPS，HTTP 只允许本机地址", bundle: .module)
+        case .invalidURL: return String(localized: "地址为空或格式不对", bundle: ModuleBundle.bundle)
+        case .unsupportedScheme: return String(localized: "只支持 HTTPS（本机地址可用 HTTP）", bundle: ModuleBundle.bundle)
+        case .embeddedCredentials: return String(localized: "地址里不能带用户名或密码", bundle: ModuleBundle.bundle)
+        case .queryOrFragment: return String(localized: "地址里不能带 ? 查询参数或 # 片段", bundle: ModuleBundle.bundle)
+        case .insecureHTTP: return String(localized: "远程地址必须用 HTTPS，HTTP 只允许本机地址", bundle: ModuleBundle.bundle)
         }
     }
 }

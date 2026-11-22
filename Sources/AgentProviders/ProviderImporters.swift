@@ -193,7 +193,7 @@ public enum ProviderImporters {
                 if base.lowercased().hasSuffix("/v1") {
                     base.removeLast(3)
                 } else {
-                    warning = String(localized: "原地址不以 /v1 结尾，换算后请求路径可能不同，请检查 Base URL", bundle: .module)
+                    warning = String(localized: "原地址不以 /v1 结尾，换算后请求路径可能不同，请检查 Base URL", bundle: ModuleBundle.bundle)
                 }
             }
             let model: String? = if let selected, selected.providerID == item.id {

@@ -8,7 +8,7 @@ nonisolated enum PrivateKeyImporter {
     static func resolve(pem rawText: String, passphrase: String?) throws -> ParsedPrivateKey {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let label = firstPEMLabel(in: text) else {
-            throw PrivateKeyImportError.malformedPEM(reason: String(localized: "未找到 -----BEGIN ...----- 标记", bundle: .module))
+            throw PrivateKeyImportError.malformedPEM(reason: String(localized: "未找到 -----BEGIN ...----- 标记", bundle: ModuleBundle.bundle))
         }
 
         switch label {
@@ -31,7 +31,7 @@ nonisolated enum PrivateKeyImporter {
         do {
             keyType = try SSHKeyDetection.detectPrivateKeyType(from: text)
         } catch {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "无法识别 OpenSSH 私钥类型", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "无法识别 OpenSSH 私钥类型", bundle: ModuleBundle.bundle))
         }
         switch keyType {
         case .rsa:

@@ -67,7 +67,7 @@ public struct UPaneSplitter: View {
                     }
                     .onEnded { _ in dragStartFraction = nil }
             )
-            .accessibilityLabel(orientation == .vertical ? String(localized: "调整左右分组宽度", bundle: .module) : String(localized: "调整上下分组高度", bundle: .module))
+            .accessibilityLabel(orientation == .vertical ? String(localized: "调整左右分组宽度", bundle: ModuleBundle.bundle) : String(localized: "调整上下分组高度", bundle: ModuleBundle.bundle))
             .accessibilityAddTraits(.allowsDirectInteraction)
     }
 

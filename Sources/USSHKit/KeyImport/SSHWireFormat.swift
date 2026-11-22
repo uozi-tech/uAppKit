@@ -40,7 +40,7 @@ nonisolated struct SSHWireReader {
 
     mutating func readUInt32() throws -> UInt32 {
         guard offset + 4 <= bytes.count else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：读 uint32 越界", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：读 uint32 越界", bundle: ModuleBundle.bundle))
         }
         defer { offset += 4 }
         return (UInt32(bytes[offset]) << 24) | (UInt32(bytes[offset + 1]) << 16)
@@ -50,7 +50,7 @@ nonisolated struct SSHWireReader {
     mutating func readString() throws -> [UInt8] {
         let length = Int(try readUInt32())
         guard offset + length <= bytes.count else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：读 string 越界", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：读 string 越界", bundle: ModuleBundle.bundle))
         }
         defer { offset += length }
         return Array(bytes[offset..<offset + length])

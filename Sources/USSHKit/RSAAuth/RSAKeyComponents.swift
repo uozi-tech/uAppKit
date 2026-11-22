@@ -15,7 +15,7 @@ nonisolated struct RSAKeyComponents {
         let root = try DERKeyDecoder.parse(der)
         let fields = try DERKeyDecoder.children(root)
         guard fields.count >= 9 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PKCS#1 RSA：字段不足（需 9）", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PKCS#1 RSA：字段不足（需 9）", bundle: ModuleBundle.bundle))
         }
         return RSAKeyComponents(
             modulus:         try DERKeyDecoder.integerMagnitude(fields[1]),

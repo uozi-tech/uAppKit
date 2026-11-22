@@ -104,6 +104,6 @@ public struct UDAgentApprovalCard: View {
         .background(RoundedRectangle(cornerRadius: UD.Radius.md).fill(Self.tint))
         .overlay(RoundedRectangle(cornerRadius: UD.Radius.md).stroke(Self.stroke, lineWidth: 1))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(String(localized: "\(title)：\(toolName)", bundle: .module, comment: "审批卡片读屏标签：标题：工具名"))
+        .accessibilityLabel(String(localized: "\(title)：\(toolName)", bundle: ModuleBundle.bundle, comment: "审批卡片读屏标签：标题：工具名"))
     }
 }

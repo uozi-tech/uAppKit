@@ -14,7 +14,7 @@ public enum UDComposerLayout {
 /// 纯展示组件，只读 `UD` token + 普通值 / 闭包 / 视图输入，不依赖任何 domain model。
 public struct UDComposer<ModelControl: View>: View {
     @Binding var text: String
-    var placeholder: String = String(localized: "问点什么…", bundle: .module)
+    var placeholder: String = String(localized: "问点什么…", bundle: ModuleBundle.bundle)
     /// 固定宽度（DesignKit 画廊用 300 spec）；`nil` 则撑满容器（真实 Agent 面板用）。
     var width: CGFloat? = nil
     /// 输入框最少显示行数（默认 1；真实 Agent 面板传更大值让输入区更高）。
@@ -64,14 +64,14 @@ public struct UDComposer<ModelControl: View>: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(UDComposerIconStyle())
-                .help(String(localized: "附加上下文", bundle: .module))
+                .help(String(localized: "附加上下文", bundle: ModuleBundle.bundle))
 
                 Button(action: submit) {
                     Text(queueing ? "⊕" : "↩")
                         .font(UD.font(12))
                 }
                 .buttonStyle(UDComposerIconStyle())
-                .help(queueing ? String(localized: "排队发送（Agent 忙碌中）", bundle: .module) : String(localized: "发送", bundle: .module))
+                .help(queueing ? String(localized: "排队发送（Agent 忙碌中）", bundle: ModuleBundle.bundle) : String(localized: "发送", bundle: ModuleBundle.bundle))
             }
         }
         .padding(UDComposerLayout.contentPadding)

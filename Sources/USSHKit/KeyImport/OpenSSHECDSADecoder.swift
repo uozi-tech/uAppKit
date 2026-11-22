@@ -8,7 +8,7 @@ nonisolated enum OpenSSHECDSADecoder {
         switch try OpenSSHContainer.openPrivateSection(text: openSSHText) {
         case .encrypted(let cipherName):
             throw PrivateKeyImportError.unsupportedFormat(
-                label: String(localized: "加密的 OpenSSH ECDSA（\(cipherName)）", bundle: .module))
+                label: String(localized: "加密的 OpenSSH ECDSA（\(cipherName)）", bundle: ModuleBundle.bundle))
         case .plaintext(let keyType, var body):
             // ecdsa-sha2-nistp256 等：curveName, Q(point), d(scalar mpint)
             guard keyType.hasPrefix("ecdsa-sha2-nistp") else {

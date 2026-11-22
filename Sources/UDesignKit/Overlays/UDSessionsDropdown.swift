@@ -58,7 +58,7 @@ public struct UDSessionsDropdown: View {
     // MARK: - 头部
 
     private var header: some View {
-        Text("会话历史", bundle: .module)
+        Text("会话历史", bundle: ModuleBundle.bundle)
             .font(UD.font(10.5))
             .foregroundStyle(UD.text4)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -124,7 +124,7 @@ public struct UDSessionsDropdown: View {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
                     .font(UD.font(11))
-                Text("新建对话", bundle: .module)
+                Text("新建对话", bundle: ModuleBundle.bundle)
                     .font(UD.font(12))
                 Spacer(minLength: 0)
                 Text("⌘⇧N")

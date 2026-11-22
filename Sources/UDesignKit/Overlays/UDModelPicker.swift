@@ -186,8 +186,8 @@ public struct UDModelPicker: View {
                 }
                 .buttonStyle(UDComposerGhostIconStyle())
                 .allowsHitTesting(!isRefreshing)
-                .help(String(localized: "重新获取模型列表", bundle: .module))
-                .accessibilityLabel(String(localized: "刷新模型列表", bundle: .module))
+                .help(String(localized: "重新获取模型列表", bundle: ModuleBundle.bundle))
+                .accessibilityLabel(String(localized: "刷新模型列表", bundle: ModuleBundle.bundle))
             }
         }
         .padding(.bottom, 4)
@@ -206,7 +206,7 @@ public struct UDModelPicker: View {
         UDCappedScroll(maxHeight: listCap) {
             VStack(alignment: .leading, spacing: 0) {
                 if visibleGroups.isEmpty {
-                    Text(isSearching ? String(localized: "没有匹配「\(query)」的模型", bundle: .module) : String(localized: "还没有配置模型服务", bundle: .module))
+                    Text(isSearching ? String(localized: "没有匹配「\(query)」的模型", bundle: ModuleBundle.bundle) : String(localized: "还没有配置模型服务", bundle: ModuleBundle.bundle))
                         .font(UD.font(12))
                         .foregroundStyle(UD.text3)
                         .padding(.horizontal, 9).padding(.vertical, 10)
@@ -237,7 +237,7 @@ public struct UDModelPicker: View {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if group.status == .loading {
-                    Text("加载中…", bundle: .module).font(UD.font(10)).foregroundStyle(UD.text4)
+                    Text("加载中…", bundle: ModuleBundle.bundle).font(UD.font(10)).foregroundStyle(UD.text4)
                 }
             }
             if case .failed(let message) = group.status, !isSearching {
@@ -248,7 +248,7 @@ public struct UDModelPicker: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .help(message)
             } else if group.items.isEmpty, group.status == .ready {
-                Text("没有可用模型", bundle: .module).font(UD.font(10.5)).foregroundStyle(UD.text4)
+                Text("没有可用模型", bundle: ModuleBundle.bundle).font(UD.font(10.5)).foregroundStyle(UD.text4)
             }
         }
         .padding(.horizontal, 9)
@@ -483,7 +483,7 @@ public struct UDComposerModelMenu: View {
         }
         .fixedSize()
         .help(help)
-        .accessibilityLabel(String(localized: "模型", bundle: .module, comment: "模型选择器的读屏标签"))
+        .accessibilityLabel(String(localized: "模型", bundle: ModuleBundle.bundle, comment: "模型选择器的读屏标签"))
         .accessibilityValue(label)
     }
 }
@@ -519,7 +519,7 @@ public struct UDComposerEffortMenu: View {
         options.first { $0.value == selection }
     }
 
-    private var defaultEffortLabel: String { String(localized: "默认", bundle: .module, comment: "思考深度：交给模型的默认档") }
+    private var defaultEffortLabel: String { String(localized: "默认", bundle: ModuleBundle.bundle, comment: "思考深度：交给模型的默认档") }
 
     /// 当前档位；默认档不写字，只亮一个弱化的图标。
     private var isDefault: Bool { selection == nil }
@@ -535,14 +535,14 @@ public struct UDComposerEffortMenu: View {
                 }
             }
         } content: {
-            UDMenu(width: 168, head: String(localized: "思考深度", bundle: .module), maxHeight: nil, items: options.map { option in
+            UDMenu(width: 168, head: String(localized: "思考深度", bundle: ModuleBundle.bundle), maxHeight: nil, items: options.map { option in
                 UDMenuItem(label: option.label, active: option.value == selection,
                            action: { onSelect(option.value) })
             })
         }
         .fixedSize()
-        .help(String(localized: "思考深度：\(current?.label ?? defaultEffortLabel)", bundle: .module))
-        .accessibilityLabel(String(localized: "思考深度", bundle: .module))
+        .help(String(localized: "思考深度：\(current?.label ?? defaultEffortLabel)", bundle: ModuleBundle.bundle))
+        .accessibilityLabel(String(localized: "思考深度", bundle: ModuleBundle.bundle))
         .accessibilityValue(current?.label ?? defaultEffortLabel)
     }
 }

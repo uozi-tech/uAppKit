@@ -10,7 +10,7 @@ import SwiftUI
 /// 否则横向撑满。
 public struct UDSearchField: View {
     @Binding var text: String
-    var placeholder: String = String(localized: "搜索", bundle: .module)
+    var placeholder: String = String(localized: "搜索", bundle: ModuleBundle.bundle)
     var width: CGFloat? = nil
     var autoFocus: Bool = false
     var showsHotkeyChip: Bool = true

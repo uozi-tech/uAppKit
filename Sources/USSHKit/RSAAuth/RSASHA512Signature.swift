@@ -23,7 +23,7 @@ nonisolated struct RSASHA512Signature: NIOSSHSignatureProtocol {
     static func read(from buffer: inout ByteBuffer) throws -> RSASHA512Signature {
         guard let length: UInt32 = buffer.readInteger(),
               let bytes = buffer.readBytes(length: Int(length)) else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "RSA 签名线格式损坏", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "RSA 签名线格式损坏", bundle: ModuleBundle.bundle))
         }
         return RSASHA512Signature(rawRepresentation: Data(bytes))
     }

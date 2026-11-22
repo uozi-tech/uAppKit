@@ -216,7 +216,7 @@ nonisolated enum SSHClientFactory {
             )
         } catch {
             throw SSHConnectionError.jumpHostFailed(
-                String(localized: "无法连接 \(jumpHost.address.host):\(String(jumpHost.address.port)) —— \(describe(error))", bundle: .module)
+                String(localized: "无法连接 \(jumpHost.address.host):\(String(jumpHost.address.port)) —— \(describe(error))", bundle: ModuleBundle.bundle)
             )
         }
 
@@ -248,7 +248,7 @@ nonisolated enum SSHClientFactory {
         } catch {
             try? await bastion.close()
             throw SSHConnectionError.jumpHostFailed(
-                String(localized: "经跳板机连接 \(endpoint.host):\(String(endpoint.port)) 失败 —— \(describe(error))", bundle: .module)
+                String(localized: "经跳板机连接 \(endpoint.host):\(String(endpoint.port)) 失败 —— \(describe(error))", bundle: ModuleBundle.bundle)
             )
         }
     }
@@ -309,7 +309,7 @@ nonisolated enum SSHClientFactory {
                 return try key.authenticationMethod(username: username)
             } catch let error as PrivateKeyImportError {
                 throw SSHConnectionError.authenticationFailed(
-                    error.errorDescription ?? String(localized: "私钥导入失败", bundle: .module)
+                    error.errorDescription ?? String(localized: "私钥导入失败", bundle: ModuleBundle.bundle)
                 )
             } catch {
                 throw SSHConnectionError.authenticationFailed(describe(error))
@@ -330,7 +330,7 @@ nonisolated enum SSHClientFactory {
         if let channelError = error as? ChannelError {
             switch channelError {
             case .connectTimeout(let amount):
-                return String(localized: "登录阶段超时：\(formatSeconds(amount)) 内未完成握手与认证（ChannelError.connectTimeout）", bundle: .module)
+                return String(localized: "登录阶段超时：\(formatSeconds(amount)) 内未完成握手与认证（ChannelError.connectTimeout）", bundle: ModuleBundle.bundle)
             default:
                 return "\(channelError)（NIOCore.ChannelError）"
             }
@@ -340,12 +340,12 @@ nonisolated enum SSHClientFactory {
             // 底层 IOError（含 errno 与 strerror），再带上目标地址。
             let target = "\(connectionError.host):\(connectionError.port)"
             if let last = connectionError.connectionErrors.last {
-                return String(localized: "无法连接 \(target)：\(describe(last.error))", bundle: .module)
+                return String(localized: "无法连接 \(target)：\(describe(last.error))", bundle: ModuleBundle.bundle)
             }
             if let dns = connectionError.dnsAError ?? connectionError.dnsAAAAError {
-                return String(localized: "无法解析 \(connectionError.host)：\(describe(dns))", bundle: .module)
+                return String(localized: "无法解析 \(connectionError.host)：\(describe(dns))", bundle: ModuleBundle.bundle)
             }
-            return String(localized: "无法连接 \(target)（NIOPosix.NIOConnectionError）", bundle: .module)
+            return String(localized: "无法连接 \(target)（NIOPosix.NIOConnectionError）", bundle: ModuleBundle.bundle)
         }
         if let ioError = error as? IOError {
             // IOError 自带 description（"<reason>: <strerror> (errno: N)"），比桥接文案有用。
@@ -367,10 +367,10 @@ nonisolated enum SSHClientFactory {
         let seconds = Double(amount.nanoseconds) / 1_000_000_000
         if seconds == seconds.rounded() {
             let whole = Int(seconds)
-            return String(localized: "\(whole) 秒", bundle: .module)
+            return String(localized: "\(whole) 秒", bundle: ModuleBundle.bundle)
         }
         let text = String(format: "%.1f", seconds)
-        return String(localized: "\(text) 秒", bundle: .module, comment: "带一位小数的秒数")
+        return String(localized: "\(text) 秒", bundle: ModuleBundle.bundle, comment: "带一位小数的秒数")
     }
 }
 

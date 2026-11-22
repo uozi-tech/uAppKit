@@ -130,9 +130,9 @@ public final class AgentRuntimeSession<Context: Sendable> {
 
     // MARK: - 界面文案
 
-    public nonisolated static var noModelMessage: String { String(localized: "还没有选择模型：在输入区的模型菜单里选一个", bundle: .module) }
+    public nonisolated static var noModelMessage: String { String(localized: "还没有选择模型：在输入区的模型菜单里选一个", bundle: ModuleBundle.bundle) }
     public nonisolated static func iterationLimitMessage(_ limit: Int) -> String {
-        String(localized: "工具调用超过 \(limit) 步上限，已停止。可以接着发消息让它继续。", bundle: .module)
+        String(localized: "工具调用超过 \(limit) 步上限，已停止。可以接着发消息让它继续。", bundle: ModuleBundle.bundle)
     }
 
     public init(
@@ -449,9 +449,9 @@ public final class AgentRuntimeSession<Context: Sendable> {
         let note: String
         if failure.abandonedToolCalls > 0 {
             let count = failure.abandonedToolCalls
-            note = String(localized: "[错误：\(reason)；模型发起的 \(count) 个工具调用没有执行]", bundle: .module, comment: "回复中途失败时附在回复末尾的注记")
+            note = String(localized: "[错误：\(reason)；模型发起的 \(count) 个工具调用没有执行]", bundle: ModuleBundle.bundle, comment: "回复中途失败时附在回复末尾的注记")
         } else {
-            note = String(localized: "[错误：\(reason)]", bundle: .module, comment: "回复中途失败时附在回复末尾的注记")
+            note = String(localized: "[错误：\(reason)]", bundle: ModuleBundle.bundle, comment: "回复中途失败时附在回复末尾的注记")
         }
         let text = failure.text.map { $0 + "\n\n" + note } ?? note
         append(.assistant(content: text, toolCalls: []))

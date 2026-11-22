@@ -183,7 +183,7 @@ public struct BackgroundLifecycleCommands: Commands {
         controller: BackgroundWindowController = .shared
     ) {
         self.moveToBackgroundTitle = moveToBackgroundTitle
-        self.quitTitle = quitTitle ?? String(localized: "完全退出 \(appName)", bundle: .module)
+        self.quitTitle = quitTitle ?? String(localized: "完全退出 \(appName)", bundle: ModuleBundle.bundle)
         self.controller = controller
     }
 

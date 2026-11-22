@@ -17,7 +17,7 @@ public enum ProviderKind: String, Codable, CaseIterable, Sendable, Hashable, Ide
     public var displayName: String {
         switch self {
         case .anthropic: return "Anthropic"
-        case .openai: return String(localized: "OpenAI 兼容", bundle: .module)
+        case .openai: return String(localized: "OpenAI 兼容", bundle: ModuleBundle.bundle)
         }
     }
 
@@ -65,11 +65,11 @@ public struct ProviderPreset: Identifiable, Sendable, Hashable {
                        baseURL: "https://api.deepseek.com", requiresAPIKey: true),
         ProviderPreset(id: "moonshot", name: "Moonshot (Kimi)", kind: .openai,
                        baseURL: "https://api.moonshot.cn/v1", requiresAPIKey: true),
-        ProviderPreset(id: "zhipu", name: String(localized: "智谱 GLM", bundle: .module, comment: "模型服务预置名（智谱 AI 的 GLM）"), kind: .openai,
+        ProviderPreset(id: "zhipu", name: String(localized: "智谱 GLM", bundle: ModuleBundle.bundle, comment: "模型服务预置名（智谱 AI 的 GLM）"), kind: .openai,
                        baseURL: "https://open.bigmodel.cn/api/paas/v4", requiresAPIKey: true),
         ProviderPreset(id: "openrouter", name: "OpenRouter", kind: .openai,
                        baseURL: "https://openrouter.ai/api/v1", requiresAPIKey: true),
-        ProviderPreset(id: "ollama", name: String(localized: "本地 Ollama", bundle: .module, comment: "模型服务预置名：本机运行的 Ollama"), kind: .openai,
+        ProviderPreset(id: "ollama", name: String(localized: "本地 Ollama", bundle: ModuleBundle.bundle, comment: "模型服务预置名：本机运行的 Ollama"), kind: .openai,
                        baseURL: "http://localhost:11434/v1", requiresAPIKey: false),
     ]
 }

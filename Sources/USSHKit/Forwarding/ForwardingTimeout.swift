@@ -3,7 +3,7 @@ import Foundation
 /// 转发开通道（direct-tcpip）超时保护用错误。
 @_spi(uTermIntegration)
 public nonisolated struct ForwardingTimeoutError: LocalizedError, Sendable {
-    public var errorDescription: String? { String(localized: "开通道超时（上游无响应）", bundle: .module) }
+    public var errorDescription: String? { String(localized: "开通道超时（上游无响应）", bundle: ModuleBundle.bundle) }
 }
 
 /// 给一个 async 操作套超时：操作先完成则返回其结果并取消计时；超时先到则抛

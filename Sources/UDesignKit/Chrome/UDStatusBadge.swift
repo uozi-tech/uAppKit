@@ -27,11 +27,11 @@ public struct UDStatusBadge: View {
         /// 显示文案（经 String Catalog 本地化）。
         var label: String {
             switch self {
-            case .idle:         return String(localized: "未连接", bundle: .module)
-            case .connected:    return String(localized: "已连接", bundle: .module)
-            case .connecting:   return String(localized: "连接中", bundle: .module)
-            case .disconnected: return String(localized: "已断开", bundle: .module)
-            case .failed:       return String(localized: "连接失败", bundle: .module)
+            case .idle:         return String(localized: "未连接", bundle: ModuleBundle.bundle)
+            case .connected:    return String(localized: "已连接", bundle: ModuleBundle.bundle)
+            case .connecting:   return String(localized: "连接中", bundle: ModuleBundle.bundle)
+            case .disconnected: return String(localized: "已断开", bundle: ModuleBundle.bundle)
+            case .failed:       return String(localized: "连接失败", bundle: ModuleBundle.bundle)
             }
         }
 

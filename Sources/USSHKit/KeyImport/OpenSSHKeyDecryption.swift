@@ -65,11 +65,11 @@ nonisolated enum OpenSSHKeyDecryption {
         let salt = try options.readString()            // 注意是 string，不能按 mpint 读
         let rounds = try options.readUInt32()
         guard !salt.isEmpty, rounds >= 1, rounds <= maxRounds else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：bcrypt 参数非法", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：bcrypt 参数非法", bundle: ModuleBundle.bundle))
         }
         guard !blob.isEmpty, blob.count % cipher.blockSize == 0 else {
             throw PrivateKeyImportError.malformedKey(
-                reason: String(localized: "OpenSSH：私钥段长度不是块大小的整数倍", bundle: .module))
+                reason: String(localized: "OpenSSH：私钥段长度不是块大小的整数倍", bundle: ModuleBundle.bundle))
         }
 
         let derived = try bcryptPBKDF(
@@ -85,7 +85,7 @@ nonisolated enum OpenSSHKeyDecryption {
     static func bcryptPBKDF(passphrase: [UInt8], salt: [UInt8],
                             rounds: UInt32, keyLength: Int) throws -> [UInt8] {
         guard sha512HookInstalled else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "bcrypt：SHA-512 未就绪", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "bcrypt：SHA-512 未就绪", bundle: ModuleBundle.bundle))
         }
         // C 侧 passlen == 0 直接返回 -1；空口令在这里就归到「口令错」更贴合用户视角。
         guard !passphrase.isEmpty else { throw PrivateKeyImportError.incorrectPassphrase }
@@ -102,7 +102,7 @@ nonisolated enum OpenSSHKeyDecryption {
             }
         }
         guard status == 0 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "bcrypt_pbkdf 失败", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "bcrypt_pbkdf 失败", bundle: ModuleBundle.bundle))
         }
         return derived
     }
@@ -114,7 +114,7 @@ nonisolated enum OpenSSHKeyDecryption {
             let nonce = try AES._CTR.Nonce(nonceBytes: iv)
             return Array(try AES._CTR.decrypt(input, using: SymmetricKey(data: key), nonce: nonce))
         } catch {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "AES-CTR 解密失败", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "AES-CTR 解密失败", bundle: ModuleBundle.bundle))
         }
     }
 

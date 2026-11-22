@@ -98,11 +98,11 @@ public struct ClientLinkInstaller: Sendable {
         }
         guard type == S_IFLNK else {
             return .conflict(reason: type == S_IFDIR
-                ? String(localized: "~/.local/bin/\(name) 是一个目录", bundle: .module)
-                : String(localized: "~/.local/bin/\(name) 已被别的文件占用（非 \(appName) 创建）", bundle: .module))
+                ? String(localized: "~/.local/bin/\(name) 是一个目录", bundle: ModuleBundle.bundle)
+                : String(localized: "~/.local/bin/\(name) 已被别的文件占用（非 \(appName) 创建）", bundle: ModuleBundle.bundle))
         }
         guard let resolved = SkillInstaller.linkDestination(of: linkURL) else {
-            return .conflict(reason: String(localized: "无法读取符号链接目标", bundle: .module))
+            return .conflict(reason: String(localized: "无法读取符号链接目标", bundle: ModuleBundle.bundle))
         }
         if resolved.path == sourceURL.path {
             return SkillInstaller.fileType(at: sourceURL) == nil ? .brokenLink : .installed
@@ -112,7 +112,7 @@ public struct ClientLinkInstaller: Sendable {
             || looksLikeLegacyMaterializedClient(resolved) {
             return .brokenLink
         }
-        return .conflict(reason: String(localized: "符号链接指向其它位置：\(resolved.path)", bundle: .module))
+        return .conflict(reason: String(localized: "符号链接指向其它位置：\(resolved.path)", bundle: ModuleBundle.bundle))
     }
 
     private func looksLikeLegacyMaterializedClient(_ url: URL) -> Bool {
@@ -133,7 +133,7 @@ public struct ClientLinkInstaller: Sendable {
             throw SkillInstallError.failed(reason)
         }
         guard SkillInstaller.fileType(at: sourceURL) != nil else {
-            throw SkillInstallError.failed(String(localized: "\(appName).app 里缺少 \(executableName)，重新安装 \(appName) 即可。", bundle: .module))
+            throw SkillInstallError.failed(String(localized: "\(appName).app 里缺少 \(executableName)，重新安装 \(appName) 即可。", bundle: ModuleBundle.bundle))
         }
         switch status() {
         case .installed:
@@ -146,7 +146,7 @@ public struct ClientLinkInstaller: Sendable {
                 try FileManager.default.removeItem(at: linkURL)
             } catch {
                 throw SkillInstallError.failed(
-                    String(localized: "无法替换既有的 ~/.local/bin/\(executableName)（\(error.localizedDescription)）", bundle: .module)
+                    String(localized: "无法替换既有的 ~/.local/bin/\(executableName)（\(error.localizedDescription)）", bundle: ModuleBundle.bundle)
                 )
             }
         case .notInstalled:
@@ -156,7 +156,7 @@ public struct ClientLinkInstaller: Sendable {
             try FileManager.default.createDirectory(at: binDirectoryURL, withIntermediateDirectories: true)
             try FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: sourceURL)
         } catch {
-            throw SkillInstallError.failed(String(localized: "无法写入 \(linkURL.path)（\(error.localizedDescription)）", bundle: .module))
+            throw SkillInstallError.failed(String(localized: "无法写入 \(linkURL.path)（\(error.localizedDescription)）", bundle: ModuleBundle.bundle))
         }
     }
 
@@ -168,7 +168,7 @@ public struct ClientLinkInstaller: Sendable {
         case .notInstalled:
             return
         case .conflict(let reason):
-            throw SkillInstallError.failed(String(localized: "未删除（\(reason)）", bundle: .module))
+            throw SkillInstallError.failed(String(localized: "未删除（\(reason)）", bundle: ModuleBundle.bundle))
         }
     }
 }

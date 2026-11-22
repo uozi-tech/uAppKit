@@ -64,13 +64,13 @@ public nonisolated struct SSHForwardingChannelFailure: Sendable {
         let target = "\(targetHost):\(targetPort)"
         switch kind {
         case .timeout:
-            return String(localized: "跳板机连不上目标 \(target)：开通道超时（多为目标的白名单/安全组未放行跳板机）", bundle: .module)
+            return String(localized: "跳板机连不上目标 \(target)：开通道超时（多为目标的白名单/安全组未放行跳板机）", bundle: ModuleBundle.bundle)
         case .administrativelyProhibited:
-            return String(localized: "跳板机拒绝端口转发（sshd 可能配置了 AllowTcpForwarding no）", bundle: .module)
+            return String(localized: "跳板机拒绝端口转发（sshd 可能配置了 AllowTcpForwarding no）", bundle: ModuleBundle.bundle)
         case .connectFailed:
-            return String(localized: "跳板机无法连接目标 \(target)（连接被拒绝或地址不可达）", bundle: .module)
+            return String(localized: "跳板机无法连接目标 \(target)（连接被拒绝或地址不可达）", bundle: ModuleBundle.bundle)
         case .other:
-            return String(localized: "转发到 \(target) 的通道打开失败：\(detail)", bundle: .module)
+            return String(localized: "转发到 \(target) 的通道打开失败：\(detail)", bundle: ModuleBundle.bundle)
         }
     }
 }

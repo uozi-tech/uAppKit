@@ -20,9 +20,9 @@ public enum SSHFileTransferError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .downloadTooLarge(let observed, let maximum):
-            return String(localized: "远程文件过大（\(observed) 字节，超过上限 \(maximum) 字节）", bundle: .module)
+            return String(localized: "远程文件过大（\(observed) 字节，超过上限 \(maximum) 字节）", bundle: ModuleBundle.bundle)
         case .localFileUnavailable(let path):
-            return String(localized: "无法访问本地文件：\(path)", bundle: .module)
+            return String(localized: "无法访问本地文件：\(path)", bundle: ModuleBundle.bundle)
         }
     }
 }

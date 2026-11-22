@@ -67,7 +67,7 @@ private struct Swatch: View {
         .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .help(color.label)
-        .accessibilityLabel(Text("强调色 \(color.label)", bundle: .module))
+        .accessibilityLabel(Text("强调色 \(color.label)", bundle: ModuleBundle.bundle))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

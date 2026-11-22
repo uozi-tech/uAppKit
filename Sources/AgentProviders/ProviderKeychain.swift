@@ -19,10 +19,10 @@ public enum ProviderKeychainError: Error, Equatable, Sendable, LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unexpectedStatus(let status):
-            let message = (SecCopyErrorMessageString(status, nil) as String?) ?? String(localized: "未知", bundle: .module, comment: "钥匙串错误没有系统说明时的占位")
-            return String(localized: "钥匙串错误 \(String(status))（\(message)）", bundle: .module)
+            let message = (SecCopyErrorMessageString(status, nil) as String?) ?? String(localized: "未知", bundle: ModuleBundle.bundle, comment: "钥匙串错误没有系统说明时的占位")
+            return String(localized: "钥匙串错误 \(String(status))（\(message)）", bundle: ModuleBundle.bundle)
         case .dataEncodingFailed:
-            return String(localized: "密钥数据编码失败", bundle: .module)
+            return String(localized: "密钥数据编码失败", bundle: ModuleBundle.bundle)
         }
     }
 }

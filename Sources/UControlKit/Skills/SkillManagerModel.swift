@@ -55,7 +55,7 @@ public final class SkillManagerModel {
         if let conflict = pairs.first(where: { $0.1.conflictReason != nil }) {
             let name = conflict.0
             let reason = conflict.1.conflictReason ?? ""
-            return .conflict(reason: String(localized: "\(name)：\(reason)", bundle: .module, comment: "名称：失败原因"))
+            return .conflict(reason: String(localized: "\(name)：\(reason)", bundle: ModuleBundle.bundle, comment: "名称：失败原因"))
         }
         if let first = pairs.first, pairs.allSatisfy({ $0.1 == first.1 }) { return first.1 }
         return .brokenLink

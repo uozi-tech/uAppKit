@@ -99,10 +99,10 @@ extension AgentRuntimeSession {
     public var statusLine: AgentStatusLine? {
         switch state {
         case .idle, .streaming: return nil
-        case .sending: return .busy(String(localized: "思考中…", bundle: .module))
-        case .reviewingTool(let name): return .busy(String(localized: "审查 \(name)…", bundle: .module, comment: "AI 正在审查某个工具调用；参数是工具名"))
-        case .waitingForApproval(let name): return .busy(String(localized: "等待确认 \(name)", bundle: .module, comment: "等用户确认某个工具调用；参数是工具名"))
-        case .runningTool(let name): return .busy(String(localized: "运行工具 \(name)…", bundle: .module, comment: "参数是工具名"))
+        case .sending: return .busy(String(localized: "思考中…", bundle: ModuleBundle.bundle))
+        case .reviewingTool(let name): return .busy(String(localized: "审查 \(name)…", bundle: ModuleBundle.bundle, comment: "AI 正在审查某个工具调用；参数是工具名"))
+        case .waitingForApproval(let name): return .busy(String(localized: "等待确认 \(name)", bundle: ModuleBundle.bundle, comment: "等用户确认某个工具调用；参数是工具名"))
+        case .runningTool(let name): return .busy(String(localized: "运行工具 \(name)…", bundle: ModuleBundle.bundle, comment: "参数是工具名"))
         case .error(let message): return .error(message)
         }
     }

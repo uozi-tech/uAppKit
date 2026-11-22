@@ -39,7 +39,7 @@ public struct UDAgentHistoryMenu: View {
                 .foregroundStyle(open ? UD.text : UD.text3)
                 .frame(width: 26, height: 26)
                 .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(open ? UD.uw06 : Color.clear))
-                .accessibilityLabel(String(localized: "历史对话", bundle: .module))
+                .accessibilityLabel(String(localized: "历史对话", bundle: ModuleBundle.bundle))
         } content: {
             HistoryList(store: store, scopeID: scopeID, newTitle: newTitle, emptyTitle: emptyTitle,
                         onSelect: onSelect, onNew: onNew, onDelete: onDelete)
@@ -114,7 +114,7 @@ private struct HistoryList: View {
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 8) {
-                        Text(session.title.isEmpty ? String(localized: "新对话", bundle: .module, comment: "还没有标题的对话") : session.title)
+                        Text(session.title.isEmpty ? String(localized: "新对话", bundle: ModuleBundle.bundle, comment: "还没有标题的对话") : session.title)
                             .font(UD.font(12.5, weight: isActive ? .medium : .regular))
                             .foregroundStyle(isActive ? UD.text : UD.text2)
                             .lineLimit(1)
@@ -145,7 +145,7 @@ private struct HistoryList: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.udPlain)
-            .accessibilityLabel(String(localized: "删除对话", bundle: .module))
+            .accessibilityLabel(String(localized: "删除对话", bundle: ModuleBundle.bundle))
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)

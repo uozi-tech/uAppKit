@@ -209,18 +209,18 @@ nonisolated public enum UFormat {
     /// 只取 `calendar` 的时区；日历日与年份一律按公历算（避免佛历/和历年份）。
     public static func relative(_ date: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
         let elapsed = now.timeIntervalSince(date)
-        if elapsed < 60 { return String(localized: "刚刚", bundle: .module) }
-        if elapsed < 3600 { let minutes = Int(elapsed / 60); return String(localized: "\(minutes) 分钟前", bundle: .module) }
+        if elapsed < 60 { return String(localized: "刚刚", bundle: ModuleBundle.bundle) }
+        if elapsed < 3600 { let minutes = Int(elapsed / 60); return String(localized: "\(minutes) 分钟前", bundle: ModuleBundle.bundle) }
         let hours = Int(elapsed / 3600)
-        let hoursText = String(localized: "\(hours) 小时前", bundle: .module)
+        let hoursText = String(localized: "\(hours) 小时前", bundle: ModuleBundle.bundle)
         if elapsed < 86_400 { return hoursText }
 
         var g = gregorian
         g.timeZone = calendar.timeZone
         let dayDiff = g.dateComponents([.day], from: g.startOfDay(for: date), to: g.startOfDay(for: now)).day ?? 0
         if dayDiff <= 0 { return hoursText }   // 25 小时的 DST 日内
-        if dayDiff == 1 { return String(localized: "昨天", bundle: .module) }
-        if dayDiff < 7 { return String(localized: "\(dayDiff) 天前", bundle: .module) }
+        if dayDiff == 1 { return String(localized: "昨天", bundle: ModuleBundle.bundle) }
+        if dayDiff < 7 { return String(localized: "\(dayDiff) 天前", bundle: ModuleBundle.bundle) }
 
         let d = g.dateComponents([.year, .month, .day], from: date)
         let md = twoDigits(d.month ?? 0) + "-" + twoDigits(d.day ?? 0)

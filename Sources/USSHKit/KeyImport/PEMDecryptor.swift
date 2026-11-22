@@ -29,11 +29,11 @@ nonisolated enum PEMDecryptor {
 
     private static func decryptLegacy(doc: PEMDocument, password: [UInt8]) throws -> [UInt8] {
         guard let dekInfo = doc.headers["DEK-Info"] else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "缺少 DEK-Info 头", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "缺少 DEK-Info 头", bundle: ModuleBundle.bundle))
         }
         let parts = dekInfo.split(separator: ",")
         guard parts.count == 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "DEK-Info 格式错误", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "DEK-Info 格式错误", bundle: ModuleBundle.bundle))
         }
         let cipherName = parts[0].trimmingCharacters(in: .whitespaces).uppercased()
         let iv = try hexBytes(String(parts[1]).trimmingCharacters(in: .whitespaces))
@@ -67,20 +67,20 @@ nonisolated enum PEMDecryptor {
         let root = try DERKeyDecoder.parse(der)
         let top = try DERKeyDecoder.children(root)
         guard top.count == 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "EncryptedPrivateKeyInfo 字段数错误", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "EncryptedPrivateKeyInfo 字段数错误", bundle: ModuleBundle.bundle))
         }
         let algFields = try DERKeyDecoder.children(top[0])
         guard let algOID = algFields.first,
               try DERKeyDecoder.oidString(algOID) == "1.2.840.113549.1.5.13" else {
-            throw PrivateKeyImportError.unsupportedKDF(name: String(localized: "非 PBES2（不支持 PBES1）", bundle: .module))
+            throw PrivateKeyImportError.unsupportedKDF(name: String(localized: "非 PBES2（不支持 PBES1）", bundle: ModuleBundle.bundle))
         }
         guard algFields.count >= 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBES2：缺少参数", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBES2：缺少参数", bundle: ModuleBundle.bundle))
         }
         // PBES2-params ::= SEQUENCE { keyDerivationFunc AID, encryptionScheme AID }
         let pbes2 = try DERKeyDecoder.children(algFields[1])
         guard pbes2.count == 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBES2-params 字段数错误", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBES2-params 字段数错误", bundle: ModuleBundle.bundle))
         }
         let (salt, iterations, prf, keyLenHint) = try parsePBKDF2(pbes2[0])
         let (cipher, keyLen, iv) = try parseEncScheme(pbes2[1])
@@ -88,7 +88,7 @@ nonisolated enum PEMDecryptor {
         // 里的可选 keyLength 提示——它不可信且会被直接用于分配缓冲。
         // 若提示存在，仅校验其与密码所需长度一致，不一致则视为结构损坏。
         if let hint = keyLenHint, hint != keyLen {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2 密钥长度与加密算法不符", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2 密钥长度与加密算法不符", bundle: ModuleBundle.bundle))
         }
         let key = try KeyImportCrypto.pbkdf2(
             password: password, salt: salt, iterations: iterations,
@@ -108,18 +108,18 @@ nonisolated enum PEMDecryptor {
         guard let kdfOID = kdf.first,
               try DERKeyDecoder.oidString(kdfOID) == "1.2.840.113549.1.5.12",
               kdf.count >= 2 else {
-            throw PrivateKeyImportError.unsupportedKDF(name: String(localized: "非 PBKDF2", bundle: .module))
+            throw PrivateKeyImportError.unsupportedKDF(name: String(localized: "非 PBKDF2", bundle: ModuleBundle.bundle))
         }
         let params = try DERKeyDecoder.children(kdf[1])
         guard params.count >= 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2-params 字段不足", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2-params 字段不足", bundle: ModuleBundle.bundle))
         }
         let salt = try DERKeyDecoder.primitiveBytes(params[0])
         let iterations = try intValue(params[1])
         // 迭代次数来自不可信 DER，仅受 4 字节宽度约束（最高约 4.29 亿）。
         // 不设上限会让构造的密钥强制执行多分钟级 HMAC，造成 CPU DoS / 界面卡死。
         guard iterations >= 1, iterations <= KeyImportCrypto.maxPBKDF2Iterations else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2 迭代次数超出允许范围", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2 迭代次数超出允许范围", bundle: ModuleBundle.bundle))
         }
         var keyLen: Int?
         var prf: KeyImportCrypto.PRF = .sha1            // 默认 hmacWithSHA1
@@ -151,7 +151,7 @@ nonisolated enum PEMDecryptor {
         throws -> (KeyImportCrypto.BlockCipher, Int, [UInt8]) {
         let enc = try DERKeyDecoder.children(node)
         guard let cipherOID = enc.first, enc.count >= 2 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "encryptionScheme 字段不足", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "encryptionScheme 字段不足", bundle: ModuleBundle.bundle))
         }
         let iv = try DERKeyDecoder.primitiveBytes(enc[1])
         switch try DERKeyDecoder.oidString(cipherOID) {
@@ -170,21 +170,21 @@ nonisolated enum PEMDecryptor {
     private static func intValue(_ node: ASN1Node) throws -> Int {
         let bytes = try DERKeyDecoder.integerMagnitude(node)
         guard bytes.count <= 4 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "整数过大", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "整数过大", bundle: ModuleBundle.bundle))
         }
         return bytes.reduce(0) { ($0 << 8) | Int($1) }
     }
 
     private static func hexBytes(_ hex: String) throws -> [UInt8] {
         guard hex.count % 2 == 0 else {
-            throw PrivateKeyImportError.malformedKey(reason: String(localized: "IV 十六进制长度为奇", bundle: .module))
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "IV 十六进制长度为奇", bundle: ModuleBundle.bundle))
         }
         var result: [UInt8] = []
         var idx = hex.startIndex
         while idx < hex.endIndex {
             let next = hex.index(idx, offsetBy: 2)
             guard let byte = UInt8(hex[idx..<next], radix: 16) else {
-                throw PrivateKeyImportError.malformedKey(reason: String(localized: "IV 含非十六进制字符", bundle: .module))
+                throw PrivateKeyImportError.malformedKey(reason: String(localized: "IV 含非十六进制字符", bundle: ModuleBundle.bundle))
             }
             result.append(byte)
             idx = next

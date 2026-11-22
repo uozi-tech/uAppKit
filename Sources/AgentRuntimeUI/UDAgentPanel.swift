@@ -7,7 +7,7 @@ import AppKit
 import SwiftUI
 import UDesignKit
 
-/// 面板上的文案。默认值走本包的文案目录（`bundle: .module`），调用方也可以整体替换。
+/// 面板上的文案。默认值走本包的文案目录（`bundle: ModuleBundle.bundle`），调用方也可以整体替换。
 public struct UDAgentPanelText: Sendable {
     public var placeholder: String
     public var emptyTitle: String
@@ -147,7 +147,7 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case .orphanToolResult(_, let content, let isError):
-            UDAgentToolTrace(name: String(localized: "结果", bundle: .module, comment: "没有对应工具调用的工具结果的标题"), arguments: "", result: content, status: isError ? .failed : .done)
+            UDAgentToolTrace(name: String(localized: "结果", bundle: ModuleBundle.bundle, comment: "没有对应工具调用的工具结果的标题"), arguments: "", result: content, status: isError ? .failed : .done)
         }
     }
 
