@@ -84,7 +84,7 @@ SOFTWARE.
 
 ## swift-nio-ssh
 
-`Sources/NIOSSH` 取自 [Wellz26/swift-nio-ssh](https://github.com/Wellz26/swift-nio-ssh) 0.3.6（[apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) 的 fork），带本仓库的补丁（`ThirdParty/swift-nio-ssh/`，被改过的文件头部有修改声明）。
+`Sources/NIOSSH` 与 `Tests/NIOSSHTests` 取自 [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) 0.15.2，带本仓库的补丁（`ThirdParty/swift-nio-ssh/`，被改过的文件头部有修改声明，补丁新增的文件头部写明出自 uAppKit、同样以 Apache-2.0 授权）。
 
 Copyright (c) Apple Inc. and the SwiftNIO project authors.
 Licensed under the Apache License, Version 2.0，全文见 `ThirdParty/swift-nio-ssh/LICENSE.txt`。
