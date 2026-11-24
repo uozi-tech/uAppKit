@@ -157,26 +157,28 @@ public final class SSHClient: Sendable {
         await lifecycle.waitForDisconnect()
     }
 
-    /// 关闭连接。幂等；返回时断开观察者都已回调过。
+    /// 关闭时等对端配合（回 CHANNEL_CLOSE）最多这么久，之后在本端收尾、照样返回。
+    public static let closeGracePeriod: Duration = .seconds(2)
+
+    /// 关闭连接。幂等；返回时断开观察者都已回调过，这条连接上的子通道（SFTP、exec / shell、转发）都已报关闭、
+    /// 在途请求都已失败。
     ///
-    /// 跳板机内层连接的关闭要等外层对端回 CHANNEL_CLOSE；外层传输半死时最多等 `gracePeriod`，
-    /// 之后照样算已关闭（观察者以 `.localClose` 回调），子通道留给外层断开时一起收拾。
-    public func close(gracePeriod: Duration = .seconds(5)) async {
+    /// 直连的传输是 TCP socket，本端关掉就是关了，不等对端。跳板机内层连接的传输是外层的一条 direct-tcpip 通道，
+    /// 关它要等外层对端回 CHANNEL_CLOSE；外层链路被黑洞、跳板机卡死时最多等 `gracePeriod`（默认
+    /// `SSHClient.closeGracePeriod`），之后在本端收尾：观察者以 `.localClose` 回调，内层的子通道就地拆掉，
+    /// 外层那条通道留给外层断开时一起收拾。不发 SSH_MSG_DISCONNECT（NIOSSH 没有公开发它的接口；OpenSSH 的客户端
+    /// 正常退出时也只是关通道、断 TCP）。
+    public func close(gracePeriod: Duration = SSHClient.closeGracePeriod) async {
         lifecycle.markLocalClose()
         transport.close(promise: nil)
-        let lifecycle = self.lifecycle
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                _ = await lifecycle.waitForDisconnect()
-            }
-            group.addTask {
-                // 等待断开不响应取消，所以到点（或本任务被取消）时由这里收尾，等待那一头随之返回。
-                try? await Task.sleep(for: gracePeriod)
-                lifecycle.finish(.localClose)
-            }
-            await group.next()
-            group.cancelAll()
-        }
+        if await lifecycle.waitForDisconnect(within: gracePeriod) != nil { return }
+        // 对端不配合：本端认定已关，再让内层的 SSH 当作传输没了，拆掉它上面的子通道（它们在等的回答不会来了）。
+        lifecycle.finish(.localClose)
+        let transport = self.transport
+        try? await transport.eventLoop.submit {
+            guard transport.isActive else { return }
+            transport.pipeline.fireChannelInactive()
+        }.get()
     }
 
     /// 确认对端还活着：发一个 `keepalive@openssh.com`（want-reply）。对端回 SUCCESS 或 FAILURE 都算活着。

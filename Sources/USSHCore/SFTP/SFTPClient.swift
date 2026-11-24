@@ -78,6 +78,8 @@ public final class SFTPClient: Sendable {
     public let maximumPacketLength: Int
 
     let core: SFTPClientCore
+    /// 本端关了（`close()` 发出了 CHANNEL_CLOSE；对端回不回都算）。
+    private let closedLocally = SSHCloseSignal()
 
     private init(core: SFTPClientCore, handshake: SFTPClientChannelHandler.Handshake,
                  limits: SFTPServerLimits?, configuration: Configuration) {
@@ -180,17 +182,27 @@ public final class SFTPClient: Sendable {
 
     // MARK: - 通道
 
-    public var isActive: Bool { channel.isActive }
+    /// 通道还开着、本端也没关过。
+    public var isActive: Bool { channel.isActive && !closedLocally.isClosed }
 
-    /// 通道关闭时完成。
+    /// 通道关闭时完成（对端回了 CHANNEL_CLOSE，或整条连接断了）。本端 `close()` 后对端一直不回时，它要等连接断了
+    /// 才完成；`close()` 本身不等它那么久。
     public var closeFuture: EventLoopFuture<Void> { channel.closeFuture }
 
-    /// 关掉整条通道；在途请求以 `connectionClosed` 失败。重复调用无害。
-    public func close() async {
+    /// 关掉整条通道。重复调用无害。
+    ///
+    /// 在途请求立刻以 `connectionClosed` 失败，之后的请求也是；发出 CHANNEL_CLOSE 后最多等 `gracePeriod`
+    /// （默认 `SSHClient.closeGracePeriod`）等对端回它——链路正常时对端马上回，关闭照旧有序；链路被黑洞、服务端
+    /// 卡死时到点就返回，不等保活判死。留下的 NIOSSH 子通道随连接一起拆掉。
+    public func close(gracePeriod: Duration = SSHClient.closeGracePeriod) async {
+        guard !closedLocally.isClosed else { return }
+        closedLocally.markClosed()
         // 已经不活跃：不再等 closeFuture——EventLoop 关停之后，它上面的 future 永远等不到回调。
         guard channel.isActive else { return }
+        let handler = core.handler
+        channel.eventLoop.execute { handler.value.closeLocally() }
         channel.close(promise: nil)
-        try? await channel.closeFuture.get()
+        _ = await channel.closeFuture.completes(within: gracePeriod)
     }
 
     public func supportsExtension(_ name: String) -> Bool {

@@ -29,7 +29,7 @@ public struct ConnectedClient: Sendable {
     public var bastionLegacyAlgorithmsInUse: [SSHLegacyAlgorithm]  // 跳板机那一跳的
     public var legacyAlgorithmStatusKnown: Bool          // 目标那一跳的协商结果读得出来（false = 不知道，不是「没用」）
     public var bastionLegacyAlgorithmStatusKnown: Bool   // 跳板机那一跳的（没有跳板机时 true）
-    public func close() async               // 先目标、再跳板机；幂等
+    public func close(gracePeriod: Duration = SSHClient.closeGracePeriod) async   // 先目标、再跳板机；幂等；最多约 2 秒
     public func exec(_ command: String) async throws -> String   // stdout+stderr，≤ 64 000 字节
     public func openDirectTCPIP(host: String, port: Int) async throws -> NIOAsyncChannel<ByteBuffer, ByteBuffer>
 }
@@ -115,7 +115,7 @@ public struct SSHLegacyAlgorithm: Sendable, Hashable {
 | — | `await handle.exitStatusReported()`：远端**报告**结束（exit-status / exit-signal 到达）就返回，不等通道关、不碰输出；通道关了也没报返回 nil。后台进程占着伪终端（`sleep 1000 &` 再 `exit`）时通道一直不关，终端可以据此再给输出一点时间然后自己关 |
 | — | `await handle.exitStatus()`：**没人读 `output` 时会认领并丢弃之后的输出**（否则输出超过一个窗口的命令会卡住）。要输出就先开始读，再在别的任务里或读完之后等退出状态 |
 | `client.onDisconnect(perform:)`（只存一个回调） | `let token = client.onDisconnect { reason in }`，可挂任意多个，`removeDisconnectObserver(token)`；`await client.waitForDisconnect()`；`client.disconnectReason` |
-| `try await client.close()` | `await client.close()`（不抛错，幂等） |
+| `try await client.close()` | `await client.close()`（不抛错，幂等，有上限：见第 5 节「关闭有上限」） |
 | `try await client.openSFTP()` | `try await client.openSFTP(configuration: SFTPClient.Configuration = .init())` |
 | `createDirectTCPIPChannel(using:initialize:)` | `openDirectTCPIPAsyncChannel(targetHost:targetPort:originatorAddress:)`，或 `openDirectTCPIP(targetHost:targetPort:originatorAddress:initializer:)`——**initializer 必填**，在通道激活前、它的 EventLoop 上装 handler |
 | `runRemotePortForward(host:port:onOpen:handleChannel:)` | `withRemotePortForward(host:port:onOpen:onAccept:)`，或 `startRemotePortForward(host:port:initializer:)` 拿 `SSHRemotePortForward`（`boundPort`；`await forward.cancel(timeout: .seconds(5))` 撤销，传输半死时最多等这么久） |
@@ -155,6 +155,15 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **隧道与 SFTP 会话**（`SSHLocalForwardingTunnel` / `SSHFileTransferSession`）：
   - `keepAliveInterval:` 给了就每一跳都保活（同上），判死约需 `n × 4` 秒；默认 nil，不发。没开保活时链路卡死（NAT 掐了、
     防火墙丢包、对端失联但 TCP 不复位）**什么都察觉不到**：在途的请求、隧道里的查询一直挂着。长期挂着的隧道建议开（uTable 用 30 秒）。
+  - **关闭有上限**（不等对端、不等保活判死）：`SFTPClient.close()`、`SSHSessionHandle.close()`（exec / shell / PTY）、
+    `SSHClient.close()`、`ConnectedClient.close()`、`SSHFileTransferSession.close()`、隧道的 `close()` 不管对端怎样都在约
+    `SSHClient.closeGracePeriod`（2 秒）内返回。以前 SFTP 通道的关闭要等服务端回 CHANNEL_CLOSE——链路被黑洞（包被悄悄丢掉）时
+    要等保活判死（uTable 实测 120 秒），没开保活就是永远；exec / PTY 与跳板机内层连接最多等 5 秒、之后仍报「开着」。现在等满
+    宽限就在本端收尾：在途请求失败（SFTP 是 `SFTPError.connectionClosed`，等回应的通道请求是 `SSHChannelError.channelClosed`），
+    输出序列结束、`exitStatus()` 返回、之后的写入立刻失败、`isActive` / `isConnected` 为 false；留下的 NIOSSH 子通道随连接一起拆掉。
+    链路正常时照旧有序（服务端先看到通道关闭，再看到 TCP 断开），用时只是一个往返。直连的 `SSHClient.close()` 本来就不等
+    （关 TCP socket）；不发 SSH_MSG_DISCONNECT（NIOSSH 没有公开发它的接口，OpenSSH 客户端正常退出也不发）。各个 `close` 都可以
+    传 `gracePeriod:` 改宽限。**app 自己给关闭加的超时（uTable 的 3 秒）可以去掉。**
   - SSH 连接（任一跳）不是本端关的而断了（服务器关闭、传输出错、保活判死）：隧道的本地监听不再接连接（之后连本地端口的连接立刻被关掉；端口**不还给系统**，留到 `close()`——还回去可能被别的进程绑上，app 里还没关的连接池再去连就把握手、密码发给了它，
     不会再在死连接上开通道），正在转发的连接随各自的 SSH 通道结束，关掉连接，然后调一次 `onDisconnect(reason)`（收完才调）。
     `isConnected` 从此为 false、`disconnectReason` 是那个原因；隧道不会自己重连，app 要换一条新的。本端 `close()` 不回调。

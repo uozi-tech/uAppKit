@@ -16,9 +16,11 @@ public nonisolated struct ConnectedClient: Sendable {
     }
 
     /// 先关目标连接，再关跳板机。幂等。
-    public func close() async {
-        await target.close()
-        await bastion?.close()
+    /// 关掉目标连接，再关跳板机。经跳板机时目标连接的关闭最多等 `gracePeriod` 让跳板机回 CHANNEL_CLOSE
+    /// （见 `SSHClient.close(gracePeriod:)`）；跳板机是 TCP，关掉就是关了。所以整个最多约 `gracePeriod`。
+    public func close(gracePeriod: Duration = SSHClient.closeGracePeriod) async {
+        await target.close(gracePeriod: gracePeriod)
+        await bastion?.close(gracePeriod: gracePeriod)
     }
 
     /// 目标连接用上的 SHA-1 时代旧算法（自动退级的结果，见 `SSHLegacyFallback`）：协商到的密钥交换 / 主机密钥 / MAC

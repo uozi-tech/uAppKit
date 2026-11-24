@@ -142,6 +142,12 @@ final class SSHChannelRequestHandler: ChannelInboundHandler, RemovableChannelHan
         context.fireChannelInactive()
     }
 
+    /// 本端关了、对端一直不回 CHANNEL_CLOSE：等回应的请求失败，不再等退出状态。
+    func closeLocally() {
+        failAll(SSHChannelError.channelClosed)
+        deliverExitStatus(nil)
+    }
+
     private func failAll(_ error: any Error) {
         while let next = pendingReplies.popFirst() {
             next.promise.fail(error)
@@ -244,6 +250,11 @@ final class SSHSessionOutputHandler: ChannelDuplexHandler {
     func handlerRemoved(context: ChannelHandlerContext) {
         finish()
         self.context = nil
+    }
+
+    /// 本端关了、对端一直不回 CHANNEL_CLOSE：输出序列就此结束（同本端关闭），之后到的数据丢掉。
+    func closeLocally() {
+        finish()
     }
 
     /// 没有人读输出、却有人在等退出状态：之后到的数据直接丢掉，不再施加背压。
