@@ -31,6 +31,7 @@ enum SSHMessage: Equatable {
     case debug(DebugMessage)
     case serviceRequest(ServiceRequestMessage)
     case serviceAccept(ServiceAcceptMessage)
+    case extensionInfo(ExtensionInfoMessage)
     case keyExchange(KeyExchangeMessage)
     case keyExchangeInit(KeyExchangeECDHInitMessage)
     case keyExchangeReply(KeyExchangeECDHReplyMessage)
@@ -406,6 +407,11 @@ extension ByteBuffer {
                     return nil
                 }
                 return .serviceRequest(message)
+            case SSHMessage.ExtensionInfoMessage.id:
+                guard let message = self.readExtensionInfoMessage() else {
+                    return nil
+                }
+                return .extensionInfo(message)
             case SSHMessage.ServiceAcceptMessage.id:
                 guard let message = self.readServiceAcceptMessage() else {
                     return nil
@@ -1226,6 +1232,9 @@ extension ByteBuffer {
         case .serviceAccept(let message):
             writtenBytes += self.writeInteger(SSHMessage.ServiceAcceptMessage.id)
             writtenBytes += self.writeServiceAcceptMessage(message)
+        case .extensionInfo(let message):
+            writtenBytes += self.writeInteger(SSHMessage.ExtensionInfoMessage.id)
+            writtenBytes += self.writeExtensionInfoMessage(message)
         case .keyExchange(let message):
             writtenBytes += self.writeInteger(SSHMessage.KeyExchangeMessage.id)
             writtenBytes += self.writeKeyExchangeMessage(message)

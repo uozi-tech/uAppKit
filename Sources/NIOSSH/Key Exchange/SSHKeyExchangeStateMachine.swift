@@ -99,6 +99,9 @@ struct SSHKeyExchangeStateMachine {
     /// (OpenSSH `PROTOCOL` §1.10, the Terrapin mitigation). Decided when the peer's KEXINIT arrives.
     private(set) var isStrictKeyExchange = false
 
+    /// Whether this is the initial key exchange and the client announced `ext-info-c` (RFC 8308).
+    private(set) var peerAcceptsExtensionInfo = false
+
     init(
         allocator: ByteBufferAllocator,
         loop: EventLoop,
@@ -151,6 +154,9 @@ struct SSHKeyExchangeStateMachine {
 
     mutating func handle(keyExchange message: SSHMessage.KeyExchangeMessage) throws -> SSHMultiMessage? {
         self.isStrictKeyExchange = self.peerAgreesToStrictKeyExchange(message)
+        self.peerAcceptsExtensionInfo =
+            self.previousSessionIdentifier == nil && self.role.isServer
+            && message.keyExchangeAlgorithms.contains(Self.extensionInfoClientMarker)
 
         switch self.state {
         case .keyExchangeSent(message: let ourMessage):
@@ -698,7 +704,10 @@ extension SSHKeyExchangeStateMachine {
     /// Pseudo-algorithms that announce protocol extensions in the KEXINIT algorithm list. They are never
     /// negotiated: our own configured list never contains them.
     static var keyExchangeExtensionMarkerNames: [Substring] {
-        [Self.strictKeyExchangeClientMarker, Self.strictKeyExchangeServerMarker]
+        [
+            Self.strictKeyExchangeClientMarker, Self.strictKeyExchangeServerMarker, Self.extensionInfoClientMarker,
+            "ext-info-s",
+        ]
     }
 
     /// Whether we announce strict key exchange at all (tests turn it off to play an old peer).
@@ -713,10 +722,31 @@ extension SSHKeyExchangeStateMachine {
 
     /// The markers appended to our KEXINIT: only in the first one of the connection.
     private var keyExchangeExtensionMarkers: [Substring] {
-        guard self.previousSessionIdentifier == nil, self.offersStrictKeyExchange else {
+        guard self.previousSessionIdentifier == nil else {
             return []
         }
-        return [self.role.isClient ? Self.strictKeyExchangeClientMarker : Self.strictKeyExchangeServerMarker]
+        var markers: [Substring] = []
+        if self.role.isClient {
+            // RFC 8308: we accept SSH_MSG_EXT_INFO.
+            markers.append(Self.extensionInfoClientMarker)
+        }
+        if self.offersStrictKeyExchange {
+            markers.append(self.role.isClient ? Self.strictKeyExchangeClientMarker : Self.strictKeyExchangeServerMarker)
+        }
+        return markers
+    }
+
+    /// The SSH_MSG_EXT_INFO a server sends right after its first SSH_MSG_NEWKEYS: only if the client announced
+    /// `ext-info-c` and the configuration has `serverSignatureAlgorithms`.
+    var extensionInfoToSend: SSHMessage.ExtensionInfoMessage? {
+        guard self.peerAcceptsExtensionInfo, case .server(let configuration) = self.role,
+            let algorithms = configuration.serverSignatureAlgorithms
+        else {
+            return nil
+        }
+        return .init(extensions: [
+            .init(name: "server-sig-algs", value: ByteBuffer(string: algorithms.joined(separator: ",")))
+        ])
     }
 
     private func peerAgreesToStrictKeyExchange(_ message: SSHMessage.KeyExchangeMessage) -> Bool {

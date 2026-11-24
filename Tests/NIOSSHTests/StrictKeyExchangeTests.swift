@@ -126,7 +126,7 @@ final class StrictKeyExchangeTests: XCTestCase {
         let defaults = SSHKeyExchangeStateMachine.supportedKeyExchangeAlgorithms
 
         let clientFirst = self.keyExchangeMessage(role: .client(clientConfiguration), previousSessionIdentifier: nil)
-        XCTAssertEqual(clientFirst.keyExchangeAlgorithms, defaults + ["kex-strict-c-v00@openssh.com"])
+        XCTAssertEqual(clientFirst.keyExchangeAlgorithms, defaults + ["ext-info-c", "kex-strict-c-v00@openssh.com"])
         let serverFirst = self.keyExchangeMessage(role: .server(serverConfiguration), previousSessionIdentifier: nil)
         XCTAssertEqual(serverFirst.keyExchangeAlgorithms, defaults + ["kex-strict-s-v00@openssh.com"])
 
@@ -160,7 +160,7 @@ final class StrictKeyExchangeTests: XCTestCase {
         XCTAssertEqual(
             self.keyExchangeMessage(role: .client(clientConfiguration), previousSessionIdentifier: nil)
                 .keyExchangeAlgorithms,
-            ["curve25519-sha256", "kex-strict-c-v00@openssh.com"]
+            ["curve25519-sha256", "ext-info-c", "kex-strict-c-v00@openssh.com"]
         )
     }
 

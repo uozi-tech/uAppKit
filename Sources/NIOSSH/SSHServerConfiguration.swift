@@ -41,6 +41,11 @@ public struct SSHServerConfiguration {
     /// tests turn it off to play a peer that predates it.
     internal var offersStrictKeyExchange = true
 
+    /// The public key algorithms to announce in the RFC 8308 `server-sig-algs` extension, most preferred first
+    /// (e.g. `["ssh-ed25519", "rsa-sha2-512", "rsa-sha2-256"]`). When set and the client announced `ext-info-c`,
+    /// the server sends SSH_MSG_EXT_INFO right after its first SSH_MSG_NEWKEYS. `nil` (the default) sends nothing.
+    public var serverSignatureAlgorithms: [String]? = nil
+
     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).

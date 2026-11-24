@@ -51,5 +51,10 @@ extension SendsKeyExchangeMessages {
         let result = self.keyExchangeStateMachine.sendNewKeys()
         try self.serializer.serialize(message: .newKeys, to: &buffer)
         self.serializer.addEncryption(result, strictKeyExchange: self.keyExchangeStateMachine.isStrictKeyExchange)
+
+        // RFC 8308: a server's SSH_MSG_EXT_INFO is the first message under the new keys.
+        if let extensionInfo = self.keyExchangeStateMachine.extensionInfoToSend {
+            try self.serializer.serialize(message: .extensionInfo(extensionInfo), to: &buffer)
+        }
     }
 }

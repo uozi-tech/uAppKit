@@ -282,6 +282,12 @@ struct SSHConnectionStateMachine {
                         self = .receivedNewKeys(state)
                         return result
 
+                    case .extensionInfo(let message):
+                        // RFC 8308: the server's first message under the new keys.
+                        state.userAuthStateMachine.receiveExtensionInfo(message)
+                        self = .receivedNewKeys(state)
+                        return .noMessage
+
                     case .disconnect:
                         self = .receivedDisconnect(state.role)
                         return .disconnect
@@ -329,6 +335,12 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveServiceAccept(message)
                         self = .userAuthentication(state)
                         return result
+
+                    case .extensionInfo(let message):
+                        // RFC 8308: right after the server's NEWKEYS, or right before USERAUTH_SUCCESS.
+                        state.userAuthStateMachine.receiveExtensionInfo(message)
+                        self = .userAuthentication(state)
+                        return .noMessage
 
                     case .userAuthRequest(let message):
                         let result = try state.receiveUserAuthRequest(message)
