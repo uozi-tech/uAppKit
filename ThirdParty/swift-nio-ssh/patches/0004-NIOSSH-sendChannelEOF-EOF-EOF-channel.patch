@@ -1,0 +1,214 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 12:51:44 +0800
+Subject: [PATCH 4/9] =?UTF-8?q?NIOSSH:=20=E4=BF=AE=E6=AD=A3=20sendChannelE?=
+ =?UTF-8?q?OF=20=E7=9A=84=E7=8A=B6=E6=80=81=E8=BD=AC=E6=8D=A2=EF=BC=88?=
+ =?UTF-8?q?=E5=AF=B9=E7=AB=AF=E5=85=88=E5=8F=91=20EOF=20=E5=90=8E=E6=88=91?=
+ =?UTF-8?q?=E6=96=B9=20EOF=20=E4=B8=8D=E5=86=8D=E6=96=AD=E5=BC=80=20channe?=
+ =?UTF-8?q?l=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+ChildChannelStateMachine.sendChannelEOF 把两个状态弄反了：它接受 .active → .halfClosedLocal 与
+.halfClosedLocal → .quiescent，却对 .halfClosedRemote 抛 protocolViolation("Sent EOF out of sequence.")。
+EOF 每个方向只能发一次，合法的转换是 .active → .halfClosedLocal 与 .halfClosedRemote → .quiescent，
+在 .halfClosedLocal 再发一次才是违规——和 receiveChannelEOF（.active → .halfClosedRemote、
+.halfClosedLocal → .quiescent）正好对称。
+
+后果：对端先半关闭、我方随后发 EOF——`-L` 转发里服务端先关写端的正常收尾，或 exec 的输出已经结束后再
+sendEOF——会让 child channel 当场出错拆除，排在 EOF 前面还没写出去的数据随之丢弃（写入 promise 失败、
+CLOSE 抢在数据前面发出）。
+
+改法只动那一个 switch：.halfClosedRemote 转 .quiescent，.halfClosedLocal 挪进抛错的分支。上游没有用例
+固化错误的行为。测试：状态机层面四种 EOF 次序（我先 / 对端先 / 我方两次 / 对端两次）及之后的数据与关闭；
+端到端（ChannelHalfClosureTests）对端先发 EOF，我方再写数据、再发 EOF，数据送达、对端看到 EOF、随后干净
+关闭、两端都没有错误——修之前这个用例在 EOF 处报「Sent EOF out of sequence」。
+
+通用 bug，可以提给上游。
+---
+ .../ChildChannelStateMachine.swift            |  5 +-
+ .../NIOSSHTests/ChannelHalfClosureTests.swift | 98 +++++++++++++++++++
+ .../ChildChannelStateMachineTests.swift       | 43 ++++++++
+ 3 files changed, 144 insertions(+), 2 deletions(-)
+ create mode 100644 Tests/NIOSSHTests/ChannelHalfClosureTests.swift
+
+diff --git a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift
+index 980475c..9e1472b 100644
+--- a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
++++ b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
+@@ -435,7 +435,8 @@ extension ChildChannelStateMachine {
+             precondition(message.recipientChannel == channelID.peerChannelID)
+             self.state = .halfClosedLocal(channelID: channelID)
+ 
+-        case .halfClosedLocal(let channelID):
++        case .halfClosedRemote(let channelID):
++            // The peer sent its EOF first; ours completes the half-closure (mirrors `receiveChannelEOF`).
+             precondition(message.recipientChannel == channelID.peerChannelID)
+             self.state = .quiescent(channelID: channelID)
+ 
+@@ -443,7 +444,7 @@ extension ChildChannelStateMachine {
+             // In the idle state we haven't either sent a channel open or received one. This is not really possible.
+             preconditionFailure("Somehow sent channel EOF for idle channel")
+ 
+-        case .requestedLocally, .requestedRemotely, .halfClosedRemote, .quiescent, .closedLocally, .closedRemotely,
++        case .requestedLocally, .requestedRemotely, .halfClosedLocal, .quiescent, .closedLocally, .closedRemotely,
+             .closed:
+             throw NIOSSHError.protocolViolation(protocolName: "channel", violation: "Sent EOF out of sequence.")
+         }
+diff --git a/Tests/NIOSSHTests/ChannelHalfClosureTests.swift b/Tests/NIOSSHTests/ChannelHalfClosureTests.swift
+new file mode 100644
+index 0000000..6b5d89c
+--- /dev/null
++++ b/Tests/NIOSSHTests/ChannelHalfClosureTests.swift
+@@ -0,0 +1,98 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++/// Half-closure end to end: the peer sends EOF first, we keep writing and then send ours.
++final class ChannelHalfClosureTests: XCTestCase {
++    func testWritesAndEOFAfterThePeersEOF() throws {
++        let channel = BackToBackEmbeddedChannel()
++        defer { XCTAssertNoThrow(try channel.finish()) }
++
++        let serverReads = ReadRecordingHandler()
++        let serverEOF = EOFRecorder()
++        let serverErrors = ErrorLoggingHandler()
++        var serverChild: Channel?
++
++        let clientHandler = NIOSSHHandler(
++            role: .client(
++                .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
++            ),
++            allocator: channel.client.allocator,
++            inboundChildChannelInitializer: nil
++        )
++        let serverHandler = NIOSSHHandler(
++            role: .server(
++                .init(hostKeys: [.init(ed25519Key: .init())], userAuthDelegate: DenyThenAcceptDelegate(messagesToDeny: 0))
++            ),
++            allocator: channel.server.allocator
++        ) { child, _ in
++            serverChild = child
++            return child.eventLoop.makeCompletedFuture {
++                try child.syncOptions!.setOption(.allowRemoteHalfClosure, value: true)
++                try child.pipeline.syncOperations.addHandlers([serverReads, serverEOF, serverErrors])
++            }
++        }
++        XCTAssertNoThrow(try channel.client.pipeline.syncOperations.addHandler(clientHandler))
++        XCTAssertNoThrow(try channel.server.pipeline.syncOperations.addHandler(serverHandler))
++        XCTAssertNoThrow(try channel.activate())
++        XCTAssertNoThrow(try channel.interactInMemory())
++
++        let clientEOF = EOFRecorder()
++        let clientErrors = ErrorLoggingHandler()
++        let clientChildPromise = channel.client.eventLoop.makePromise(of: Channel.self)
++        clientHandler.createChannel(clientChildPromise) { child, _ in
++            child.eventLoop.makeCompletedFuture {
++                try child.syncOptions!.setOption(.allowRemoteHalfClosure, value: true)
++                try child.pipeline.syncOperations.addHandlers([clientEOF, clientErrors])
++            }
++        }
++        XCTAssertNoThrow(try channel.interactInMemory())
++        let clientChild = try clientChildPromise.futureResult.wait()
++        guard let serverChild = serverChild else {
++            XCTFail("No server channel")
++            return
++        }
++
++        // The server is done talking first.
++        XCTAssertNoThrow(try serverChild.close(mode: .output).wait())
++        XCTAssertNoThrow(try channel.interactInMemory())
++        XCTAssertTrue(clientEOF.seenEOF)
++        XCTAssertTrue(clientChild.isActive)
++
++        // The client still has things to say, then says EOF.
++        var payload = clientChild.allocator.buffer(capacity: 16)
++        payload.writeString("still talking")
++        let write = clientChild.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(payload)))
++        let eof = clientChild.close(mode: .output)
++        XCTAssertNoThrow(try channel.interactInMemory())
++        XCTAssertNoThrow(try write.wait())
++        XCTAssertNoThrow(try eof.wait())
++        XCTAssertEqual(serverReads.reads, [SSHChannelData(type: .channel, data: .byteBuffer(payload))])
++        XCTAssertTrue(serverEOF.seenEOF)
++        XCTAssertTrue(clientChild.isActive)
++
++        // Both sides are quiescent: a clean close, no errors anywhere.
++        let close = clientChild.close()
++        XCTAssertNoThrow(try channel.interactInMemory())
++        XCTAssertNoThrow(try close.wait())
++        XCTAssertNoThrow(try clientChild.closeFuture.wait())
++        XCTAssertNoThrow(try serverChild.closeFuture.wait())
++        XCTAssertEqual(clientErrors.errors.count, 0)
++        XCTAssertEqual(serverErrors.errors.count, 0)
++    }
++}
+diff --git a/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift b/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift
+index 0e74547..560cd57 100644
+--- a/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift
++++ b/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift
+@@ -83,4 +83,47 @@ final class ChildChannelStateMachineTests: XCTestCase {
+         XCTAssertFalse(afterEOF.sentClose)
+         XCTAssertFalse(afterEOF.canSendWindowAdjust)
+     }
++
++    // MARK: EOF in both directions
++
++    func testEOFOrderings() throws {
++        // We send EOF first, then the peer.
++        var localFirst = try self.activeOutboundChannel()
++        try localFirst.sendChannelEOF(.init(recipientChannel: 2))
++        XCTAssertTrue(localFirst.isActiveOnChannel)
++        try localFirst.receiveChannelEOF(.init(recipientChannel: 1))
++        XCTAssertNoThrow(try localFirst.sendChannelClose(.init(recipientChannel: 2)))
++
++        // The peer sends EOF first, then we do: the end of a `-L` stream whose server half-closes first, or EOF on an
++        // exec whose output already ended. Used to throw "Sent EOF out of sequence.".
++        var remoteFirst = try self.activeOutboundChannel()
++        try remoteFirst.receiveChannelEOF(.init(recipientChannel: 1))
++        XCTAssertNoThrow(try remoteFirst.sendChannelData(.init(recipientChannel: 2, data: ByteBuffer())))
++        XCTAssertNoThrow(try remoteFirst.sendChannelEOF(.init(recipientChannel: 2)))
++        XCTAssertThrowsError(try remoteFirst.sendChannelData(.init(recipientChannel: 2, data: ByteBuffer())))
++        XCTAssertThrowsError(try remoteFirst.receiveChannelEOF(.init(recipientChannel: 1)))
++        XCTAssertNoThrow(try remoteFirst.sendChannelClose(.init(recipientChannel: 2)))
++        XCTAssertNoThrow(try remoteFirst.receiveChannelClose(.init(recipientChannel: 1)))
++        XCTAssertTrue(remoteFirst.isClosed)
++
++        // We may send EOF only once...
++        var localTwice = try self.activeOutboundChannel()
++        try localTwice.sendChannelEOF(.init(recipientChannel: 2))
++        XCTAssertThrowsError(try localTwice.sendChannelEOF(.init(recipientChannel: 2))) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .protocolViolation)
++        }
++
++        // ... and so may the peer.
++        var remoteTwice = try self.activeOutboundChannel()
++        try remoteTwice.receiveChannelEOF(.init(recipientChannel: 1))
++        XCTAssertThrowsError(try remoteTwice.receiveChannelEOF(.init(recipientChannel: 1))) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .protocolViolation)
++        }
++
++        // Both EOFs sent and received: a third one either way is out of sequence.
++        var quiescent = try self.activeOutboundChannel()
++        try quiescent.receiveChannelEOF(.init(recipientChannel: 1))
++        try quiescent.sendChannelEOF(.init(recipientChannel: 2))
++        XCTAssertThrowsError(try quiescent.sendChannelEOF(.init(recipientChannel: 2)))
++    }
+ }

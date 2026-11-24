@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
-Date: Tue, 24 Nov 2026 12:46:11 +0800
-Subject: [PATCH 8/8] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
+Date: Tue, 24 Nov 2026 12:57:52 +0800
+Subject: [PATCH 9/9] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
  =?UTF-8?q?=E7=9A=84=E6=96=87=E4=BB=B6=E5=8A=A0=E4=BF=AE=E6=94=B9=E5=A3=B0?=
  =?UTF-8?q?=E6=98=8E=EF=BC=88Apache-2.0=20=C2=A74(b)=20notice=EF=BC=89?=
 MIME-Version: 1.0
@@ -9,9 +9,8 @@ Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
 Apache-2.0 第 4(b) 条要求被修改的文件带有显著的修改声明。前面补丁改过的 20 个上游源文件和
-1 个上游测试文件（ChildChannelMultiplexerTests.swift）头部各加一行。补丁新增的文件（CustomKeys、
-CustomKeyExchange、SSHKeyDerivation、ExtensionNegotiation 与六个测试文件）文件头本身写明出自
-uAppKit，不用再加。
+1 个上游测试文件（ChildChannelMultiplexerTests.swift）头部各加一行。补丁新增的文件（CustomKeys、CustomKeyExchange、SSHKeyDerivation、ExtensionNegotiation 与七个测试文件）
+文件头本身写明出自 uAppKit，不用再加。
 
 以后的补丁改到别的上游文件，就在这个补丁里给那个文件也加一行；这个补丁始终排在最后。
 ---
@@ -39,7 +38,7 @@ uAppKit，不用再加。
  21 files changed, 42 insertions(+)
 
 diff --git a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift
-index 980475c..e7bf91c 100644
+index 9e1472b..3bb40c8 100644
 --- a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
 +++ b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
 @@ -10,6 +10,8 @@
