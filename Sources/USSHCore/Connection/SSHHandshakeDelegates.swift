@@ -84,6 +84,9 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     private var pending: [Int: Task<Void, Never>] = [:]
     private var nextID = 0
     private var cancelled = false
+    /// 第一次密钥交换时接受的主机密钥。NIOSSH 每次密钥交换（含重新交换）都会来问，重新交换时只认这一把，
+    /// 不再回调（用户不会被同一台主机再问一遍）；换了别的密钥就是硬失败（RFC 4253 §9 不允许换主机身份）。
+    private var acceptedKey: NIOSSHPublicKey?
 
     init(eventLoop: any EventLoop, validation: SSHHostKeyValidation, host: String, port: Int,
          timeout: Duration?, clock: SSHHandshakeClock) {
@@ -96,11 +99,22 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        if let acceptedKey {
+            if acceptedKey == hostKey {
+                validationCompletePromise.succeed(())
+            } else {
+                validationCompletePromise.fail(HostKeyRejection(
+                    underlying: SSHHostKeyChangedDuringRekey(previous: acceptedKey, offered: hostKey)))
+            }
+            return
+        }
         switch validation {
         case .acceptAnything:
+            acceptedKey = hostKey
             validationCompletePromise.succeed(())
         case .trustedKeys(let keys):
             if keys.contains(hostKey) {
+                acceptedKey = hostKey
                 validationCompletePromise.succeed(())
             } else {
                 validationCompletePromise.fail(HostKeyRejection(underlying: SSHUntrustedHostKey(hostKey: hostKey)))
@@ -137,6 +151,7 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
                 delegate.pending[id]?.cancel()
                 delegate.pending[id] = nil
                 delegate.clock.resume()
+                if case .success = result { delegate.acceptedKey = context.hostKey }
                 promise.completeWith(result)
             }
         }
@@ -177,28 +192,48 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     }
 }
 
+/// `.delegate` 认证方式的委托以错误完成了 promise。包一层，`SSHConnectionGuard` 才分得清它和传输错误。
+struct AuthenticationDelegateFailure: Error {
+    var underlying: any Error
+}
+
 /// `NIOSSHClientUserAuthenticationDelegate` 的实现：按 `SSHAuthentication.methods` 的顺序，
 /// 跳过服务器不再接受的方式。
+///
+/// 列表用完时以 `nil` 完成 promise，NIOSSH（补丁 0011）随即在 pipeline 上报
+/// `NIOSSHError.noFurtherAuthenticationOffers`，`SSHConnectionGuard` 据此结束连接、取 `failure` 作为详情。
+/// 认证结束（成功或失败）后 `forgetCredentials()` 丢掉口令与私钥，不让它们跟着连接活下去。
 final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
-    private let methods: [SSHAuthenticationMethod]
+    private var methods: [SSHAuthenticationMethod]
     private var index = 0
     private var activeDelegate: (any NIOSSHClientUserAuthenticationDelegate & Sendable)?
     private(set) var attempted: [SSHAuthenticationMethod.Kind] = []
-
-    /// 列表用完了（在 EventLoop 上调）。NIOSSH 0.15.2 收到 `nil` 之后什么也不做，连接会一直挂着，
-    /// 所以必须由我们自己结束连接。
-    var onExhausted: ((SSHAuthenticationFailure) -> Void)?
+    /// 服务器最后一次声明还接受的方式。
+    private var lastAvailable: NIOSSHAvailableUserAuthenticationMethods = .all
 
     init(authentication: SSHAuthentication) {
         self.username = authentication.username
         self.methods = authentication.methods
     }
 
+    /// 认证失败的详情（列表用完时）。
+    var failure: SSHAuthenticationFailure {
+        SSHAuthenticationFailure(remainingMethods: lastAvailable, attemptedMethods: attempted)
+    }
+
+    /// 丢掉还没用到（或已经用过）的口令、私钥与委托。
+    func forgetCredentials() {
+        methods = []
+        index = 0
+        activeDelegate = nil
+    }
+
     func nextAuthenticationType(
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
+        lastAvailable = availableMethods
         if let delegate = activeDelegate {
             ask(delegate, availableMethods: availableMethods, promise: nextChallengePromise)
         } else {
@@ -238,7 +273,6 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
             }
         }
         promise.succeed(nil)
-        onExhausted?(SSHAuthenticationFailure(remainingMethods: availableMethods, attemptedMethods: attempted))
     }
 
     private func ask(
@@ -261,7 +295,7 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
                 this.activeDelegate = nil
                 this.advance(availableMethods: availableMethods, promise: promise)
             case .failure(let error):
-                promise.fail(error)
+                promise.fail(AuthenticationDelegateFailure(underlying: error))
             }
         }
     }

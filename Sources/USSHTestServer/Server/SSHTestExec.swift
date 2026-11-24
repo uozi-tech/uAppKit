@@ -62,6 +62,8 @@ public final class SSHTestExecContext: Sendable {
     public let channel: any Channel
 
     let receivedSignal = NIOLockedValueBox<String?>(nil)
+    /// 处理函数自己发过 EOF 了：收尾时不再发第二个（每个方向只能发一次）。
+    let eofSent = NIOLockedValueBox(false)
 
     init(command: String, environment: [String: String], pty: SSHTestPTYInfo?, stdin: AsyncStream<ByteBuffer>,
          windowChanges: AsyncStream<SSHTestWindowSize>, channel: any Channel) {
@@ -99,6 +101,7 @@ public final class SSHTestExecContext: Sendable {
 
     /// 发 EOF。
     public func sendEOF() async {
+        eofSent.withLockedValue { $0 = true }
         try? await channel.close(mode: .output)
     }
 
