@@ -18,6 +18,12 @@ public final class SSHClient: Sendable {
     /// 承载这条 SSH 连接的 NIO 通道：直连是 TCP 通道，跳板机内层是外层连接上的 direct-tcpip 子通道。
     public let transport: any Channel
 
+    /// 第一次密钥交换选中的算法（USSHCore 由双方的 KEXINIT 按 NIOSSH 的规则算出，见 `SSHNegotiatedAlgorithms`）。
+    /// 读不出对端的 KEXINIT 时为 nil（实际不会发生：读不出时 NIOSSH 也协商不下去）。
+    public let negotiatedAlgorithms: SSHNegotiatedAlgorithms?
+    /// 用 RSA 用户私钥（`SSHAuthenticationMethod.rsaPrivateKey`）认证成功时用的签名算法；别的方式成功时为 nil。
+    public let rsaUserAuthenticationAlgorithm: SSHRSASignatureAlgorithm?
+
     let sshHandler: NIOLoopBound<NIOSSHHandler>
     let lifecycle: SSHConnectionLifecycle
     let remoteForwards: SSHRemoteForwardRegistry
@@ -27,7 +33,10 @@ public final class SSHClient: Sendable {
     public var eventLoop: any EventLoop { transport.eventLoop }
 
     init(host: String, port: Int, transport: any Channel, sshHandler: NIOLoopBound<NIOSSHHandler>,
-                 lifecycle: SSHConnectionLifecycle, remoteForwards: SSHRemoteForwardRegistry, logger: Logger) {
+                 lifecycle: SSHConnectionLifecycle, remoteForwards: SSHRemoteForwardRegistry, logger: Logger,
+                 facts: SSHSessionFacts = SSHSessionFacts()) {
+        self.negotiatedAlgorithms = facts.negotiatedAlgorithms
+        self.rsaUserAuthenticationAlgorithm = facts.rsaUserAuthenticationAlgorithm
         self.host = host
         self.port = port
         self.transport = transport
@@ -231,7 +240,7 @@ final class SSHConnectionSetup: Sendable {
 
     private struct Installed: Sendable {
         var handler: NIOLoopBound<NIOSSHHandler>
-        var authenticated: EventLoopFuture<Void>
+        var authenticated: EventLoopFuture<SSHSessionFacts>
     }
 
     private let installed = NIOLockedValueBox<Installed?>(nil)
@@ -256,7 +265,8 @@ final class SSHConnectionSetup: Sendable {
             eventLoop: eventLoop, validation: configuration.hostKeyValidation, host: host, port: port,
             timeout: configuration.hostKeyValidationTimeout, clock: clock)
         let authDelegate = SSHClientAuthDelegate(
-            authentication: configuration.authentication, allowsLegacyAlgorithms: algorithms.allowsLegacyAlgorithms)
+            authentication: configuration.authentication, allowsLegacyAlgorithms: algorithms.allowsLegacyAlgorithms,
+            allowsSHA1Fallback: configuration.allowsSHA1RSAUserAuthenticationFallback)
         var nioConfiguration = SSHClientConfiguration(
             userAuthDelegate: authDelegate,
             serverAuthDelegate: hostKeyDelegate,
@@ -276,13 +286,17 @@ final class SSHConnectionSetup: Sendable {
         let keepAlive = configuration.keepAliveInterval.map {
             SSHConnectionGuard.KeepAlive(interval: $0, maximumUnanswered: max(configuration.keepAliveMaximumUnanswered, 0))
         }
-        let authenticated = eventLoop.makePromise(of: Void.self)
+        let authenticated = eventLoop.makePromise(of: SSHSessionFacts.self)
+        let sniffer = SSHKeyExchangeInitSniffer(aeadCiphers: Set(
+            algorithms.effectiveTransportProtectionSchemes.filter { $0.macName == nil }.map { $0.cipherName }))
         let guardHandler = SSHConnectionGuard(
             lifecycle: lifecycle, authenticated: authenticated, clock: clock,
-            hostKeyDelegate: hostKeyDelegate, authDelegate: authDelegate, sshHandler: handler,
+            hostKeyDelegate: hostKeyDelegate, authDelegate: authDelegate, sshHandler: handler, sniffer: sniffer,
             handshakeTimeout: configuration.handshakeTimeout, keepAlive: keepAlive, logger: configuration.logger)
         do {
             let sync = channel.pipeline.syncOperations
+            // 嗅探放在 NIOSSHHandler 前面（靠 socket 一侧），先于 NIOSSH 看到双方的 KEXINIT。
+            try sync.addHandler(sniffer)
             try sync.addHandler(handler)
             try sync.addHandler(guardHandler)
         } catch {
@@ -300,8 +314,9 @@ final class SSHConnectionSetup: Sendable {
             throw SSHClientError.connectionClosed(.localClose)
         }
         let lifecycle = self.lifecycle
+        let facts: SSHSessionFacts
         do {
-            try await installed.authenticated.getCancellable { _ in }
+            facts = try await installed.authenticated.getCancellable { _ in }
         } catch is CancellationError {
             lifecycle.markLocalClose()
             channel.close(promise: nil)
@@ -319,7 +334,7 @@ final class SSHConnectionSetup: Sendable {
         let logger = configuration.logger
         logger.debug("SSH 已连接", metadata: ["host": "\(host)", "port": "\(port)"])
         return SSHClient(host: host, port: port, transport: channel, sshHandler: installed.handler,
-                         lifecycle: lifecycle, remoteForwards: remoteForwards, logger: logger)
+                         lifecycle: lifecycle, remoteForwards: remoteForwards, logger: logger, facts: facts)
     }
 }
 

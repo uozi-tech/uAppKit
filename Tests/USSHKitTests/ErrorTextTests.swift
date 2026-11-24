@@ -103,6 +103,33 @@ final class ErrorTextTests: XCTestCase {
                        localized("RSA 密钥长度 \(String(512)) 位不受支持（支持 \(String(1024))–\(String(8192)) 位）"))
     }
 
+    /// 没有共同算法：按类别与服务器的报价分三种说法（断言文案键，不比对译文）。
+    func testNoCommonAlgorithmKeys() {
+        func text(_ category: SSHAlgorithmNegotiationFailure.Category?, _ offer: [String]) -> String? {
+            SSHClientError.noCommonAlgorithm(.init(category: category, clientOffer: ["x"], serverOffer: offer)).errorDescription
+        }
+        func handshake(_ detail: String) -> String { localized("SSH 握手失败：\(detail)") }
+        let hostKey = localized("主机密钥")
+        let keyExchange = localized("密钥交换")
+        let encryption = localized("加密")
+        let mac = localized("消息认证（MAC）")
+        XCTAssertEqual(text(nil, []), handshake(localized("与服务器没有共同支持的算法")))
+        XCTAssertEqual(text(.hostKey, ["rsa-sha2-512", "rsa-sha2-256"]),
+                       handshake(localized("这次连接没有启用服务器提供的任何\(hostKey)算法（服务器提供：\("rsa-sha2-512, rsa-sha2-256")）")))
+        XCTAssertEqual(text(.hostKey, ["ssh-rsa"]),
+                       handshake(localized("服务器只提供 SHA-1 时代的旧\(hostKey)算法（服务器提供：\("ssh-rsa")）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。")))
+        XCTAssertEqual(text(.keyExchange, ["diffie-hellman-group14-sha1"]),
+                       handshake(localized("服务器只提供 SHA-1 时代的旧\(keyExchange)算法（服务器提供：\("diffie-hellman-group14-sha1")）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。")))
+        XCTAssertEqual(text(.encryption, ["aes128-cbc"]),
+                       handshake(localized("本应用不支持服务器提供的任何\(encryption)算法（服务器提供：\("aes128-cbc")）")))
+        XCTAssertEqual(text(.mac, []),
+                       handshake(localized("本应用不支持服务器提供的任何\(mac)算法（服务器提供：\(localized("无"))）")))
+        // 归到 `.handshakeFailed`（不是网络断开，重试也不会好；显示同 `.connectFailed`）。
+        let mapped = try? SSHClientFactory.connectionError(for: SSHClientError.noCommonAlgorithm(.init(
+            category: .hostKey, clientOffer: [], serverOffer: ["ssh-rsa"])))
+        guard case .handshakeFailed = mapped else { return XCTFail("\(String(describing: mapped))") }
+    }
+
     /// 英文资源确实带上了新文案（找不到时界面只剩中文原文）。
     func testNewMessagesAreTranslated() throws {
         let english = try XCTUnwrap(ModuleBundle.bundle.path(forResource: "en", ofType: "lproj").flatMap(Bundle.init(path:)))

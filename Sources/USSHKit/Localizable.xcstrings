@@ -1918,30 +1918,59 @@
         }
       }
     },
-    "与服务器没有共同支持的算法（服务器可能只支持旧算法）" : {
+    "与服务器没有共同支持的算法" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No algorithm is supported by both sides (the server may only support legacy algorithms)"
+            "value" : "The client and the server have no algorithm in common"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "サーバと共通して対応しているアルゴリズムがありません（サーバが旧式のアルゴリズムにしか対応していない可能性があります）"
+            "value" : "サーバと共通して対応しているアルゴリズムがありません"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "서버와 공통으로 지원하는 알고리즘이 없음(서버가 구형 알고리즘만 지원할 수 있음)"
+            "value" : "서버와 공통으로 지원하는 알고리즘이 없음"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "與伺服器沒有共同支援的演算法（伺服器可能只支援舊演算法）"
+            "value" : "與伺服器沒有共同支援的演算法"
+          }
+        }
+      }
+    },
+    "主机密钥" : {
+      "comment" : "算法类别，嵌在「…的任何%@算法」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "host key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호스트 키"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主機金鑰"
           }
         }
       }
@@ -1970,6 +1999,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主機金鑰已變更：原為 %1$@，現為 %2$@"
+          }
+        }
+      }
+    },
+    "加密" : {
+      "comment" : "算法类别，嵌在「…的任何%@算法」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "encryption"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暗号化"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호화"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加密"
           }
         }
       }
@@ -2026,6 +2084,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目前尚未實作加密演算法 %@。"
+          }
+        }
+      }
+    },
+    "压缩" : {
+      "comment" : "算法类别，嵌在「…的任何%@算法」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "compression"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "圧縮"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "압축"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "壓縮"
           }
         }
       }
@@ -2222,6 +2309,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "密文長度不是區塊大小的整數倍"
+          }
+        }
+      }
+    },
+    "密钥交换" : {
+      "comment" : "算法类别，嵌在「…的任何%@算法」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "key exchange"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鍵交換"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키 교환"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "金鑰交換"
           }
         }
       }
@@ -2534,6 +2650,35 @@
         }
       }
     },
+    "无" : {
+      "comment" : "服务器在这一类里什么算法都没报",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "none"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "なし"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "없음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "無"
+          }
+        }
+      }
+    },
     "无法解析 %@：%@" : {
       "localizations" : {
         "en" : {
@@ -2810,6 +2955,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器關閉了連線"
+          }
+        }
+      }
+    },
+    "服务器只提供 SHA-1 时代的旧%@算法（服务器提供：%@）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server only offers legacy SHA-1-era %1$@ algorithms (the server offers: %2$@). These algorithms are less secure and are usually only found on very old devices; this connection doesn't enable the algorithms for old devices."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバは SHA-1 時代の旧式の%1$@アルゴリズムしか提供していません（サーバの提供：%2$@）。これらのアルゴリズムは安全性が低く、通常はとても古い機器でしか使われていません。この接続では旧式機器向けのアルゴリズムを有効にしていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 SHA-1 시대의 구형 %1$@ 알고리즘만 제공함(서버 제공: %2$@). 이 알고리즘들은 보안성이 낮아 보통 아주 오래된 기기에서만 쓰이며, 이번 연결에서는 구형 기기용 알고리즘을 사용하도록 설정하지 않았음."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器只提供 SHA-1 時代的舊%1$@演算法（伺服器提供：%2$@）。這類演算法安全性較低，通常只有很舊的裝置還在用；這次連線沒有啟用相容舊裝置的演算法。"
           }
         }
       }
@@ -3374,6 +3547,34 @@
         }
       }
     },
+    "本应用不支持服务器提供的任何%@算法（服务器提供：%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This app doesn't support any of the %1$@ algorithms the server offers (the server offers: %2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このアプリは、サーバが提供する%1$@アルゴリズムのいずれにも対応していません（サーバの提供：%2$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 앱은 서버가 제공하는 %1$@ 알고리즘을 하나도 지원하지 않음(서버 제공: %2$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本應用程式不支援伺服器提供的任何%1$@演算法（伺服器提供：%2$@）"
+          }
+        }
+      }
+    },
     "权限不足" : {
       "comment" : "SFTP 服务端回的 SSH_FX_PERMISSION_DENIED",
       "localizations" : {
@@ -3455,6 +3656,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "衍生金鑰長度不合法"
+          }
+        }
+      }
+    },
+    "消息认证（MAC）" : {
+      "comment" : "算法类别，嵌在「…的任何%@算法」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "message authentication (MAC)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メッセージ認証（MAC）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메시지 인증(MAC)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "訊息驗證（MAC）"
           }
         }
       }
@@ -4408,6 +4638,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輸入的私密金鑰密語無法解密此檔案。"
+          }
+        }
+      }
+    },
+    "这次连接没有启用服务器提供的任何%@算法（服务器提供：%@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This connection doesn't enable any of the %1$@ algorithms the server offers (the server offers: %2$@)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "この接続では、サーバが提供する%1$@アルゴリズムをどれも有効にしていません（サーバの提供：%2$@）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이번 연결에서는 서버가 제공하는 %1$@ 알고리즘을 하나도 사용하도록 설정하지 않았음(서버 제공: %2$@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "這次連線沒有啟用伺服器提供的任何%1$@演算法（伺服器提供：%2$@）"
           }
         }
       }

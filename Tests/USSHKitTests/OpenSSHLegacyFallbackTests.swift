@@ -1,0 +1,77 @@
+import XCTest
+@_spi(uTermIntegration) @testable import USSHKit
+
+/// 对本机真实 sshd 的自动退级：只开 SHA-1 主机签名 / 只开 group14-sha1 / 只开 hmac-sha1 的服务器默认连得上
+/// （第二次成，只问一次信任，报出用上的旧算法）；关掉自动退级时报没有共同算法；现代配置的 sshd 只连一次。
+/// sshd 起不来时跳过。
+final class OpenSSHLegacyFallbackTests: XCTestCase {
+
+    private func start(_ config: [String], rsaHostKey: Bool = false) async throws -> LocalSSHD {
+        let sshd = try await LocalSSHD.start(extraConfig: config, rsaHostKey: rsaHostKey)
+        addTeardownBlock { sshd.stop() }
+        return sshd
+    }
+
+    private func connect(_ sshd: LocalSSHD, probe: ApproverProbe, legacyFallback: Bool = true) async throws -> ConnectedClient {
+        try await SSHClientFactory.connect(
+            endpoint: SSHEndpoint(host: "127.0.0.1", port: sshd.port, username: sshd.username),
+            credential: .privateKey(pem: sshd.userKeyPEM, passphrase: nil),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .ask,
+            connectTimeout: .seconds(30), approvalTimeout: .seconds(30), approver: probe.approver,
+            legacyFallback: legacyFallback, legacyMemory: SSHLegacyEndpointMemory())
+    }
+
+    /// 默认连上、两次连接、一次信任、报出旧算法；关掉退级时报没有共同算法且只连一次。
+    private func assertFallback(_ sshd: LocalSSHD, expected: [SSHLegacyAlgorithm], refusal: SSHAlgorithmNegotiationFailure,
+                                file: StaticString = #filePath, line: UInt = #line) async throws {
+        let probe = ApproverProbe(.approve)
+        let client = try await connect(sshd, probe: probe)
+        let echoed = try await client.exec("echo legacy-ok")
+        XCTAssertEqual(echoed, "legacy-ok\n", file: file, line: line)
+        XCTAssertEqual(client.legacyAlgorithmsInUse, expected, file: file, line: line)
+        await client.close()
+        await sshd.waitForConnections(2)
+        XCTAssertEqual(sshd.connections, 2, sshd.log, file: file, line: line)
+        XCTAssertEqual(probe.challenges.count, 1, file: file, line: line)
+
+        let refused = ApproverProbe(.approve)
+        let message = await assertConnectionError({
+            _ = try await self.connect(sshd, probe: refused, legacyFallback: false)
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
+        XCTAssertEqual(message, SSHErrorText.describe(SSHClientError.noCommonAlgorithm(refusal)), file: file, line: line)
+        await sshd.waitForConnections(3)
+        XCTAssertEqual(sshd.connections, 3, file: file, line: line)
+        XCTAssertTrue(refused.challenges.isEmpty, file: file, line: line)
+    }
+
+    func testSHA1HostKeyOnly() async throws {
+        let sshd = try await start(["HostKeyAlgorithms ssh-rsa"], rsaHostKey: true)
+        try await assertFallback(sshd, expected: [SSHLegacyAlgorithm(role: .hostKey, name: "ssh-rsa")],
+                                 refusal: .init(category: .hostKey, clientOffer: [], serverOffer: ["ssh-rsa"]))
+    }
+
+    func testGroup14SHA1Only() async throws {
+        let sshd = try await start(["KexAlgorithms diffie-hellman-group14-sha1"])
+        try await assertFallback(
+            sshd, expected: [SSHLegacyAlgorithm(role: .keyExchange, name: "diffie-hellman-group14-sha1")],
+            refusal: .init(category: .keyExchange, clientOffer: [], serverOffer: ["diffie-hellman-group14-sha1"]))
+    }
+
+    func testHMACSHA1Only() async throws {
+        let sshd = try await start(["Ciphers aes128-ctr", "MACs hmac-sha1"])
+        try await assertFallback(sshd, expected: [SSHLegacyAlgorithm(role: .mac, name: "hmac-sha1")],
+                                 refusal: .init(category: .mac, clientOffer: [], serverOffer: ["hmac-sha1"]))
+    }
+
+    func testModernSSHDConnectsOnce() async throws {
+        let sshd = try await start([])
+        let probe = ApproverProbe(.approve)
+        let client = try await connect(sshd, probe: probe)
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [])
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.keyExchange, "curve25519-sha256")
+        await client.close()
+        await sshd.waitForConnections(1)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(sshd.connections, 1)
+    }
+}

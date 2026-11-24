@@ -1,10 +1,12 @@
+import Crypto
 import NIOSSH
 import USSHTestServer
 import XCTest
 @_spi(uTermIntegration) @testable import USSHKit
 
-/// USSHKit 默认的算法集 `.builtInOnly`（今天的行为）：RSA **用户**私钥照样能登录，只有 RSA 主机密钥的服务器
-/// 被拒；app 明确选 `.standard` 才接受 RSA 主机密钥。保活默认关。
+/// USSHKit 默认的算法集是 `.standard`：RSA 主机密钥的服务器默认能连上；明确传 `.builtInOnly` 时照样拒绝；
+/// SHA-1 的旧算法不在默认集里（关掉自动退级时被拒，`.legacyCompatible` 能连）。保活默认关。
+/// 自动退级本身见 `LegacyFallbackTests`。
 final class AlgorithmPolicyTests: XCTestCase {
 
     private func rsaKey(_ pem: String = KeyImportFixtures.rsaPKCS1) throws -> SSHRSAPrivateKey {
@@ -52,49 +54,120 @@ final class AlgorithmPolicyTests: XCTestCase {
         XCTAssertEqual(rsaAttempts(server).map(\.rsaSignatureAlgorithm), [.rsaSHA2_512, .rsaSHA2_256])
     }
 
-    /// 只有 RSA 主机密钥的服务器：`.builtInOnly` 不报、不接受 RSA 主机密钥，握手协商不出来；`.standard` 能连上。
-    func testRSAOnlyHostKeyIsRefusedUnderBuiltInOnly() async throws {
+    /// 服务器的报价对不上时 USSHKit 给的文字（与 `SSHClientError.noCommonAlgorithm` 的说法是同一份）。
+    private func noCommonAlgorithm(_ category: SSHAlgorithmNegotiationFailure.Category, serverOffer: [String]) -> String {
+        SSHErrorText.describe(SSHClientError.noCommonAlgorithm(
+            SSHAlgorithmNegotiationFailure(category: category, clientOffer: [], serverOffer: serverOffer)))
+    }
+
+    /// 只有 RSA（SHA-2）主机密钥的服务器：默认（`.standard`）一次就连上，主机密钥照 OpenSSH 的写法记成 `ssh-rsa`。
+    func testRSAOnlyHostKeyConnectsByDefault() async throws {
         let hostKey = try rsaKey()
         let server = try await TestSSH.startServer { configuration in
             configuration.useRSAHostKey(hostKey)
         }
         defer { Task { await server.stop() } }
 
-        let message = await assertConnectionError({
-            _ = try await TestSSH.connect(server, algorithms: .builtInOnly)
-        }) {
-            switch $0 {
-            case .connectFailed(let message), .handshakeFailed(let message): return message
-            default: return nil
-            }
-        }
-        // 协商不出主机密钥算法时，往往是服务端先发现、先关连接，客户端只看到对端关闭（`.connectFailed`）；
-        // 本端先发现时是「没有共同支持的算法」（`.handshakeFailed`）。两种都没走到认证。
-        let negotiation = String(localized: "与服务器没有共同支持的算法（服务器可能只支持旧算法）", bundle: ModuleBundle.bundle)
-        let expected = [
-            String(localized: "SSH 握手失败：\(negotiation)", bundle: ModuleBundle.bundle),
-            String(localized: "服务器关闭了连接", bundle: ModuleBundle.bundle),
-        ]
-        XCTAssertTrue(expected.contains(message ?? ""), message ?? "")
-        XCTAssertTrue(server.events.authAttempts.isEmpty)
-
         let store = MemoryHostKeyStore()
-        let client = try await TestSSH.connect(server, store: store, algorithms: .standard)
+        let client = try await TestSSH.connect(server, store: store)
         let echoed = try await client.exec("echo hello")
         XCTAssertEqual(echoed, "hello\n")
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.hostKey, "rsa-sha2-512")
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [])
         await client.close()
         XCTAssertEqual(store.remembered.map(\.keyType), ["ssh-rsa"], "RSA 主机密钥照 OpenSSH 的写法记成 ssh-rsa")
+        XCTAssertEqual(server.events.acceptedConnections, 1)
     }
 
-    func testDefaultsAreTodaysBehaviour() throws {
+    /// 明确传 `.builtInOnly`：不报、不接受 RSA 主机密钥，每次都是「没有共同的主机密钥算法」，没走到认证。
+    /// 自动退级补的只有 SHA-1 的 `ssh-rsa`，对不上服务器报的 `rsa-sha2-*`，所以也不再试。
+    func testRSAOnlyHostKeyIsRefusedUnderExplicitBuiltInOnly() async throws {
+        let hostKey = try rsaKey()
+        let server = try await TestSSH.startServer { configuration in
+            configuration.useRSAHostKey(hostKey)
+        }
+        defer { Task { await server.stop() } }
+
+        let attempts = 5
+        for _ in 0..<attempts {
+            let message = await assertConnectionError({
+                _ = try await TestSSH.connect(server, algorithms: .builtInOnly)
+            }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
+            XCTAssertEqual(message, noCommonAlgorithm(.hostKey, serverOffer: ["rsa-sha2-512", "rsa-sha2-256"]))
+        }
+        XCTAssertTrue(server.events.authAttempts.isEmpty)
+        try await server.waitForEvents { $0.acceptedConnections == attempts }
+        XCTAssertEqual(server.events.acceptedConnections, attempts, "一次也没有再试")
+    }
+
+    /// 只有 SHA-1 的 `ssh-rsa` 主机签名：关掉自动退级时被拒（类别与报价都对），`.legacyCompatible` 能连。
+    func testSHA1HostKeyOnlyNeedsLegacy() async throws {
+        let hostKey = try rsaKey()
+        let server = try await TestSSH.startServer { configuration in
+            configuration.useRSAHostKey(hostKey, algorithms: [.sshRSA])
+        }
+        defer { Task { await server.stop() } }
+
+        let message = await assertConnectionError({
+            _ = try await TestSSH.connect(server, legacyFallback: false)
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
+        XCTAssertEqual(message, noCommonAlgorithm(.hostKey, serverOffer: ["ssh-rsa"]))
+
+        let client = try await TestSSH.connect(server, algorithms: .legacyCompatible, legacyFallback: false)
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [SSHLegacyAlgorithm(role: .hostKey, name: "ssh-rsa")])
+        await client.close()
+    }
+
+    /// 只有 `diffie-hellman-group14-sha1`：关掉自动退级时被拒，`.legacyCompatible` 能连。
+    func testGroup14SHA1OnlyNeedsLegacy() async throws {
+        let server = try await TestSSH.startServer { configuration in
+            configuration.keyExchangeAlgorithms = [SSHDiffieHellmanAlgorithm.group14SHA1.name]
+        }
+        defer { Task { await server.stop() } }
+
+        let message = await assertConnectionError({
+            _ = try await TestSSH.connect(server, legacyFallback: false)
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
+        XCTAssertEqual(message, noCommonAlgorithm(.keyExchange, serverOffer: ["diffie-hellman-group14-sha1"]))
+
+        let client = try await TestSSH.connect(server, algorithms: .legacyCompatible, legacyFallback: false)
+        XCTAssertEqual(client.legacyAlgorithmsInUse,
+                       [SSHLegacyAlgorithm(role: .keyExchange, name: "diffie-hellman-group14-sha1")])
+        await client.close()
+    }
+
+    /// 服务器同时有 ed25519 与 RSA 主机密钥：协商到的仍是 ed25519，记下的主机密钥类型不变（已有的 known-hosts 照常生效）。
+    func testEd25519AndRSAHostKeysKeepEd25519() async throws {
+        let hostKey = try rsaKey()
+        let server = try await TestSSH.startServer { configuration in
+            configuration.hostKeys = [NIOSSHPrivateKey(ed25519Key: .init())]
+                + SSHRSASignatureAlgorithm.modern.map { NIOSSHPrivateKey(rsaPrivateKey: hostKey, algorithm: $0) }
+        }
+        defer { Task { await server.stop() } }
+
+        let store = MemoryHostKeyStore()
+        let client = try await TestSSH.connect(server, store: store)
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.hostKey, "ssh-ed25519")
+        await client.close()
+        XCTAssertEqual(store.remembered.map(\.keyType), ["ssh-ed25519"])
+    }
+
+    func testDefaultsAreStandardWithLegacyFallback() throws {
         let configuration = try USSHKitIntegration.makeConfiguration(
             host: "h", port: 22, username: "u", credential: .password("p"),
             hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .strict, connectTimeout: .seconds(5),
             approver: { _ in false })
-        XCTAssertEqual(configuration.algorithms.hostKeyAlgorithms, SSHAlgorithms.builtInOnly.hostKeyAlgorithms)
-        XCTAssertEqual(configuration.algorithms.keyExchangeAlgorithms, SSHAlgorithms.builtInOnly.keyExchangeAlgorithms)
+        XCTAssertEqual(configuration.algorithms.hostKeyAlgorithms, SSHAlgorithms.standard.hostKeyAlgorithms)
+        XCTAssertEqual(configuration.algorithms.keyExchangeAlgorithms, SSHAlgorithms.standard.keyExchangeAlgorithms)
         XCTAssertFalse(configuration.algorithms.allowsLegacyAlgorithms)
+        XCTAssertTrue(configuration.allowsSHA1RSAUserAuthenticationFallback, "自动退级默认开：含同一条连接里的 ssh-rsa 用户认证")
         XCTAssertNil(configuration.keepAliveInterval, "保活默认关")
+
+        let strict = try USSHKitIntegration.makeConfiguration(
+            host: "h", port: 22, username: "u", credential: .password("p"),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .strict, connectTimeout: .seconds(5),
+            approver: { _ in false }, legacyFallback: false)
+        XCTAssertFalse(strict.allowsSHA1RSAUserAuthenticationFallback)
     }
 
     /// 打开保活后，链路卡死（服务端不读不写、TCP 还在）会被判死，断开原因是 `.keepAliveTimeout`。

@@ -119,10 +119,14 @@ enum TestSSH {
         approvalTimeout: Duration = .seconds(180),
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in true },
         jumpHost: SSHJumpHost? = nil,
-        algorithms: SSHAlgorithms = .builtInOnly,
-        keepAliveInterval: Duration? = nil
+        algorithms: SSHAlgorithms = .standard,
+        keepAliveInterval: Duration? = nil,
+        legacyFallback: Bool = true,
+        legacyMemory: SSHLegacyEndpointMemory = SSHLegacyEndpointMemory(),
+        logger: any SSHLogger = NoOpSSHLogger()
     ) async throws -> ConnectedClient {
-        try await USSHKitIntegration.connect(
+        // 与 `USSHKitIntegration.connect` 同一条路径，只是进程内的「需要旧算法」记录默认每次一份新的，用例之间不串。
+        try await SSHClientFactory.connect(
             endpoint: endpoint(server, jumpHost: jumpHost),
             credential: credential,
             hostKeyStore: store,
@@ -131,7 +135,10 @@ enum TestSSH {
             approvalTimeout: approvalTimeout,
             approver: approver,
             algorithms: algorithms,
-            keepAliveInterval: keepAliveInterval
+            keepAliveInterval: keepAliveInterval,
+            legacyFallback: legacyFallback,
+            legacyMemory: legacyMemory,
+            logger: logger
         )
     }
 
