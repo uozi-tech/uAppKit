@@ -190,10 +190,10 @@ index 0000000..527f2ca
 +    }
 +}
 diff --git a/Tests/NIOSSHTests/CustomKeyTests.swift b/Tests/NIOSSHTests/CustomKeyTests.swift
-index 6e734e7..517ff2b 100644
+index 7eef49d..9fe1f8e 100644
 --- a/Tests/NIOSSHTests/CustomKeyTests.swift
 +++ b/Tests/NIOSSHTests/CustomKeyTests.swift
-@@ -522,8 +522,10 @@ final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
+@@ -708,8 +708,10 @@ final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
          XCTAssertNoThrow(try self.channel.client.pipeline.syncOperations.addHandler(successes))
          XCTAssertNoThrow(try self.channel.activate())
          // The server does not know the algorithm: it answers with a failure without consulting its delegate, the

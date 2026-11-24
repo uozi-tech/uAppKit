@@ -95,6 +95,12 @@ struct SSHKeyExchangeStateMachine {
     private var protectionSchemes: [NIOSSHTransportProtection.Type]
     private var previousSessionIdentifier: ByteBuffer?
 
+    /// The key exchange and host key algorithms of this key exchange, read once from the configuration and the
+    /// algorithm registry when it starts: what we offer in KEXINIT is exactly what we negotiate with, even if an
+    /// algorithm is registered in between.
+    private let configuredKeyExchangeAlgorithms: [Substring]
+    private let supportedHostKeyAlgorithms: [Substring]
+
     /// Whether this is the initial key exchange and both peers announced strict key exchange
     /// (OpenSSH `PROTOCOL` §1.10, the Terrapin mitigation). Decided when the peer's KEXINIT arrives.
     private(set) var isStrictKeyExchange = false
@@ -117,6 +123,8 @@ struct SSHKeyExchangeStateMachine {
         self.state = .idle
         self.protectionSchemes = protectionSchemes
         self.previousSessionIdentifier = previousSessionIdentifier
+        self.configuredKeyExchangeAlgorithms = Self.configuredKeyExchangeAlgorithms(role: role)
+        self.supportedHostKeyAlgorithms = Self.supportedHostKeyAlgorithms(role: role)
 
         switch self.role {
         case .client:
@@ -582,8 +590,8 @@ struct SSHKeyExchangeStateMachine {
 
     /// The key exchange methods from the configuration, in order of preference, keeping only those we can run:
     /// built-in ones and registered custom ones.
-    private var configuredKeyExchangeAlgorithms: [Substring] {
-        self.role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
+    private static func configuredKeyExchangeAlgorithms(role: SSHConnectionRole) -> [Substring] {
+        role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
             Self.supportedKeyExchangeAlgorithms.contains(name) || NIOSSHAlgorithms.keyExchangeType(named: name) != nil
         }
     }
@@ -596,12 +604,17 @@ struct SSHKeyExchangeStateMachine {
     }
 
     // The host key algorithms supported by this peer, in order of preference.
-    private var supportedHostKeyAlgorithms: [Substring] {
-        switch self.role {
-        case .client:
-            // Registered custom algorithms follow the built-in ones.
-            return Self.supportedServerHostKeyAlgorithms
+    private static func supportedHostKeyAlgorithms(role: SSHConnectionRole) -> [Substring] {
+        switch role {
+        case .client(let configuration):
+            // Registered custom algorithms follow the built-in ones, unless the configuration picks and orders them.
+            let available =
+                Self.supportedServerHostKeyAlgorithms
                 + NIOSSHAlgorithms.registeredPublicKeyAlgorithms.map { Substring($0) }
+            guard let configured = configuration.hostKeyAlgorithms else {
+                return available
+            }
+            return configured.map { Substring($0) }.filter { available.contains($0) }
         case .server(let configuration):
             return configuration.hostKeys.flatMap { $0.hostKeyAlgorithms }
         }

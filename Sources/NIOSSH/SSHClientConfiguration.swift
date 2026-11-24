@@ -28,6 +28,13 @@ public struct SSHClientConfiguration {
     /// Supported data encryption algorithms
     public var transportProtectionSchemes: [NIOSSHTransportProtection.Type]
 
+    /// The host key algorithms to offer and accept, in order of preference. `nil` (the default) means NIOSSH's
+    /// built-in algorithms followed by every algorithm registered with `NIOSSHAlgorithms`, in registration order.
+    ///
+    /// Names that are neither built in nor registered are dropped. Use it to keep a registered legacy algorithm
+    /// (say SHA-1 `ssh-rsa`) for the one connection that needs it.
+    public var hostKeyAlgorithms: [String]? = nil
+
     /// The key exchange methods to offer, in order of preference. Defaults to NIOSSH's built-in methods.
     ///
     /// Names of methods registered with `NIOSSHAlgorithms.register(keyExchangeAlgorithm:)` may be added; names
