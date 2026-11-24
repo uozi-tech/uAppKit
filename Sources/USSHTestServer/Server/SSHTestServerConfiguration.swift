@@ -61,6 +61,9 @@ public struct SSHTestAuthentication: Sendable {
     public var authorizedKeys: [String: [NIOSSHPublicKey]]
     /// 给了就只听它的（上面两项不再看）。
     public var custom: (@Sendable (SSHTestAuthAttempt) async -> Bool)?
+    /// 比 `custom` 更细：可以回「部分成功」（RFC 4252 §5.1 的 partial success，要求再用别的方式认证一次）。
+    /// 给了就优先于 `custom`。
+    public var decision: (@Sendable (SSHTestAuthAttempt) async -> SSHTestAuthDecision)?
     /// 服务器声明支持的方式（RFC 4252 §5.1 的 "authentications that can continue"）。
     public var supportedMethods: NIOSSHAvailableUserAuthenticationMethods
 
@@ -81,6 +84,11 @@ public struct SSHTestAuthentication: Sendable {
         SSHTestAuthentication(custom: { _ in true })
     }
 
+    func decide(_ attempt: SSHTestAuthAttempt) async -> SSHTestAuthDecision {
+        if let decision { return await decision(attempt) }
+        return await accepts(attempt) ? .accept : .reject
+    }
+
     func accepts(_ attempt: SSHTestAuthAttempt) async -> Bool {
         if let custom { return await custom(attempt) }
         switch attempt.method {
@@ -92,6 +100,14 @@ public struct SSHTestAuthentication: Sendable {
             return false
         }
     }
+}
+
+/// 对一次认证请求的判定。
+public enum SSHTestAuthDecision: Sendable {
+    case accept
+    case reject
+    /// 这一步通过了，但还要再用 `remaining` 里的方式认证（RFC 4252 §5.1）。
+    case partialSuccess(remaining: NIOSSHAvailableUserAuthenticationMethods)
 }
 
 /// 一次登录尝试。

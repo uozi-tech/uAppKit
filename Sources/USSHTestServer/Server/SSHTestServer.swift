@@ -10,23 +10,29 @@ import USSHCore
 /// 脚本化 exec、回显 PTY shell（记录 TERM、窗口变化、环境变量）、direct-tcpip（真的去连目标）、
 /// 远程转发、subsystem 挂载点（SFTP 那条线接在这里），以及故障注入。
 public final class SSHTestServer: Sendable {
-    public let host = "127.0.0.1"
+    /// 监听的地址（默认 127.0.0.1）。
+    public let host: String
     public let port: Int
     public let hostPublicKey: NIOSSHPublicKey
 
     let state: SSHTestServerState
     private let listener: any Channel
 
-    private init(port: Int, hostPublicKey: NIOSSHPublicKey, state: SSHTestServerState, listener: any Channel) {
+    private init(host: String, port: Int, hostPublicKey: NIOSSHPublicKey, state: SSHTestServerState,
+                 listener: any Channel) {
+        self.host = host
         self.port = port
         self.hostPublicKey = hostPublicKey
         self.state = state
         self.listener = listener
     }
 
-    /// 起一个服务端。`group` 默认 `MultiThreadedEventLoopGroup.singleton`。
+    /// 起一个服务端。`group` 默认 `MultiThreadedEventLoopGroup.singleton`；`bindHost` 默认只听 127.0.0.1
+    /// （测「localhost 解析出的 ::1 连不上」时用得到），`port` 为 0 时随机。
     public static func start(_ configuration: Configuration = Configuration(),
-                             group: (any EventLoopGroup)? = nil) async throws -> SSHTestServer {
+                             group: (any EventLoopGroup)? = nil,
+                             bindHost: String = "127.0.0.1",
+                             port: Int = 0) async throws -> SSHTestServer {
         let state = SSHTestServerState(configuration: configuration)
         let bootstrap = ServerBootstrap(group: group ?? MultiThreadedEventLoopGroup.singleton)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
@@ -36,12 +42,13 @@ public final class SSHTestServer: Sendable {
                     try state.installConnection(on: channel)
                 }
             }
-        let listener = try await bootstrap.bind(host: "127.0.0.1", port: 0).get()
-        guard let port = listener.localAddress?.port else {
+        let listener = try await bootstrap.bind(host: bindHost, port: port).get()
+        guard let boundPort = listener.localAddress?.port else {
             try? await listener.close()
             throw ChannelError.unknownLocalAddress
         }
-        return SSHTestServer(port: port, hostPublicKey: configuration.hostKey.publicKey, state: state, listener: listener)
+        return SSHTestServer(host: bindHost, port: boundPort, hostPublicKey: configuration.hostKey.publicKey,
+                             state: state, listener: listener)
     }
 
     /// 到目前为止记下的事。
@@ -63,12 +70,44 @@ public final class SSHTestServer: Sendable {
         }
     }
 
-    /// 故障注入：直接掐断所有 TCP 连接（不发 SSH_MSG_DISCONNECT）。
+    /// 故障注入：直接掐断所有 TCP 连接（不发 SSH_MSG_DISCONNECT）。客户端看到的是对端正常关闭（TCP EOF）。
     public func dropAllConnections() async {
-        let channels = state.connections.withLockedValue { Array($0.values) }
+        let channels = state.connections.withLockedValue { $0.values.map(\.channel) }
         for channel in channels {
             try? await channel.close()
         }
+    }
+
+    /// 故障注入：所有现有连接从此不读也不写（TCP 连接保持着），模拟链路卡死、对端失联。
+    public func freezeAllConnections() async {
+        let freezers = state.connections.withLockedValue { $0.values.map(\.freezer) }
+        for freezer in freezers {
+            try? await freezer.eventLoop.submit { freezer.value.freeze() }.get()
+        }
+    }
+
+    /// 在每条连接（已装 SSH 的）的 EventLoop 上对它的 `NIOSSHHandler` 执行 `body`。测试拿它触发服务端发起的
+    /// 重新交换密钥之类的操作。
+    public func withEachConnection(_ body: @escaping @Sendable (NIOSSHHandler) throws -> Void) async throws {
+        let handlers = state.connections.withLockedValue { $0.values.compactMap(\.handler) }
+        for handler in handlers {
+            try await handler.eventLoop.submit { try body(handler.value) }.get()
+        }
+    }
+
+    /// 服务端主动向（第一条）客户端连接开一条通道，返回开成的通道或抛出客户端的拒绝
+    /// （`NIOSSHError`，`channelOpenFailureReasonCode` 是客户端给的原因码）。
+    public func openChannelToClient(_ type: SSHChannelType) async throws -> any Channel {
+        guard let handler = state.connections.withLockedValue({ $0.values.compactMap(\.handler).first }) else {
+            throw ChannelError.ioOnClosedChannel
+        }
+        return try await handler.eventLoop.flatSubmit {
+            let promise = handler.eventLoop.makePromise(of: (any Channel).self)
+            handler.value.createChannel(promise, channelType: type) { child, _ in
+                child.eventLoop.makeSucceededVoidFuture()
+            }
+            return promise.futureResult
+        }.get()
     }
 
     /// 停止监听并断开所有连接。
@@ -109,7 +148,13 @@ public struct SSHTestServerEvents: Sendable {
 final class SSHTestServerState: Sendable {
     let configuration: SSHTestServer.Configuration
     let events = NIOLockedValueBox(SSHTestServerEvents())
-    let connections = NIOLockedValueBox<[ObjectIdentifier: any Channel]>([:])
+    struct Connection: Sendable {
+        var channel: any Channel
+        var freezer: NIOLoopBound<SSHTestFreezeHandler>
+        var handler: NIOLoopBound<NIOSSHHandler>?
+    }
+
+    let connections = NIOLockedValueBox<[ObjectIdentifier: Connection]>([:])
     private let rejectionsLeft: NIOLockedValueBox<Int>
 
     init(configuration: SSHTestServer.Configuration) {
@@ -133,7 +178,10 @@ final class SSHTestServerState: Sendable {
     /// 在新 TCP 连接上装服务端 handler（在它的 EventLoop 上）。
     func installConnection(on channel: any Channel) throws {
         let id = ObjectIdentifier(channel)
-        connections.withLockedValue { $0[id] = channel }
+        let freezer = SSHTestFreezeHandler()
+        try channel.pipeline.syncOperations.addHandler(freezer)
+        let boundFreezer = NIOLoopBound(freezer, eventLoop: channel.eventLoop)
+        connections.withLockedValue { $0[id] = Connection(channel: channel, freezer: boundFreezer, handler: nil) }
         channel.closeFuture.whenComplete { [self] _ in
             _ = connections.withLockedValue { $0.removeValue(forKey: id) }
             record { $0.closedConnections += 1 }
@@ -154,6 +202,8 @@ final class SSHTestServerState: Sendable {
             })
         try channel.pipeline.syncOperations.addHandler(handler)
         try channel.pipeline.syncOperations.addHandler(SSHTestErrorCloser())
+        let boundHandler = NIOLoopBound(handler, eventLoop: channel.eventLoop)
+        connections.withLockedValue { $0[id]?.handler = boundHandler }
         let boundForwarding = NIOLoopBound(forwarding, eventLoop: channel.eventLoop)
         channel.closeFuture.whenComplete { _ in
             boundForwarding.value.closeAll()
@@ -176,6 +226,39 @@ final class SSHTestServerState: Sendable {
             // 服务端不接受客户端发起的 forwarded-tcpip。
             return child.eventLoop.makeFailedFuture(ChannelError.operationUnsupported)
         }
+    }
+}
+
+/// 故障注入用：挂在 TCP 通道的最前面，冻结之后不再读、写出的数据直接丢掉（promise 照常完成）。
+final class SSHTestFreezeHandler: ChannelDuplexHandler {
+    typealias InboundIn = ByteBuffer
+    typealias InboundOut = ByteBuffer
+    typealias OutboundIn = ByteBuffer
+    typealias OutboundOut = ByteBuffer
+
+    private var frozen = false
+
+    func freeze() {
+        frozen = true
+    }
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        // 冻结之前已经读进来的这一批也丢掉：对端看到的就是石沉大海。
+        guard !frozen else { return }
+        context.fireChannelRead(data)
+    }
+
+    func read(context: ChannelHandlerContext) {
+        guard !frozen else { return }
+        context.read()
+    }
+
+    func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
+        guard !frozen else {
+            promise?.succeed(())
+            return
+        }
+        context.write(data, promise: promise)
     }
 }
 
@@ -225,12 +308,21 @@ final class SSHTestAuthDelegate: NIOSSHServerUserAuthenticationDelegate {
             case .publicKey: methodSupported = supported.contains(.publicKey)
             }
             // 不支持的方式直接拒绝，不占故障注入的次数。
+            var outcome = NIOSSHUserAuthenticationOutcome.failure
             if methodSupported, !state.consumeForcedRejection() {
-                attempt.accepted = await state.configuration.authentication.accepts(attempt)
+                switch await state.configuration.authentication.decide(attempt) {
+                case .accept:
+                    outcome = .success
+                case .reject:
+                    outcome = .failure
+                case .partialSuccess(let remaining):
+                    outcome = .partialSuccess(remainingMethods: remaining)
+                }
             }
+            if case .success = outcome { attempt.accepted = true }
             let recorded = attempt
             state.record { $0.authAttempts.append(recorded) }
-            responsePromise.succeed(recorded.accepted ? .success : .failure)
+            responsePromise.succeed(outcome)
         }
     }
 }
