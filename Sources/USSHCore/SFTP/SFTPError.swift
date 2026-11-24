@@ -12,7 +12,8 @@ public enum SFTPError: Error, Hashable, Sendable, CustomStringConvertible {
     /// 通道已关（对端断开、本端关闭、传输出错）。在途的请求一律以它失败。
     case connectionClosed
     /// 服务端回了违反协议的东西（类型不对、格式坏、超长）。参数是给日志看的说明。
-    /// 出现它之后通道会被关掉：字节流已经无法再信任。
+    /// 坏在分帧 / 解码层（字节流已经无法再信任）时通道会被关掉，在途请求全部以它失败；
+    /// 只是某个请求的回答类型不对时只有那个请求失败。
     case invalidResponse(String)
     /// SSH_FXP_VERSION 给的版本不是 3。
     case unsupportedVersion(UInt32)
