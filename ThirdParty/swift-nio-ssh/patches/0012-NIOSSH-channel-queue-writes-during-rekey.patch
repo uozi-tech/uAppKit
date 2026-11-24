@@ -230,7 +230,7 @@ index 44b9014..3b87d57 100644
          // we can just wait.
 diff --git a/Tests/NIOSSHTests/RekeyTests.swift b/Tests/NIOSSHTests/RekeyTests.swift
 new file mode 100644
-index 0000000..fcdacad
+index 0000000..b8fdd46
 --- /dev/null
 +++ b/Tests/NIOSSHTests/RekeyTests.swift
 @@ -0,0 +1,317 @@
@@ -433,9 +433,9 @@ index 0000000..fcdacad
 +
 +    /// The result of `future` if it has completed, without blocking (an embedded loop would hang in `wait()`).
 +    private func completed<T>(_ future: EventLoopFuture<T>) -> Result<T, Error>? {
-+        var result: Result<T, Error>?
-+        future.whenComplete { result = $0 }
-+        return result
++        let result = NIOLoopBoundBox<Result<T, Error>?>(nil, eventLoop: future.eventLoop)
++        future.whenComplete { result.value = $0 }
++        return result.value
 +    }
 +
 +    private func keepalive(from handler: NIOSSHHandler, on loop: EventLoop) -> NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?> {

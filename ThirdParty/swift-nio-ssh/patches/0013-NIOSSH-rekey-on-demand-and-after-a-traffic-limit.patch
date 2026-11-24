@@ -300,7 +300,7 @@ index d23bace..fff622c 100644
      /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
      /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).
 diff --git a/Tests/NIOSSHTests/RekeyTests.swift b/Tests/NIOSSHTests/RekeyTests.swift
-index fcdacad..6bf7942 100644
+index b8fdd46..962e584 100644
 --- a/Tests/NIOSSHTests/RekeyTests.swift
 +++ b/Tests/NIOSSHTests/RekeyTests.swift
 @@ -314,4 +314,217 @@ final class RekeyTests: XCTestCase {

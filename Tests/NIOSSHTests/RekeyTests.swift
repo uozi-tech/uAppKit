@@ -197,9 +197,9 @@ final class RekeyTests: XCTestCase {
 
     /// The result of `future` if it has completed, without blocking (an embedded loop would hang in `wait()`).
     private func completed<T>(_ future: EventLoopFuture<T>) -> Result<T, Error>? {
-        var result: Result<T, Error>?
-        future.whenComplete { result = $0 }
-        return result
+        let result = NIOLoopBoundBox<Result<T, Error>?>(nil, eventLoop: future.eventLoop)
+        future.whenComplete { result.value = $0 }
+        return result.value
     }
 
     private func keepalive(from handler: NIOSSHHandler, on loop: EventLoop) -> NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?> {
