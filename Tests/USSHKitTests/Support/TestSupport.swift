@@ -122,6 +122,7 @@ enum TestSSH {
         algorithms: SSHAlgorithms = .standard,
         keepAliveInterval: Duration? = nil,
         legacyFallback: Bool = true,
+        legacyFallbackApproval: (@Sendable (SSHLegacyFallbackRequest) async -> Bool)? = nil,
         legacyMemory: SSHLegacyEndpointMemory = SSHLegacyEndpointMemory(),
         logger: any SSHLogger = NoOpSSHLogger()
     ) async throws -> ConnectedClient {
@@ -137,6 +138,7 @@ enum TestSSH {
             algorithms: algorithms,
             keepAliveInterval: keepAliveInterval,
             legacyFallback: legacyFallback,
+            legacyFallbackApproval: legacyFallbackApproval,
             legacyMemory: legacyMemory,
             logger: logger
         )

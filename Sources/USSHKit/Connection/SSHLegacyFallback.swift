@@ -32,6 +32,48 @@ public nonisolated struct SSHLegacyAlgorithm: Sendable, Hashable, CustomStringCo
     }
 }
 
+/// 自动退到旧算法之前交给 app 决定的那一问（`USSHKitIntegration.connect(legacyFallbackApproval:)`）：哪一跳、哪台主机、
+/// 为什么要用旧算法。被拒时原样放进 `SSHConnectionError.legacyFallbackDeclined`。
+public nonisolated struct SSHLegacyFallbackRequest: Sendable, Hashable {
+    /// 是哪一跳要用旧算法。
+    public enum Hop: Sendable, Hashable {
+        /// 要连的那台主机（不经跳板机时就是唯一的一跳）。
+        case target
+        /// 跳板机。
+        case jumpHost
+    }
+
+    /// 为什么要用旧算法。
+    public enum Trigger: Sendable, Hashable {
+        /// 刚才用现代算法连了一次，服务器说没有共同的算法（`failure` 是这一次的详情）。
+        case noCommonAlgorithm
+        /// 这个进程里先前连过这台、记着它需要旧算法，这次要直接带上旧算法连（省掉注定失败的那一次）。
+        /// `failure` 是当时让它退级的那一次的详情；那次本身就带着旧算法（调用方传了 `.legacyCompatible` 之类）时为 nil。
+        case remembered
+    }
+
+    public var hop: Hop
+    public var host: String
+    public var port: Int
+    public var trigger: Trigger
+    /// 卡在哪一类（`category`，密钥交换 / 主机密钥 / MAC……；nil 是没读懂服务器的 KEXINIT）、双方各报了什么。
+    /// 只有 `.remembered` 且说不出来时为 nil。
+    public var failure: SSHAlgorithmNegotiationFailure?
+
+    public init(hop: Hop, host: String, port: Int, trigger: Trigger, failure: SSHAlgorithmNegotiationFailure?) {
+        self.hop = hop
+        self.host = host
+        self.port = port
+        self.trigger = trigger
+        self.failure = failure
+    }
+
+    /// 卡在哪一类；不知道时为 nil。
+    public var category: SSHAlgorithmNegotiationFailure.Category? { failure?.category }
+    /// 服务器这一类报的算法；不知道时为空。
+    public var serverOffer: [String] { failure?.serverOffer ?? [] }
+}
+
 /// 自动退到旧算法：服务器和我们没有共同的现代算法时，同一跳再连一次，这次在原来的算法后面补上 SHA-1 的旧算法。
 ///
 /// 安全上能保证什么、不能保证什么（`LegacyFallbackTamperingTests` 逐条验证）：
@@ -52,8 +94,10 @@ public nonisolated struct SSHLegacyAlgorithm: Sendable, Hashable, CustomStringCo
 ///   现代算法之后，对真的服务器没有影响）。这不是对真正那台服务器的降级，是共用主机密钥的固有问题。
 ///
 /// SHA-1 原理上仍然更弱，所以结果不是悄悄发生的：`ConnectedClient.legacyAlgorithmsInUse` 报出用上了哪些，
-/// 日志里记一条警告。一台主机密钥已被信任、以前从没需要过旧算法的服务器突然需要了，USSHKit 现在不会拦下来（进程内的
-/// 记录不落盘，它不知道「以前」）；要拦，app 得把「这台需要旧算法」记在自己的主机记录里，见迁移说明。
+/// 日志里记一条警告。一台主机密钥已被信任、以前从没需要过旧算法的服务器突然需要了，USSHKit 自己判断不了（进程内的
+/// 记录不落盘，它不知道「以前」），交给 app：用旧算法连之前调 `legacyFallbackApproval`（两处都问：没有共同算法要再试、
+/// 进程内记着需要旧算法要第一次就带上），app 对照自己记的「这台以前用不用旧算法」决定；不同意就抛
+/// `SSHConnectionError.legacyFallbackDeclined`，不再连、也不写进程内的记录。不给这个闭包时照旧静默退级。见迁移说明。
 ///
 /// RSA **用户**签名的 SHA-1（`ssh-rsa`）回退是另一回事，第一次连接就开着（`makeConfiguration` 把
 /// `allowsSHA1RSAUserAuthenticationFallback` 设成 `legacyFallback`），为的是 OpenSSH 6.5–7.1 这类主机密钥与密钥交换都是现代的、
@@ -161,13 +205,15 @@ nonisolated enum SSHLegacyFallback {
 
     /// 一跳连上之后要记的事：进程内记录（知道时才动：用上旧算法就记、没用上就忘；不知道时不动），以及
     /// 要记的警告（用上了旧算法一条；`legacyFallback` 开着却不知道一条）。
+    /// `failure` 是这一跳第一次连接的协商失败（退级再试才连上时），一并记下，下次问 app 时交给它。
     static func outcome(negotiated: SSHNegotiatedAlgorithms?, rsaUserAuthentication: SSHRSASignatureAlgorithm?,
                         host: String, port: Int, legacyFallback: Bool,
-                        memory: SSHLegacyEndpointMemory) -> [SSHLogEvent] {
+                        memory: SSHLegacyEndpointMemory,
+                        failure: SSHAlgorithmNegotiationFailure? = nil) -> [SSHLogEvent] {
         var events: [SSHLogEvent] = []
         if legacyFallback {
             if let needsLegacy = negotiationNeededLegacy(negotiated) {
-                memory.record(host: host, port: port, needsLegacy: needsLegacy)
+                memory.record(host: host, port: port, needsLegacy: needsLegacy, failure: failure)
             } else {
                 events.append(SSHLogEvent(
                     level: .warning,
@@ -224,16 +270,27 @@ nonisolated final class SSHLegacyEndpointMemory: @unchecked Sendable {
     }
 
     private let lock = NSLock()
-    private var endpoints: Set<Endpoint> = []
+    /// 值是当初让它退级的那次协商失败（问 app 时交给它）；说不出来时为 nil。
+    private var endpoints: [Endpoint: SSHAlgorithmNegotiationFailure?] = [:]
 
     func needsLegacy(host: String, port: Int) -> Bool {
-        lock.withLock { endpoints.contains(Endpoint(host: host.lowercased(), port: port)) }
+        lock.withLock { endpoints[Endpoint(host: host.lowercased(), port: port)] != nil }
     }
 
-    func record(host: String, port: Int, needsLegacy: Bool) {
+    /// 记着需要旧算法时，当初让它退级的那次协商失败（没记着、或记着但说不出来时为 nil）。
+    func failure(host: String, port: Int) -> SSHAlgorithmNegotiationFailure? {
+        lock.withLock { endpoints[Endpoint(host: host.lowercased(), port: port)] ?? nil }
+    }
+
+    /// `failure` 为 nil 时保留已记着的那一份（直接带旧算法连上、没有新的失败可记）。
+    func record(host: String, port: Int, needsLegacy: Bool, failure: SSHAlgorithmNegotiationFailure? = nil) {
         let endpoint = Endpoint(host: host.lowercased(), port: port)
         lock.withLock {
-            if needsLegacy { endpoints.insert(endpoint) } else { endpoints.remove(endpoint) }
+            if needsLegacy {
+                endpoints[endpoint] = .some(failure ?? (endpoints[endpoint] ?? nil))
+            } else {
+                endpoints[endpoint] = nil
+            }
         }
     }
 }

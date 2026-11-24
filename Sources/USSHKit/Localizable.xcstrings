@@ -4027,6 +4027,62 @@
         }
       }
     },
+    "没有连接 %@：这台主机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Didn't connect to %@: this time the host offered only an older, less secure encryption method (SHA-1), so the connection was stopped."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ に接続しませんでした：このホストが今回は古く安全性の低い暗号化方式（SHA-1）しか提供しなかったため、接続を中止しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에 연결하지 않았습니다: 이 호스트가 이번에는 오래되고 보안성이 낮은 암호화 방식(SHA-1)만 제공해 연결을 중단했습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未連線至 %@：這台主機這次只提供較舊、安全性較低的加密方式（SHA-1），因此沒有繼續連線。"
+          }
+        }
+      }
+    },
+    "没有连接跳板机 %@：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Didn't connect to the jump host %@: this time it offered only an older, less secure encryption method (SHA-1), so the connection was stopped."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバ %@ に接続しませんでした：この踏み台サーバが今回は古く安全性の低い暗号化方式（SHA-1）しか提供しなかったため、接続を中止しました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트 %@에 연결하지 않았습니다: 이 점프 호스트가 이번에는 오래되고 보안성이 낮은 암호화 방식(SHA-1)만 제공해 연결을 중단했습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未連線至跳板機 %@：這台跳板機這次只提供較舊、安全性較低的加密方式（SHA-1），因此沒有繼續連線。"
+          }
+        }
+      }
+    },
     "派生密钥长度非法" : {
       "localizations" : {
         "en" : {

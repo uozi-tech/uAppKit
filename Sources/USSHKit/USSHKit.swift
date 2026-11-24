@@ -223,6 +223,10 @@ public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
     case jumpHostFailed(String, cause: SSHConnectionError? = nil)
     case hostKeyRejected(String)
     case bindFailed(String)
+    /// 这一跳要退到 SHA-1 时代的旧算法才连得上，`legacyFallbackApproval` 没有同意（`request` 就是被拒的那一问：
+    /// 哪一跳、哪台、为什么、卡在哪一类）。是 app 自己的决定、不是网络问题，**重试不会好**，重连逻辑别在它上面打转。
+    /// 没有同意就不会用旧算法再连，进程内也不记什么。经跳板机时同样包在 `jumpHostFailed(_, cause:)` 里。
+    case legacyFallbackDeclined(SSHLegacyFallbackRequest)
 
     public var errorDescription: String? {
         switch self {
@@ -242,6 +246,14 @@ public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
             return String(localized: "SSH 主机密钥被拒绝：\(message)", bundle: ModuleBundle.bundle)
         case .bindFailed(let message):
             return String(localized: "SSH 本地转发端口绑定失败：\(message)", bundle: ModuleBundle.bundle)
+        case .legacyFallbackDeclined(let request):
+            let address = "\(request.host):\(String(request.port))"
+            switch request.hop {
+            case .target:
+                return String(localized: "没有连接 \(address)：这台主机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。", bundle: ModuleBundle.bundle)
+            case .jumpHost:
+                return String(localized: "没有连接跳板机 \(address)：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。", bundle: ModuleBundle.bundle)
+            }
         }
     }
 }

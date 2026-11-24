@@ -12,13 +12,45 @@ final class OpenSSHLegacyFallbackTests: XCTestCase {
         return sshd
     }
 
-    private func connect(_ sshd: LocalSSHD, probe: ApproverProbe, legacyFallback: Bool = true) async throws -> ConnectedClient {
+    private func connect(
+        _ sshd: LocalSSHD, probe: ApproverProbe, legacyFallback: Bool = true,
+        legacyFallbackApproval: (@Sendable (SSHLegacyFallbackRequest) async -> Bool)? = nil
+    ) async throws -> ConnectedClient {
         try await SSHClientFactory.connect(
             endpoint: SSHEndpoint(host: "127.0.0.1", port: sshd.port, username: sshd.username),
             credential: .privateKey(pem: sshd.userKeyPEM, passphrase: nil),
             hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .ask,
             connectTimeout: .seconds(30), approvalTimeout: .seconds(30), approver: probe.approver,
-            legacyFallback: legacyFallback, legacyMemory: SSHLegacyEndpointMemory())
+            legacyFallback: legacyFallback, legacyFallbackApproval: legacyFallbackApproval,
+            legacyMemory: SSHLegacyEndpointMemory())
+    }
+
+    /// 问 app（`legacyFallbackApproval`）：不同意时只连一次、不问信任、抛带着卡在哪一类的 `legacyFallbackDeclined`；
+    /// 同意时与不问一样（两次连接、一次信任）。
+    func testApprovalHookAgainstRealSSHD() async throws {
+        let sshd = try await start(["HostKeyAlgorithms ssh-rsa"], rsaHostKey: true)
+        let refused = ApproverProbe(.approve)
+        do {
+            _ = try await connect(sshd, probe: refused, legacyFallbackApproval: { _ in false })
+            XCTFail("应当失败")
+        } catch SSHConnectionError.legacyFallbackDeclined(let request) {
+            XCTAssertEqual(request.hop, .target)
+            XCTAssertEqual(request.trigger, .noCommonAlgorithm)
+            XCTAssertEqual(request.category, .hostKey)
+            XCTAssertEqual(request.serverOffer, ["ssh-rsa"])
+        }
+        await sshd.waitForConnections(1)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(sshd.connections, 1, sshd.log)
+        XCTAssertTrue(refused.challenges.isEmpty)
+
+        let probe = ApproverProbe(.approve)
+        let client = try await connect(sshd, probe: probe, legacyFallbackApproval: { _ in true })
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [SSHLegacyAlgorithm(role: .hostKey, name: "ssh-rsa")])
+        await client.close()
+        await sshd.waitForConnections(3)
+        XCTAssertEqual(sshd.connections, 3, sshd.log)
+        XCTAssertEqual(probe.challenges.count, 1)
     }
 
     /// 默认连上、两次连接、一次信任、报出旧算法；关掉退级时报没有共同算法且只连一次。
