@@ -1,0 +1,513 @@
+import NIOConcurrencyHelpers
+import NIOCore
+import USSHCore
+
+/// 测试用的 SFTP v3 服务端，挂在一条以 `ByteBuffer` 收发字节流的通道上（与 `SFTPClient` 的对接约定相同：
+/// 可以是 SSH 的 `sftp` 子系统通道，也可以直接是一条本机 TCP 连接或管道）。
+///
+/// 行为照 OpenSSH 的 sftp-server：SYMLINK 的参数顺序、RENAME 不覆盖、`posix-rename` 覆盖、扩展的格式。
+/// 每个请求开一个任务交给 `SFTPServerFileSystem`，所以回答可以乱序；`faults` 注入延迟、失败、短读、断线。
+public final class SFTPServer: Sendable {
+    public struct Configuration: Sendable {
+        /// SSH_FXP_VERSION 里宣告的扩展（名字 → 数据）。不在这里的扩展请求回 OP_UNSUPPORTED。
+        public var extensions: [String: String]
+        /// `limits@openssh.com` 的回答；READ 也按其中的 `maximumReadLength` 截短（0 = 不限）。
+        public var limits: SFTPServerLimits
+        /// 收到的单帧最大长度；超过就关通道。
+        public var maximumPacketLength: Int
+
+        public init(
+            extensions: [String: String] = SFTPServer.defaultExtensions,
+            limits: SFTPServerLimits = SFTPServer.defaultLimits,
+            maximumPacketLength: Int = 256 * 1024
+        ) {
+            self.extensions = extensions
+            self.limits = limits
+            self.maximumPacketLength = maximumPacketLength
+        }
+    }
+
+    /// 和 OpenSSH 宣告的版本号一致。
+    public static let defaultExtensions: [String: String] = [
+        SFTPExtensionName.posixRename: "1",
+        SFTPExtensionName.statVFS: "2",
+        SFTPExtensionName.fstatVFS: "2",
+        SFTPExtensionName.hardLink: "1",
+        SFTPExtensionName.fsync: "1",
+        SFTPExtensionName.lsetstat: "1",
+        SFTPExtensionName.limits: "1",
+    ]
+
+    /// 和 OpenSSH 的 sftp-server 一样：包长 256 KiB，读写各 255 KiB。
+    public static let defaultLimits = SFTPServerLimits(
+        maximumPacketLength: 256 * 1024, maximumReadLength: 255 * 1024,
+        maximumWriteLength: 255 * 1024, maximumOpenHandles: 0)
+
+    public let channel: Channel
+    public let fileSystem: any SFTPServerFileSystem
+    public let faults: SFTPFaultInjector
+
+    private init(channel: Channel, fileSystem: any SFTPServerFileSystem, faults: SFTPFaultInjector) {
+        self.channel = channel
+        self.fileSystem = fileSystem
+        self.faults = faults
+    }
+
+    /// 在 `channel` 的 pipeline 末尾装上服务端。必须在 `channel.eventLoop` 上调用
+    /// （适合放进 `ServerBootstrap.childChannelInitializer`）。
+    public static func install(
+        on channel: Channel,
+        fileSystem: any SFTPServerFileSystem,
+        configuration: Configuration = Configuration(),
+        faults: SFTPFaultInjector = SFTPFaultInjector()
+    ) throws -> SFTPServer {
+        channel.eventLoop.preconditionInEventLoop()
+        let handler = SFTPServerChannelHandler(fileSystem: fileSystem, configuration: configuration, faults: faults)
+        try channel.pipeline.syncOperations.addHandlers([
+            ByteToMessageHandler(SFTPFrameDecoder(maximumFrameLength: configuration.maximumPacketLength)),
+            handler,
+        ])
+        return SFTPServer(channel: channel, fileSystem: fileSystem, faults: faults)
+    }
+
+    /// 同 `install`，可以在任意线程调用。
+    public static func start(
+        on channel: Channel,
+        fileSystem: any SFTPServerFileSystem,
+        configuration: Configuration = Configuration(),
+        faults: SFTPFaultInjector = SFTPFaultInjector()
+    ) async throws -> SFTPServer {
+        try await channel.eventLoop.submit {
+            try install(on: channel, fileSystem: fileSystem, configuration: configuration, faults: faults)
+        }.get()
+    }
+
+    public func close() async {
+        channel.close(promise: nil)
+        try? await channel.closeFuture.get()
+    }
+}
+
+// MARK: - handler
+
+final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHandler {
+    typealias InboundIn = ByteBuffer
+    typealias OutboundOut = ByteBuffer
+
+    private enum OpenHandle {
+        case file(any SFTPServerFile)
+        case directory(any SFTPServerDirectory)
+    }
+
+    /// 文件系统任务的结果，回到 EventLoop 上再变成回答（开句柄要在这里登记）。
+    private enum Outcome: Sendable {
+        case response(SFTPResponse)
+        case openedFile(any SFTPServerFile)
+        case openedDirectory(any SFTPServerDirectory)
+    }
+
+    private let fileSystem: any SFTPServerFileSystem
+    private let configuration: SFTPServer.Configuration
+    private let faults: SFTPFaultInjector
+    private var context: ChannelHandlerContext?
+    private var initialized = false
+    private var handles: [UInt32: OpenHandle] = [:]
+    private var nextHandle: UInt32 = 1
+    private var reorderBuffer: [SFTPResponse] = []
+    private var flushScheduled = false
+    private var active = true
+
+    init(fileSystem: any SFTPServerFileSystem, configuration: SFTPServer.Configuration, faults: SFTPFaultInjector) {
+        self.fileSystem = fileSystem
+        self.configuration = configuration
+        self.faults = faults
+    }
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        self.context = context
+    }
+
+    func handlerRemoved(context: ChannelHandlerContext) {
+        shutDown()
+        self.context = nil
+    }
+
+    func channelInactive(context: ChannelHandlerContext) {
+        shutDown()
+        context.fireChannelInactive()
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        // 帧坏了（超长、空帧、截断在流尾）：字节流对不齐了，只能断开。
+        context.close(promise: nil)
+    }
+
+    /// 连接没了：关掉客户端没来得及关的句柄。
+    private func shutDown() {
+        guard active else { return }
+        active = false
+        let open = handles.values
+        handles = [:]
+        reorderBuffer = []
+        for handle in open {
+            Task {
+                switch handle {
+                case .file(let file): try? await file.close()
+                case .directory(let directory): try? await directory.close()
+                }
+            }
+        }
+    }
+
+    // MARK: 收请求
+
+    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
+        let request: SFTPRequest
+        do {
+            request = try SFTPRequest.decode(frame: unwrapInboundIn(data))
+        } catch SFTPWireError.unknownPacketType(_, let id?) where initialized {
+            send(.status(id: id, code: .operationUnsupported, message: "Unsupported request", languageTag: ""))
+            return
+        } catch {
+            context.close(promise: nil)
+            return
+        }
+
+        if case .initialize = request {
+            guard !initialized else {
+                context.close(promise: nil)
+                return
+            }
+            initialized = true
+            let extensions = configuration.extensions.sorted { $0.key < $1.key }
+                .map { SFTPWireExtension(name: $0.key, data: $0.value) }
+            send(.version(version: 3, extensions: extensions))
+            return
+        }
+        guard initialized, let id = request.requestID else {
+            context.close(promise: nil)
+            return
+        }
+
+        let decision = faults.decide(for: request.operation)
+        if decision.dropConnection {
+            context.close(promise: nil)
+            return
+        }
+        if let failure = decision.failure {
+            finish(.response(.status(id: id, code: failure.code, message: failure.message, languageTag: "en")),
+                   id: id, decision: decision)
+            return
+        }
+        dispatch(request, id: id, decision: decision)
+    }
+
+    private func dispatch(_ request: SFTPRequest, id: UInt32, decision: SFTPFaultInjector.Decision) {
+        let fs = fileSystem
+        switch request {
+        case .initialize:
+            return
+        case .open(_, let path, let flags, let attributes):
+            run(id, decision) { .openedFile(try await fs.openFile(path, flags: flags, attributes: attributes)) }
+        case .opendir(_, let path):
+            run(id, decision) { .openedDirectory(try await fs.openDirectory(path)) }
+        case .close(_, let handle):
+            guard let number = Self.handleNumber(handle), let open = handles.removeValue(forKey: number) else {
+                return finish(Self.invalidHandle(id), id: id, decision: decision)
+            }
+            run(id, decision) {
+                switch open {
+                case .file(let file): try await file.close()
+                case .directory(let directory): try await directory.close()
+                }
+                return Self.ok(id)
+            }
+        case .read(_, let handle, let offset, let length):
+            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
+            var wanted = Int(length)
+            if configuration.limits.maximumReadLength > 0 {
+                wanted = min(wanted, Int(clamping: configuration.limits.maximumReadLength))
+            }
+            if let cap = decision.readLengthCap { wanted = min(wanted, max(1, cap)) }
+            run(id, decision) { [wanted] in
+                guard let data = try await file.read(at: offset, length: wanted) else {
+                    return .response(.status(id: id, code: .eof, message: "End of file", languageTag: "en"))
+                }
+                return .response(.data(id: id, data: data))
+            }
+        case .write(_, let handle, let offset, let data):
+            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
+            run(id, decision) {
+                try await file.write(data, at: offset)
+                return Self.ok(id)
+            }
+        case .fstat(_, let handle):
+            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
+            run(id, decision) { .response(.attributes(id: id, attributes: try await file.attributes())) }
+        case .fsetstat(_, let handle, let attributes):
+            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
+            run(id, decision) {
+                try await file.setAttributes(attributes)
+                return Self.ok(id)
+            }
+        case .readdir(_, let handle):
+            guard let number = Self.handleNumber(handle), case .directory(let directory)? = handles[number] else {
+                return finish(Self.invalidHandle(id), id: id, decision: decision)
+            }
+            run(id, decision) {
+                guard let entries = try await directory.nextBatch() else {
+                    return .response(.status(id: id, code: .eof, message: "End of file", languageTag: "en"))
+                }
+                return .response(.name(id: id, entries: entries))
+            }
+        case .lstat(_, let path):
+            run(id, decision) { .response(.attributes(id: id, attributes: try await fs.attributes(at: path, followingSymlinks: false))) }
+        case .stat(_, let path):
+            run(id, decision) { .response(.attributes(id: id, attributes: try await fs.attributes(at: path, followingSymlinks: true))) }
+        case .setstat(_, let path, let attributes):
+            run(id, decision) {
+                try await fs.setAttributes(attributes, at: path, followingSymlinks: true)
+                return Self.ok(id)
+            }
+        case .remove(_, let path):
+            run(id, decision) {
+                try await fs.removeFile(path)
+                return Self.ok(id)
+            }
+        case .mkdir(_, let path, let attributes):
+            run(id, decision) {
+                try await fs.createDirectory(path, attributes: attributes)
+                return Self.ok(id)
+            }
+        case .rmdir(_, let path):
+            run(id, decision) {
+                try await fs.removeDirectory(path)
+                return Self.ok(id)
+            }
+        case .realpath(_, let path):
+            run(id, decision) {
+                let resolved = try await fs.realPath(path)
+                return .response(.name(id: id, entries: [SFTPDirectoryEntry(filename: resolved, longname: resolved, attributes: .none)]))
+            }
+        case .rename(_, let oldPath, let newPath):
+            run(id, decision) {
+                try await fs.rename(oldPath, to: newPath, replacingExisting: false)
+                return Self.ok(id)
+            }
+        case .readlink(_, let path):
+            run(id, decision) {
+                let target = try await fs.readLink(path)
+                return .response(.name(id: id, entries: [SFTPDirectoryEntry(filename: target, longname: target, attributes: .none)]))
+            }
+        case .symlink(_, let linkPath, let targetPath):
+            run(id, decision) {
+                try await fs.createSymlink(at: linkPath, pointingTo: targetPath)
+                return Self.ok(id)
+            }
+        case .extended(_, let extended):
+            dispatchExtended(extended, id: id, decision: decision)
+        }
+    }
+
+    private func dispatchExtended(_ request: SFTPExtendedRequest, id: UInt32, decision: SFTPFaultInjector.Decision) {
+        guard configuration.extensions[request.name] != nil else {
+            return finish(.response(.status(id: id, code: .operationUnsupported, message: "Unsupported extension", languageTag: "en")),
+                          id: id, decision: decision)
+        }
+        let fs = fileSystem
+        switch request {
+        case .posixRename(let oldPath, let newPath):
+            run(id, decision) {
+                try await fs.rename(oldPath, to: newPath, replacingExisting: true)
+                return Self.ok(id)
+            }
+        case .hardLink(let oldPath, let newPath):
+            run(id, decision) {
+                try await fs.createHardLink(at: newPath, pointingTo: oldPath)
+                return Self.ok(id)
+            }
+        case .statVFS(let path):
+            run(id, decision) {
+                var data = ByteBuffer()
+                try await fs.fileSystemStats(at: path).encode(into: &data)
+                return .response(.extendedReply(id: id, data: data))
+            }
+        case .fstatVFS(let handle):
+            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
+            run(id, decision) {
+                var data = ByteBuffer()
+                try await file.fileSystemStats().encode(into: &data)
+                return .response(.extendedReply(id: id, data: data))
+            }
+        case .fsync(let handle):
+            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
+            run(id, decision) {
+                try await file.sync()
+                return Self.ok(id)
+            }
+        case .lsetstat(let path, let attributes):
+            run(id, decision) {
+                try await fs.setAttributes(attributes, at: path, followingSymlinks: false)
+                return Self.ok(id)
+            }
+        case .limits:
+            var data = ByteBuffer()
+            configuration.limits.encode(into: &data)
+            finish(.response(.extendedReply(id: id, data: data)), id: id, decision: decision)
+        case .other:
+            finish(.response(.status(id: id, code: .operationUnsupported, message: "Unsupported extension", languageTag: "en")),
+                   id: id, decision: decision)
+        }
+    }
+
+    // MARK: 执行与回答
+
+    /// 在单独的任务里跑文件系统操作，结果回到 EventLoop 上写回答。
+    private func run(_ id: UInt32, _ decision: SFTPFaultInjector.Decision, _ body: @escaping @Sendable () async throws -> Outcome) {
+        guard let context else { return }
+        let bound = NIOLoopBound(self, eventLoop: context.eventLoop)
+        let eventLoop = context.eventLoop
+        Task {
+            let outcome: Outcome
+            do {
+                outcome = try await body()
+            } catch let status as SFTPServerStatusError {
+                outcome = .response(.status(id: id, code: status.code, message: status.message, languageTag: "en"))
+            } catch {
+                outcome = .response(.status(id: id, code: .failure, message: String(describing: error), languageTag: "en"))
+            }
+            eventLoop.execute {
+                bound.value.finish(outcome, id: id, decision: decision)
+            }
+        }
+    }
+
+    private func finish(_ outcome: Outcome, id: UInt32, decision: SFTPFaultInjector.Decision) {
+        let response: SFTPResponse
+        switch outcome {
+        case .response(let value):
+            response = value
+        case .openedFile(let file):
+            response = register(.file(file), id: id)
+        case .openedDirectory(let directory):
+            response = register(.directory(directory), id: id)
+        }
+        guard !decision.withhold else { return }
+        if let delay = decision.delay, let context {
+            context.eventLoop.assumeIsolated().scheduleTask(in: TimeAmount.nanoseconds(Self.nanoseconds(delay))) {
+                self.send(response)
+            }
+        } else {
+            send(response)
+        }
+    }
+
+    private func register(_ handle: OpenHandle, id: UInt32) -> SFTPResponse {
+        guard active else {
+            // 连接已经没了，开出来的东西直接关掉。
+            Task {
+                switch handle {
+                case .file(let file): try? await file.close()
+                case .directory(let directory): try? await directory.close()
+                }
+            }
+            return .status(id: id, code: .connectionLost, message: "", languageTag: "")
+        }
+        let number = nextHandle
+        nextHandle &+= 1
+        handles[number] = handle
+        var bytes = ByteBuffer()
+        bytes.writeInteger(number)
+        return .handle(id: id, handle: bytes)
+    }
+
+    private func send(_ response: SFTPResponse) {
+        guard active, let context else { return }
+        if let batch = faults.reverseBatchSize, response.packetType != .version {
+            reorderBuffer.append(response)
+            guard reorderBuffer.count >= batch else { return }
+            let held = reorderBuffer
+            reorderBuffer = []
+            for item in held.reversed() { write(item, context: context) }
+        } else {
+            if !reorderBuffer.isEmpty {
+                let held = reorderBuffer
+                reorderBuffer = []
+                for item in held { write(item, context: context) }
+            }
+            write(response, context: context)
+        }
+        scheduleFlush(context: context)
+    }
+
+    private func write(_ response: SFTPResponse, context: ChannelHandlerContext) {
+        var header = context.channel.allocator.buffer(capacity: 64)
+        let trailing = response.encodeHeader(into: &header)
+        context.write(wrapOutboundOut(header), promise: nil)
+        if let trailing {
+            context.write(wrapOutboundOut(trailing), promise: nil)
+        }
+    }
+
+    private func scheduleFlush(context: ChannelHandlerContext) {
+        guard !flushScheduled else { return }
+        flushScheduled = true
+        context.eventLoop.assumeIsolated().execute {
+            self.flushScheduled = false
+            self.context?.flush()
+        }
+    }
+
+    // MARK: 小工具
+
+    private func file(for handle: ByteBuffer) -> (any SFTPServerFile)? {
+        guard let number = Self.handleNumber(handle), case .file(let file)? = handles[number] else { return nil }
+        return file
+    }
+
+    private static func handleNumber(_ handle: ByteBuffer) -> UInt32? {
+        guard handle.readableBytes == 4 else { return nil }
+        return handle.getInteger(at: handle.readerIndex, as: UInt32.self)
+    }
+
+    private static func ok(_ id: UInt32) -> Outcome {
+        .response(.status(id: id, code: .ok, message: "Success", languageTag: "en"))
+    }
+
+    private static func invalidHandle(_ id: UInt32) -> Outcome {
+        // OpenSSH 对不认识的句柄回 SSH_FX_FAILURE。
+        .response(.status(id: id, code: .failure, message: "Invalid handle", languageTag: "en"))
+    }
+
+    private static func nanoseconds(_ duration: Duration) -> Int64 {
+        let (seconds, attoseconds) = duration.components
+        return seconds * 1_000_000_000 + attoseconds / 1_000_000_000
+    }
+}
+
+extension SFTPRequest {
+    var operation: SFTPServerOperation {
+        switch self {
+        case .initialize: return .realpath // 不会用到：INIT 不经过故障注入。
+        case .open: return .open
+        case .close: return .close
+        case .read: return .read
+        case .write: return .write
+        case .lstat: return .lstat
+        case .fstat: return .fstat
+        case .setstat: return .setstat
+        case .fsetstat: return .fsetstat
+        case .opendir: return .opendir
+        case .readdir: return .readdir
+        case .remove: return .remove
+        case .mkdir: return .mkdir
+        case .rmdir: return .rmdir
+        case .realpath: return .realpath
+        case .stat: return .stat
+        case .rename: return .rename
+        case .readlink: return .readlink
+        case .symlink: return .symlink
+        case .extended(_, let request): return .extended(request.name)
+        }
+    }
+}
