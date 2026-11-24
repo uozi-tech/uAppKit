@@ -1,5 +1,6 @@
 import BigInt
 import Foundation
+import NIOConcurrencyHelpers
 import NIOCore
 
 /// 有限域 DH 的错误。
@@ -110,9 +111,11 @@ public enum SSHKeyDerivation {
 /// 客户端：`e = g^x mod p` 放进 SSH_MSG_KEXDH_INIT；收到 KEXDH_REPLY 里的 f 后 `complete`。
 /// 服务端：`f = g^y mod p`；收到 KEXDH_INIT 里的 e 后 `complete`，再用主机私钥签 H。
 ///
-/// 临时私钥只用一次：`complete` 之后就清掉，再调抛 `.alreadyCompleted`。
+/// 临时私钥只用一次：`complete` / `sharedSecret` 之后就清掉，再调抛 `.alreadyCompleted`。是引用类型：
+/// 私钥只有一份，引用被复制到哪里都不能用它算第二次（值类型的话，一份拷贝就能把同一个指数再用一遍）。
+/// 私钥的取用加锁，可以从任意线程调用。
 /// 大数运算（attaswift/BigInt）不是恒定时间的，见 README 的安全说明。
-public struct SSHDiffieHellmanKeyExchange: Sendable {
+public final class SSHDiffieHellmanKeyExchange: Sendable {
     public enum Role: Hashable, Sendable {
         case client
         case server
@@ -122,10 +125,11 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
     public let role: Role
     /// 本端公开值（客户端的 e / 服务端的 f），大端无符号、无前导零。
     public let localPublicValue: [UInt8]
-    private var privateExponent: BigUInt?
+    /// 用过就是 `nil`。
+    private let privateExponent: NIOLockedValueBox<BigUInt?>
 
     /// 用系统 CSPRNG 生成临时私钥。
-    public init(algorithm: SSHDiffieHellmanAlgorithm, role: Role) {
+    public convenience init(algorithm: SSHDiffieHellmanAlgorithm, role: Role) {
         let group = algorithm.group
         var rng = SystemRandomNumberGenerator()
         var exponent: BigUInt
@@ -136,7 +140,7 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
     }
 
     /// 指定私钥指数（大端无符号），只给已知答案测试用。要求 1 < x < q = (p − 1) / 2。
-    package init(algorithm: SSHDiffieHellmanAlgorithm, role: Role, privateExponent: [UInt8]) throws {
+    package convenience init(algorithm: SSHDiffieHellmanAlgorithm, role: Role, privateExponent: [UInt8]) throws {
         let exponent = BigUInt(sshMagnitude: privateExponent)
         let q = (algorithm.group.prime - 1) >> 1
         guard exponent > 1, exponent < q else {
@@ -149,7 +153,7 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
         let group = algorithm.group
         self.algorithm = algorithm
         self.role = role
-        self.privateExponent = exponent
+        self.privateExponent = NIOLockedValueBox(exponent)
         self.localPublicValue = group.generator.power(exponent, modulus: group.prime).sshMagnitudeBytes
     }
 
@@ -157,7 +161,7 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
     ///
     /// - Parameter peerPublicValue: 对端的 f（客户端）或 e（服务端），大端无符号，允许带前导零；
     ///   从线上读 `mpint` 时用非负读法（负数在读的时候就会被拒绝）。
-    public mutating func complete(
+    public func complete(
         peerPublicValue: [UInt8],
         inputs: SSHExchangeHashInputs
     ) throws -> SSHDiffieHellmanResult {
@@ -189,16 +193,21 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
     ///
     /// 给 NIOSSH 的密钥交换扩展接口用：那边自己算 H、自己推导会话密钥，只要 K。`complete` 也经由这里。
     /// 私钥只用一次（成功后清掉，再调抛 `.alreadyCompleted`）；对端值不合格时私钥保留——什么也没算，不会泄露。
-    package mutating func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8] {
-        guard let exponent = self.privateExponent else {
-            throw SSHDiffieHellmanError.alreadyCompleted
-        }
+    package func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8] {
         let group = self.algorithm.group
         let peer = BigUInt(sshMagnitude: peerPublicValue)
-        guard group.isValidPublicValue(peer) else {
-            throw SSHDiffieHellmanError.invalidPeerPublicValue
+        // 先核对再取出私钥：对端值不合格时私钥保留（什么也没算）。取出与清除在同一把锁里，
+        // 两个线程同时来也只有一个拿得到。
+        let exponent = try self.privateExponent.withLockedValue { exponent -> BigUInt in
+            guard let value = exponent else {
+                throw SSHDiffieHellmanError.alreadyCompleted
+            }
+            guard group.isValidPublicValue(peer) else {
+                throw SSHDiffieHellmanError.invalidPeerPublicValue
+            }
+            exponent = nil
+            return value
         }
-        self.privateExponent = nil
 
         let shared = peer.power(exponent, modulus: group.prime)
         guard shared > 1 else {

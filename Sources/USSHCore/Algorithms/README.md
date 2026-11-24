@@ -52,7 +52,7 @@ RFC 6668 要 64 字节的 MAC 密钥。NIOSSH 0.15.2 推导会话密钥时只做
 
 - `SSHRSAPublicKey`：`ssh-rsa` 公钥。`init(sshBlob:)` / `sshBlob` 读写整个 blob；
   `package init(readingBodyFrom:)` / `writeBody(to:)` 只读写类型名之后的 `mpint e ‖ mpint n`。
-  模数 1024–16384 位；`isWeak`（< 2048 位）让调用方决定提示还是拒绝。
+  模数 1024–8192 位（BoringSSL 的上限；OpenSSH 允许到 16384，更大的以 `.unsupportedModulusSize` 拒绝）；`isWeak`（< 2048 位）让调用方决定提示还是拒绝。
 - `SSHRSASignature`：`string 算法名 ‖ string 签名`。`init(sshBlob:)` / `sshBlob`，
   `package init(algorithm:readingBodyFrom:)` / `writeBody(to:)`。
 - `SSHRSAPublicKey.isValidSignature(_:for:algorithm:)`：`algorithm` 是**调用方期望的**算法；签名里的算法不同直接判假
@@ -82,7 +82,7 @@ RFC 6668 要 64 字节的 MAC 密钥。NIOSSH 0.15.2 推导会话密钥时只做
 ## 有限域 DH 内核
 
 ```swift
-var kex = SSHDiffieHellmanKeyExchange(algorithm: .group14SHA256, role: .client)
+let kex = SSHDiffieHellmanKeyExchange(algorithm: .group14SHA256, role: .client)
 // SSH_MSG_KEXDH_INIT (30)：buffer.writeSSHWireUnsignedMPInt(magnitude: kex.localPublicValue)
 // SSH_MSG_KEXDH_REPLY (31)：读 string K_S、mpint f（readSSHWireUnsignedMPInt，负数在读时就拒绝）、string 签名
 let result = try kex.complete(

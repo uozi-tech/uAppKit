@@ -46,7 +46,8 @@ package struct SSHDiffieHellmanExtensionKeyExchange<Variant: SSHDiffieHellmanExt
 
     package static var publicValueEncoding: NIOSSHKeyExchangePublicValueEncoding { .mpint }
 
-    private var exchange: SSHDiffieHellmanKeyExchange
+    /// 引用类型：NIOSSH 在状态机里复制这个结构体，复制品共享同一个只能用一次的临时私钥。
+    private let exchange: SSHDiffieHellmanKeyExchange
 
     /// 本端公开值（客户端的 e / 服务端的 f），`init()` 里算好。
     package let publicValue: [UInt8]
@@ -58,7 +59,9 @@ package struct SSHDiffieHellmanExtensionKeyExchange<Variant: SSHDiffieHellmanExt
         self.publicValue = exchange.localPublicValue
     }
 
-    /// 对端值不在 (1, p − 1) 内时抛 `SSHDiffieHellmanError.invalidPeerPublicValue`，NIOSSH 随之中止交换。
+    /// 对端值的校验在这里做，不靠 NIOSSH（它只拒绝负数与 K = 0）：不在 (1, p − 1) 内（0、1、p − 1、≥ p）
+    /// 抛 `SSHDiffieHellmanError.invalidPeerPublicValue`，NIOSSH 随之中止交换。同一个实例（及其复制品）
+    /// 只能算一次，再调抛 `.alreadyCompleted`。
     package mutating func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8] {
         try self.exchange.sharedSecret(peerPublicValue: peerPublicValue)
     }
