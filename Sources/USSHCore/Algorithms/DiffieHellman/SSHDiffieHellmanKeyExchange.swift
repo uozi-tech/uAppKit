@@ -1,4 +1,5 @@
 import BigInt
+import Crypto
 import Foundation
 import NIOConcurrencyHelpers
 import NIOCore
@@ -129,12 +130,17 @@ public final class SSHDiffieHellmanKeyExchange: Sendable {
     private let privateExponent: NIOLockedValueBox<BigUInt?>
 
     /// 用系统 CSPRNG 生成临时私钥。
+    ///
+    /// 随机字节取自 swift-crypto 的 `SymmetricKey(size:)`（系统 CSPRNG），不用 BigInt 的
+    /// `randomInteger(withMaximumWidth:using:)`：后者把零大小的 `SystemRandomNumberGenerator` 按 inout 传进泛型，
+    /// ThreadSanitizer 插桩会去访问那个没有意义的地址而崩溃（2026-11-24 复现：每次都崩在
+    /// `SSHDiffieHellmanTests.testEphemeralExponentIsFreshAndSingleUse`），妨碍对这里做并发检查。
     public convenience init(algorithm: SSHDiffieHellmanAlgorithm, role: Role) {
         let group = algorithm.group
-        var rng = SystemRandomNumberGenerator()
         var exponent: BigUInt
         repeat {
-            exponent = BigUInt.randomInteger(withMaximumWidth: group.privateExponentBits, using: &rng)
+            let key = SymmetricKey(size: SymmetricKeySize(bitCount: group.privateExponentBits))
+            exponent = key.withUnsafeBytes { BigUInt(Data($0)) }
         } while exponent <= 1
         self.init(algorithm: algorithm, role: role, validatedExponent: exponent)
     }
