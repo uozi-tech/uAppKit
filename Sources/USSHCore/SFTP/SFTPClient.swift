@@ -62,9 +62,11 @@ public final class SFTPClient: Sendable {
     public let extensions: [String: String]
     /// `limits@openssh.com` 的回答；服务端没宣告或 `queriesLimits == false` 时为 nil。
     public let limits: SFTPServerLimits?
-    /// 单次 READ 最多要多少字节（服务端的上限与本端收帧上限取小）。多要服务端也只会短给。
+    /// 单次 READ 最多要多少字节（服务端的上限与本端收帧上限取小，不超过 `UInt32.max`）。多要服务端也只会短给。
+    /// 自己做窗口化传输的调用方按它切段，别写死某个数（OpenSSH 是 255 KiB，有的服务端只有 32 KiB）。
     public let maximumReadLength: Int
-    /// 单次 WRITE 最多写多少字节；超过的 `SFTPFile.write(_:at:)` 抛 `requestTooLarge`。
+    /// 单次 WRITE 最多写多少字节（不超过 `UInt32.max`）；超过的 `SFTPFile.write(_:at:)` 抛 `requestTooLarge`。
+    /// 自己做窗口化传输的调用方按它切片。
     public let maximumWriteLength: Int
     /// 发出的单帧最大长度。
     public let maximumPacketLength: Int
@@ -93,8 +95,9 @@ public final class SFTPClient: Sendable {
         let read = positive(limits?.maximumReadLength) ?? configuration.fallbackMaximumReadLength
         let write = positive(limits?.maximumWriteLength) ?? configuration.fallbackMaximumWriteLength
         self.maximumPacketLength = packet
-        self.maximumReadLength = max(1, min(read, configuration.maximumInboundPacketLength - 1024))
-        self.maximumWriteLength = max(1, min(write, packet - 1024))
+        // 线上的 READ 长度与 WRITE 数据长度都是 uint32：再大的宣告值与配置也封顶在 UInt32.max。
+        self.maximumReadLength = max(1, min(read, configuration.maximumInboundPacketLength - 1024, Int(UInt32.max)))
+        self.maximumWriteLength = max(1, min(write, packet - 1024, Int(UInt32.max)))
     }
 
     // MARK: - 建立
@@ -149,12 +152,24 @@ public final class SFTPClient: Sendable {
             do {
                 let response = try await core.perform { .extended(id: $0, request: .limits) }
                 limits = try SFTPResponseReader.extendedReply(response, as: SFTPServerLimits.decode)
+            } catch let error as SFTPError where channel.isActive && Self.isLimitsReplyProblem(error) {
+                // 服务端宣告了却答不好（回错误状态、回的格式不对）：当它没宣告，用保守的回退值。
+                limits = nil
             } catch {
+                // 连接没了、任务被取消：照常失败。
                 channel.close(promise: nil)
+                if Task.isCancelled { throw CancellationError() }
                 throw error
             }
         }
         return SFTPClient(core: core, handshake: handshake, limits: limits, configuration: configuration)
+    }
+
+    private static func isLimitsReplyProblem(_ error: SFTPError) -> Bool {
+        switch error {
+        case .status, .invalidResponse: return true
+        default: return false
+        }
     }
 
     // MARK: - 通道
@@ -166,6 +181,8 @@ public final class SFTPClient: Sendable {
 
     /// 关掉整条通道；在途请求以 `connectionClosed` 失败。重复调用无害。
     public func close() async {
+        // 已经不活跃：不再等 closeFuture——EventLoop 关停之后，它上面的 future 永远等不到回调。
+        guard channel.isActive else { return }
         channel.close(promise: nil)
         try? await channel.closeFuture.get()
     }
@@ -180,18 +197,33 @@ public final class SFTPClient: Sendable {
 
     // MARK: - 目录
 
+    /// 连续这么多次 READDIR 回空的 NAME 而不回 EOF，就当服务端坏了（否则会一直问下去）。
+    static let maximumConsecutiveEmptyDirectoryBatches = 64
+
     /// 列目录：OPENDIR → READDIR 直到 EOF → CLOSE。默认去掉 `.` 与 `..`。
-    public func listDirectory(_ path: String, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
+    ///
+    /// 服务端连续 `maximumConsecutiveEmptyDirectoryBatches` 次回空的 NAME（既不给项也不给 EOF）时
+    /// 抛 `invalidResponse`，不会无限循环。
+    public func listDirectory(_ path: SFTPPath, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
         let handle = try SFTPResponseReader.handle(try await core.perform { .opendir(id: $0, path: path) })
         var entries: [SFTPDirectoryEntry] = []
+        var emptyBatches = 0
         do {
             reading: while true {
                 switch try await core.perform({ .readdir(id: $0, handle: handle) }) {
                 case .name(_, let batch):
+                    if batch.isEmpty {
+                        emptyBatches += 1
+                        guard emptyBatches < Self.maximumConsecutiveEmptyDirectoryBatches else {
+                            throw SFTPError.invalidResponse("server keeps answering READDIR with empty SSH_FXP_NAME")
+                        }
+                        continue reading
+                    }
+                    emptyBatches = 0
                     if includingDotEntries {
                         entries.append(contentsOf: batch)
                     } else {
-                        entries.append(contentsOf: batch.lazy.filter { $0.filename != "." && $0.filename != ".." })
+                        entries.append(contentsOf: batch.lazy.filter { $0.name != "." && $0.name != ".." })
                     }
                 case .status(_, let code, _, _) where code == .eof:
                     break reading
@@ -207,34 +239,34 @@ public final class SFTPClient: Sendable {
         return entries
     }
 
-    public func createDirectory(_ path: String, attributes: SFTPFileAttributes = .none) async throws {
+    public func createDirectory(_ path: SFTPPath, attributes: SFTPFileAttributes = .none) async throws {
         try SFTPResponseReader.ok(try await core.perform { .mkdir(id: $0, path: path, attributes: attributes) })
     }
 
-    public func removeDirectory(_ path: String) async throws {
+    public func removeDirectory(_ path: SFTPPath) async throws {
         try SFTPResponseReader.ok(try await core.perform { .rmdir(id: $0, path: path) })
     }
 
     // MARK: - 路径
 
     /// REALPATH：服务端规范化后的绝对路径（`"."` 即登录目录）。
-    public func realPath(_ path: String) async throws -> String {
-        try SFTPResponseReader.singleName(try await core.perform { .realpath(id: $0, path: path) }).filename
+    public func realPath(_ path: SFTPPath) async throws -> SFTPPath {
+        try SFTPResponseReader.singleName(try await core.perform { .realpath(id: $0, path: path) }).name
     }
 
     /// STAT（跟随符号链接）。
-    public func stat(_ path: String) async throws -> SFTPFileAttributes {
+    public func stat(_ path: SFTPPath) async throws -> SFTPFileAttributes {
         try SFTPResponseReader.attributes(try await core.perform { .stat(id: $0, path: path) })
     }
 
     /// LSTAT（不跟随符号链接）。
-    public func lstat(_ path: String) async throws -> SFTPFileAttributes {
+    public func lstat(_ path: SFTPPath) async throws -> SFTPFileAttributes {
         try SFTPResponseReader.attributes(try await core.perform { .lstat(id: $0, path: path) })
     }
 
     /// SETSTAT；`followingSymlinks == false` 时用 `lsetstat@openssh.com`（改链接本身）。
     /// 只有非 nil 的字段会被改。
-    public func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool = true) async throws {
+    public func setAttributes(_ attributes: SFTPFileAttributes, at path: SFTPPath, followingSymlinks: Bool = true) async throws {
         if followingSymlinks {
             try SFTPResponseReader.ok(try await core.perform { .setstat(id: $0, path: path, attributes: attributes) })
         } else {
@@ -245,7 +277,7 @@ public final class SFTPClient: Sendable {
         }
     }
 
-    public func rename(_ oldPath: String, to newPath: String, mode: SFTPRenameMode = .standard) async throws {
+    public func rename(_ oldPath: SFTPPath, to newPath: SFTPPath, mode: SFTPRenameMode = .standard) async throws {
         let posix: Bool
         switch mode {
         case .standard: posix = false
@@ -262,22 +294,22 @@ public final class SFTPClient: Sendable {
     }
 
     /// 删文件（REMOVE）。
-    public func remove(_ path: String) async throws {
+    public func remove(_ path: SFTPPath) async throws {
         try SFTPResponseReader.ok(try await core.perform { .remove(id: $0, path: path) })
     }
 
-    /// 符号链接指向哪里（原样返回链接里存的字符串）。
-    public func readLink(_ path: String) async throws -> String {
-        try SFTPResponseReader.singleName(try await core.perform { .readlink(id: $0, path: path) }).filename
+    /// 符号链接指向哪里（原样返回链接里存的字节）。
+    public func readLink(_ path: SFTPPath) async throws -> SFTPPath {
+        try SFTPResponseReader.singleName(try await core.perform { .readlink(id: $0, path: path) }).name
     }
 
     /// 在 `linkPath` 建一个指向 `targetPath` 的符号链接（线上按 OpenSSH 的参数顺序发，见 `SFTPRequest.symlink`）。
-    public func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws {
+    public func createSymlink(at linkPath: SFTPPath, pointingTo targetPath: SFTPPath) async throws {
         try SFTPResponseReader.ok(try await core.perform { .symlink(id: $0, linkPath: linkPath, targetPath: targetPath) })
     }
 
     /// `hardlink@openssh.com`：在 `newPath` 建一个指向 `existingPath` 的硬链接。
-    public func createHardLink(at newPath: String, pointingTo existingPath: String) async throws {
+    public func createHardLink(at newPath: SFTPPath, pointingTo existingPath: SFTPPath) async throws {
         try requireExtension(SFTPExtensionName.hardLink)
         try SFTPResponseReader.ok(try await core.perform {
             .extended(id: $0, request: .hardLink(oldPath: existingPath, newPath: newPath))
@@ -285,7 +317,7 @@ public final class SFTPClient: Sendable {
     }
 
     /// `statvfs@openssh.com`：`path` 所在文件系统的容量。
-    public func statVFS(_ path: String) async throws -> SFTPFileSystemStats {
+    public func statVFS(_ path: SFTPPath) async throws -> SFTPFileSystemStats {
         try requireExtension(SFTPExtensionName.statVFS)
         let response = try await core.perform { .extended(id: $0, request: .statVFS(path: path)) }
         return try SFTPResponseReader.extendedReply(response, as: SFTPFileSystemStats.decode)
@@ -294,7 +326,7 @@ public final class SFTPClient: Sendable {
     // MARK: - 文件
 
     /// OPEN。返回的句柄用完要 `close()`（任务被取消、句柄还没交到调用方手里时，客户端会自己关）。
-    public func openFile(_ path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes = .none) async throws -> SFTPFile {
+    public func openFile(_ path: SFTPPath, flags: SFTPOpenFlags, attributes: SFTPFileAttributes = .none) async throws -> SFTPFile {
         let handle = try SFTPResponseReader.handle(try await core.perform {
             .open(id: $0, path: path, flags: flags, attributes: attributes)
         })
@@ -303,7 +335,7 @@ public final class SFTPClient: Sendable {
 
     /// 打开、交给 `body`、无论成败都关掉。
     public func withFile<Value: Sendable>(
-        _ path: String,
+        _ path: SFTPPath,
         flags: SFTPOpenFlags,
         attributes: SFTPFileAttributes = .none,
         _ body: (SFTPFile) async throws -> Value
@@ -321,12 +353,87 @@ public final class SFTPClient: Sendable {
     }
 }
 
+// MARK: - String 便捷写法
+
+/// 每个收路径的操作都有一份收 `String` 的便捷重载（UTF-8 编码后照发）。
+/// 目录项里拿到的名字请用 `SFTPDirectoryEntry.name`（`SFTPPath`）原样回传，名字可能不是合法的 UTF-8。
+extension SFTPClient {
+    public func listDirectory(_ path: String, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
+        try await listDirectory(SFTPPath(path), includingDotEntries: includingDotEntries)
+    }
+
+    public func createDirectory(_ path: String, attributes: SFTPFileAttributes = .none) async throws {
+        try await createDirectory(SFTPPath(path), attributes: attributes)
+    }
+
+    public func removeDirectory(_ path: String) async throws {
+        try await removeDirectory(SFTPPath(path))
+    }
+
+    /// 同 `realPath(_: SFTPPath)`，结果按 UTF-8 解成字符串（非法序列替换）。
+    public func realPath(_ path: String) async throws -> String {
+        try await realPath(SFTPPath(path)).string
+    }
+
+    public func stat(_ path: String) async throws -> SFTPFileAttributes {
+        try await stat(SFTPPath(path))
+    }
+
+    public func lstat(_ path: String) async throws -> SFTPFileAttributes {
+        try await lstat(SFTPPath(path))
+    }
+
+    public func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool = true) async throws {
+        try await setAttributes(attributes, at: SFTPPath(path), followingSymlinks: followingSymlinks)
+    }
+
+    public func rename(_ oldPath: String, to newPath: String, mode: SFTPRenameMode = .standard) async throws {
+        try await rename(SFTPPath(oldPath), to: SFTPPath(newPath), mode: mode)
+    }
+
+    public func remove(_ path: String) async throws {
+        try await remove(SFTPPath(path))
+    }
+
+    /// 同 `readLink(_: SFTPPath)`，结果按 UTF-8 解成字符串（非法序列替换）。
+    public func readLink(_ path: String) async throws -> String {
+        try await readLink(SFTPPath(path)).string
+    }
+
+    public func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws {
+        try await createSymlink(at: SFTPPath(linkPath), pointingTo: SFTPPath(targetPath))
+    }
+
+    public func createHardLink(at newPath: String, pointingTo existingPath: String) async throws {
+        try await createHardLink(at: SFTPPath(newPath), pointingTo: SFTPPath(existingPath))
+    }
+
+    public func statVFS(_ path: String) async throws -> SFTPFileSystemStats {
+        try await statVFS(SFTPPath(path))
+    }
+
+    public func openFile(_ path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes = .none) async throws -> SFTPFile {
+        try await openFile(SFTPPath(path), flags: flags, attributes: attributes)
+    }
+
+    public func withFile<Value: Sendable>(
+        _ path: String,
+        flags: SFTPOpenFlags,
+        attributes: SFTPFileAttributes = .none,
+        _ body: (SFTPFile) async throws -> Value
+    ) async throws -> Value {
+        try await withFile(SFTPPath(path), flags: flags, attributes: attributes, body)
+    }
+}
+
 // MARK: - 请求的收发
 
 /// 一个已经交出去、还在等回答的请求。
 struct SFTPInFlightRequest: Sendable {
     let id: UInt32
-    let promise: EventLoopPromise<SFTPResponse>
+    /// nil = 交出去的时候通道就已经不活跃了，请求没有发（`wait` 直接抛 `connectionClosed`）。
+    /// 这时不建 promise：EventLoop 可能已经关停，它上面的 future 既完成不了、也等不到。
+    let promise: EventLoopPromise<SFTPResponse>?
 }
 
 /// 客户端与文件句柄共用的收发内核。
@@ -336,13 +443,19 @@ struct SFTPClientCore: Sendable {
     let requestIDs: NIOLockedValueBox<UInt32>
 
     /// 取号、建 promise、交给 EventLoop 上的 handler。不检查取消（清理路径也用它）。
+    ///
+    /// 通道已经不活跃时直接以 `connectionClosed` 失败、不往 EventLoop 上交：EventLoop 关停之后
+    /// `execute` 会把任务丢掉，promise 就永远不会完成（调试构建里还会撞上 NIO 的「promise 泄漏」断言）。
     func submit(_ build: (UInt32) -> SFTPRequest) -> SFTPInFlightRequest {
         let id = requestIDs.withLockedValue { next in
             defer { next &+= 1 }
             return next
         }
-        let request = build(id)
+        guard channel.isActive else {
+            return SFTPInFlightRequest(id: id, promise: nil)
+        }
         let promise = channel.eventLoop.makePromise(of: SFTPResponse.self)
+        let request = build(id)
         let handler = self.handler
         channel.eventLoop.execute {
             handler.value.enqueue(request, promise: promise)
@@ -350,23 +463,27 @@ struct SFTPClientCore: Sendable {
         return SFTPInFlightRequest(id: id, promise: promise)
     }
 
-    /// 等回答。任务被取消时立刻抛 `CancellationError`，并撤掉 handler 里的记录。
+    /// 等回答。任务被取消时（一次 EventLoop 往返之内）抛 `CancellationError`，并撤掉 handler 里的记录。
     func wait(_ request: SFTPInFlightRequest) async throws -> SFTPResponse {
-        try await withTaskCancellationHandler {
-            try await request.promise.futureResult.get()
+        guard let promise = request.promise else { throw SFTPError.connectionClosed }
+        return try await withTaskCancellationHandler {
+            try await promise.futureResult.get()
         } onCancel: {
             abandon(request)
         }
     }
 
     /// 不再等这个请求了（取消、或者批量读写里前面的请求已经失败）。
+    ///
+    /// 撤记录与让 promise 失败必须在**同一个** EventLoop 任务里做（见 `SFTPClientChannelHandler.abandon`）：
+    /// 分成两步时，夹在中间到达的 HANDLE 会把记录拿走、成功被忽略，句柄就漏在服务端了。
     func abandon(_ request: SFTPInFlightRequest) {
-        // promise 被完成两次时 NIO 静默忽略第二次：这里先让等的一方走，handler 那边随后再完成也无妨。
-        request.promise.fail(CancellationError())
         let handler = self.handler
         let id = request.id
+        // 通道没了：handler 已经（或马上会）让所有记录失败；EventLoop 可能已经关停，不往上交任务。
+        guard let promise = request.promise, channel.isActive else { return }
         channel.eventLoop.execute {
-            handler.value.forget(id)
+            handler.value.abandon(id, promise: promise)
         }
     }
 
@@ -395,8 +512,14 @@ enum SFTPResponseReader {
         try throwUnexpected(response, expected: "SSH_FXP_STATUS")
     }
 
+    /// 句柄拷进一块自己的小缓冲：解码出来的是收帧缓冲里的切片，留着它就留着整块缓冲（可能好几 MB），
+    /// 而句柄要跟着文件活很久。
     static func handle(_ response: SFTPResponse) throws -> ByteBuffer {
-        if case .handle(_, let handle) = response { return handle }
+        if case .handle(_, let handle) = response {
+            var copy = ByteBufferAllocator().buffer(capacity: handle.readableBytes)
+            copy.writeImmutableBuffer(handle)
+            return copy
+        }
         try throwUnexpected(response, expected: "SSH_FXP_HANDLE")
     }
 

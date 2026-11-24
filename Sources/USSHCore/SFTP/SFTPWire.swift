@@ -91,6 +91,16 @@ extension ByteBuffer {
         readSFTPBytes().map { String(buffer: $0) }
     }
 
+    /// 路径 / 文件名：原样的字节（拷出来，不留着整块接收缓冲）。
+    mutating func readSFTPPath() -> SFTPPath? {
+        readSFTPBytes().map { SFTPPath(bytes: $0.readableBytesView) }
+    }
+
+    mutating func writeSFTPPath(_ path: SFTPPath) {
+        writeInteger(UInt32(truncatingIfNeeded: path.bytes.count))
+        writeBytes(path.bytes)
+    }
+
     mutating func writeSFTPString(_ string: String) {
         writeInteger(UInt32(truncatingIfNeeded: string.utf8.count))
         writeString(string)
@@ -261,12 +271,12 @@ package struct SFTPFrameDecoder: NIOSingleStepByteToMessageDecoder {
 // MARK: - 扩展请求
 
 package enum SFTPExtendedRequest: Hashable, Sendable {
-    case posixRename(oldPath: String, newPath: String)
-    case statVFS(path: String)
+    case posixRename(oldPath: SFTPPath, newPath: SFTPPath)
+    case statVFS(path: SFTPPath)
     case fstatVFS(handle: ByteBuffer)
-    case hardLink(oldPath: String, newPath: String)
+    case hardLink(oldPath: SFTPPath, newPath: SFTPPath)
     case fsync(handle: ByteBuffer)
-    case lsetstat(path: String, attributes: SFTPFileAttributes)
+    case lsetstat(path: SFTPPath, attributes: SFTPFileAttributes)
     case limits
     case other(name: String, data: ByteBuffer)
 
@@ -287,14 +297,14 @@ package enum SFTPExtendedRequest: Hashable, Sendable {
         buffer.writeSFTPString(name)
         switch self {
         case .posixRename(let oldPath, let newPath), .hardLink(let oldPath, let newPath):
-            buffer.writeSFTPString(oldPath)
-            buffer.writeSFTPString(newPath)
+            buffer.writeSFTPPath(oldPath)
+            buffer.writeSFTPPath(newPath)
         case .statVFS(let path):
-            buffer.writeSFTPString(path)
+            buffer.writeSFTPPath(path)
         case .fstatVFS(let handle), .fsync(let handle):
             buffer.writeSFTPBytes(handle)
         case .lsetstat(let path, let attributes):
-            buffer.writeSFTPString(path)
+            buffer.writeSFTPPath(path)
             attributes.encode(into: &buffer)
         case .limits:
             break
@@ -307,13 +317,13 @@ package enum SFTPExtendedRequest: Hashable, Sendable {
         guard let name = buffer.readSFTPString() else { return nil }
         switch name {
         case SFTPExtensionName.posixRename:
-            guard let old = buffer.readSFTPString(), let new = buffer.readSFTPString() else { return nil }
+            guard let old = buffer.readSFTPPath(), let new = buffer.readSFTPPath() else { return nil }
             return .posixRename(oldPath: old, newPath: new)
         case SFTPExtensionName.hardLink:
-            guard let old = buffer.readSFTPString(), let new = buffer.readSFTPString() else { return nil }
+            guard let old = buffer.readSFTPPath(), let new = buffer.readSFTPPath() else { return nil }
             return .hardLink(oldPath: old, newPath: new)
         case SFTPExtensionName.statVFS:
-            guard let path = buffer.readSFTPString() else { return nil }
+            guard let path = buffer.readSFTPPath() else { return nil }
             return .statVFS(path: path)
         case SFTPExtensionName.fstatVFS:
             guard let handle = buffer.readSFTPBytes() else { return nil }
@@ -322,7 +332,7 @@ package enum SFTPExtendedRequest: Hashable, Sendable {
             guard let handle = buffer.readSFTPBytes() else { return nil }
             return .fsync(handle: handle)
         case SFTPExtensionName.lsetstat:
-            guard let path = buffer.readSFTPString(),
+            guard let path = buffer.readSFTPPath(),
                   let attributes = SFTPFileAttributes.decode(from: &buffer) else { return nil }
             return .lsetstat(path: path, attributes: attributes)
         case SFTPExtensionName.limits:
@@ -338,29 +348,29 @@ package enum SFTPExtendedRequest: Hashable, Sendable {
 
 package enum SFTPRequest: Hashable, Sendable {
     case initialize(version: UInt32, extensions: [SFTPWireExtension])
-    case open(id: UInt32, path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes)
+    case open(id: UInt32, path: SFTPPath, flags: SFTPOpenFlags, attributes: SFTPFileAttributes)
     case close(id: UInt32, handle: ByteBuffer)
     case read(id: UInt32, handle: ByteBuffer, offset: UInt64, length: UInt32)
     case write(id: UInt32, handle: ByteBuffer, offset: UInt64, data: ByteBuffer)
-    case lstat(id: UInt32, path: String)
+    case lstat(id: UInt32, path: SFTPPath)
     case fstat(id: UInt32, handle: ByteBuffer)
-    case setstat(id: UInt32, path: String, attributes: SFTPFileAttributes)
+    case setstat(id: UInt32, path: SFTPPath, attributes: SFTPFileAttributes)
     case fsetstat(id: UInt32, handle: ByteBuffer, attributes: SFTPFileAttributes)
-    case opendir(id: UInt32, path: String)
+    case opendir(id: UInt32, path: SFTPPath)
     case readdir(id: UInt32, handle: ByteBuffer)
-    case remove(id: UInt32, path: String)
-    case mkdir(id: UInt32, path: String, attributes: SFTPFileAttributes)
-    case rmdir(id: UInt32, path: String)
-    case realpath(id: UInt32, path: String)
-    case stat(id: UInt32, path: String)
-    case rename(id: UInt32, oldPath: String, newPath: String)
-    case readlink(id: UInt32, path: String)
+    case remove(id: UInt32, path: SFTPPath)
+    case mkdir(id: UInt32, path: SFTPPath, attributes: SFTPFileAttributes)
+    case rmdir(id: UInt32, path: SFTPPath)
+    case realpath(id: UInt32, path: SFTPPath)
+    case stat(id: UInt32, path: SFTPPath)
+    case rename(id: UInt32, oldPath: SFTPPath, newPath: SFTPPath)
+    case readlink(id: UInt32, path: SFTPPath)
     /// 在 `linkPath` 建一个指向 `targetPath` 的符号链接。
     ///
     /// ⚠️ 线上的参数顺序照 OpenSSH：**先 target、后 link**。草案写的是反的，但 OpenSSH 的
     /// sftp-server 从一开始就实现反了、而且为了兼容永远不改（见 OpenSSH 的 PROTOCOL §4.1），
     /// 事实上的服务端都跟它走。
-    case symlink(id: UInt32, linkPath: String, targetPath: String)
+    case symlink(id: UInt32, linkPath: SFTPPath, targetPath: SFTPPath)
     case extended(id: UInt32, request: SFTPExtendedRequest)
 
     package var packetType: SFTPPacketType {
@@ -414,7 +424,7 @@ package enum SFTPRequest: Hashable, Sendable {
             }
         case .open(let id, let path, let flags, let attributes):
             buffer.writeInteger(id)
-            buffer.writeSFTPString(path)
+            buffer.writeSFTPPath(path)
             buffer.writeInteger(flags.rawValue)
             attributes.encode(into: &buffer)
         case .close(let id, let handle), .fstat(let id, let handle), .readdir(let id, let handle):
@@ -435,10 +445,10 @@ package enum SFTPRequest: Hashable, Sendable {
              .rmdir(let id, let path), .realpath(let id, let path), .stat(let id, let path),
              .readlink(let id, let path):
             buffer.writeInteger(id)
-            buffer.writeSFTPString(path)
+            buffer.writeSFTPPath(path)
         case .setstat(let id, let path, let attributes), .mkdir(let id, let path, let attributes):
             buffer.writeInteger(id)
-            buffer.writeSFTPString(path)
+            buffer.writeSFTPPath(path)
             attributes.encode(into: &buffer)
         case .fsetstat(let id, let handle, let attributes):
             buffer.writeInteger(id)
@@ -446,12 +456,12 @@ package enum SFTPRequest: Hashable, Sendable {
             attributes.encode(into: &buffer)
         case .rename(let id, let oldPath, let newPath):
             buffer.writeInteger(id)
-            buffer.writeSFTPString(oldPath)
-            buffer.writeSFTPString(newPath)
+            buffer.writeSFTPPath(oldPath)
+            buffer.writeSFTPPath(newPath)
         case .symlink(let id, let linkPath, let targetPath):
             buffer.writeInteger(id)
-            buffer.writeSFTPString(targetPath)
-            buffer.writeSFTPString(linkPath)
+            buffer.writeSFTPPath(targetPath)
+            buffer.writeSFTPPath(linkPath)
         case .extended(let id, let request):
             buffer.writeInteger(id)
             request.encodeBody(into: &buffer)
@@ -486,8 +496,8 @@ package enum SFTPRequest: Hashable, Sendable {
             break
         }
         guard let id = body.readInteger(as: UInt32.self) else { throw truncated }
-        func string() throws -> String {
-            guard let value = body.readSFTPString() else { throw truncated }
+        func path() throws -> SFTPPath {
+            guard let value = body.readSFTPPath() else { throw truncated }
             return value
         }
         func bytes() throws -> ByteBuffer {
@@ -508,7 +518,7 @@ package enum SFTPRequest: Hashable, Sendable {
         }
         switch type {
         case .open:
-            let path = try string()
+            let path = try path()
             let flags = SFTPOpenFlags(rawValue: try uint32())
             return .open(id: id, path: path, flags: flags, attributes: try attributes())
         case .close: return .close(id: id, handle: try bytes())
@@ -520,30 +530,30 @@ package enum SFTPRequest: Hashable, Sendable {
             let handle = try bytes()
             let offset = try uint64()
             return .write(id: id, handle: handle, offset: offset, data: try bytes())
-        case .lstat: return .lstat(id: id, path: try string())
+        case .lstat: return .lstat(id: id, path: try path())
         case .fstat: return .fstat(id: id, handle: try bytes())
         case .setstat:
-            let path = try string()
+            let path = try path()
             return .setstat(id: id, path: path, attributes: try attributes())
         case .fsetstat:
             let handle = try bytes()
             return .fsetstat(id: id, handle: handle, attributes: try attributes())
-        case .opendir: return .opendir(id: id, path: try string())
+        case .opendir: return .opendir(id: id, path: try path())
         case .readdir: return .readdir(id: id, handle: try bytes())
-        case .remove: return .remove(id: id, path: try string())
+        case .remove: return .remove(id: id, path: try path())
         case .mkdir:
-            let path = try string()
+            let path = try path()
             return .mkdir(id: id, path: path, attributes: try attributes())
-        case .rmdir: return .rmdir(id: id, path: try string())
-        case .realpath: return .realpath(id: id, path: try string())
-        case .stat: return .stat(id: id, path: try string())
+        case .rmdir: return .rmdir(id: id, path: try path())
+        case .realpath: return .realpath(id: id, path: try path())
+        case .stat: return .stat(id: id, path: try path())
         case .rename:
-            let old = try string()
-            return .rename(id: id, oldPath: old, newPath: try string())
-        case .readlink: return .readlink(id: id, path: try string())
+            let old = try path()
+            return .rename(id: id, oldPath: old, newPath: try path())
+        case .readlink: return .readlink(id: id, path: try path())
         case .symlink:
-            let target = try string()
-            return .symlink(id: id, linkPath: try string(), targetPath: target)
+            let target = try path()
+            return .symlink(id: id, linkPath: try path(), targetPath: target)
         case .extended:
             guard let request = SFTPExtendedRequest.decodeBody(from: &body) else { throw truncated }
             return .extended(id: id, request: request)
@@ -623,7 +633,7 @@ package enum SFTPResponse: Hashable, Sendable {
             buffer.writeInteger(id)
             buffer.writeInteger(UInt32(truncatingIfNeeded: entries.count))
             for entry in entries {
-                buffer.writeSFTPString(entry.filename)
+                buffer.writeSFTPPath(entry.name)
                 buffer.writeSFTPString(entry.longname)
                 entry.attributes.encode(into: &buffer)
             }
@@ -679,10 +689,10 @@ package enum SFTPResponse: Hashable, Sendable {
             var entries: [SFTPDirectoryEntry] = []
             entries.reserveCapacity(min(Int(count), body.readableBytes / 12))
             for _ in 0..<count {
-                guard let filename = body.readSFTPString(),
+                guard let name = body.readSFTPPath(),
                       let longname = body.readSFTPString(),
                       let attributes = SFTPFileAttributes.decode(from: &body) else { throw truncated }
-                entries.append(SFTPDirectoryEntry(filename: filename, longname: longname, attributes: attributes))
+                entries.append(SFTPDirectoryEntry(name: name, longname: longname, attributes: attributes))
             }
             return .name(id: id, entries: entries)
         case .attributes:

@@ -462,6 +462,53 @@ final class SFTPClientServerTests: XCTestCase {
         XCTAssertFalse(client.isActive)
     }
 
+    /// 测试服务端也照 OpenSSH 复用句柄编号：关闭和另一份拷贝上并发的读写交错时，旧句柄上的请求不能落进新文件，
+    /// 关闭开始之后线上也不再出现这个句柄的请求。
+    func testCloseWaitsForInFlightAndBlocksLaterRequests() async throws {
+        // 每个 WRITE 的回答慢 20 ms：16 MiB / 255 KiB ≈ 65 片、窗口 8，写一遍要好几轮，关闭一定落在中途。
+        let payload = SFTPTestData.bytes(count: 16 * 1024 * 1024)
+        pair.faults.delayResponses(of: .write, by: .milliseconds(20))
+        for trial in 0..<4 {
+            let a = try await client.openFile("/a\(trial)", flags: [.write, .create, .truncate])
+            let before = pair.faults.requestCount(of: .write)
+            let writer = Task { try await a.write(contentsOf: payload, window: 8) }
+            try await pair.waitForRequests(.write, count: before + 1)
+            try await a.close()
+            let writesAtClose = pair.faults.requestCount(of: .write)
+            let b = try await client.openFile("/b\(trial)", flags: [.write, .create, .truncate])
+            XCTAssertEqual(b.handle, a.handle, "the test server reuses the slot like OpenSSH")
+            do {
+                try await writer.value
+            } catch let error as SFTPError {
+                XCTAssertEqual(error, .handleClosed)
+            }
+            XCTAssertEqual(pair.faults.requestCount(of: .write), writesAtClose, "no WRITE after the CLOSE")
+            try await b.close()
+            XCTAssertEqual(hostContents("/b\(trial)"), Data(), "stale WRITE landed in the reused handle")
+            XCTAssertLessThan(hostContents("/a\(trial)")?.count ?? 0, payload.readableBytes, "close happened mid-transfer")
+        }
+        pair.faults.delayResponses(of: .write, by: nil)
+    }
+
+    func testCancellingCloseStillClosesLater() async throws {
+        try putFile("/f", SFTPTestData.bytes(count: 10))
+        let file = try await client.openFile("/f", flags: .read)
+        pair.faults.delayResponses(of: .read, by: .milliseconds(300))
+        let reader = Task { try await file.read(from: 0, length: 10) }
+        try await pair.waitForRequests(.read, count: 1)
+        let closer = Task { try await file.close() }
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(pair.faults.requestCount(of: .close), 0, "CLOSE waits for the READ in flight")
+        closer.cancel()
+        do {
+            try await closer.value
+            XCTFail("close should report cancellation")
+        } catch is CancellationError {}
+        _ = try await reader.value
+        try await pair.waitForRequests(.close, count: 1)
+        pair.faults.delayResponses(of: .read, by: nil)
+    }
+
     func testServerDroppingMidRequestFailsPending() async throws {
         try putFile("/f", SFTPTestData.bytes(count: 1000))
         let file = try await client.openFile("/f", flags: .read)

@@ -18,47 +18,47 @@ public struct SFTPServerStatusError: Error, Hashable, Sendable {
     public static func unsupported(_ message: String = "Operation unsupported") -> Self { Self(.operationUnsupported, message) }
 }
 
-/// 测试服务端背后的文件系统。路径是客户端发来的原样字符串，解释（相对路径、`..`、限制在根目录里）由实现负责。
+/// 测试服务端背后的文件系统。路径是客户端发来的原样字节（`SFTPPath`），解释（相对路径、`..`、限制在根目录里）由实现负责。
 ///
 /// 方法都是 `async`：服务端为每个请求开一个任务调用它们，所以可以在里面等待、并发执行；
 /// 回答的顺序因此可以和请求的顺序不同（客户端必须容忍乱序，这正是要测的）。
 /// 可选的操作有默认实现，回 `SSH_FX_OP_UNSUPPORTED`。
 public protocol SFTPServerFileSystem: Sendable {
-    func realPath(_ path: String) async throws -> String
-    func attributes(at path: String, followingSymlinks: Bool) async throws -> SFTPFileAttributes
-    func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool) async throws
-    func openFile(_ path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes) async throws -> any SFTPServerFile
-    func openDirectory(_ path: String) async throws -> any SFTPServerDirectory
-    func removeFile(_ path: String) async throws
-    func createDirectory(_ path: String, attributes: SFTPFileAttributes) async throws
-    func removeDirectory(_ path: String) async throws
+    func realPath(_ path: SFTPPath) async throws -> SFTPPath
+    func attributes(at path: SFTPPath, followingSymlinks: Bool) async throws -> SFTPFileAttributes
+    func setAttributes(_ attributes: SFTPFileAttributes, at path: SFTPPath, followingSymlinks: Bool) async throws
+    func openFile(_ path: SFTPPath, flags: SFTPOpenFlags, attributes: SFTPFileAttributes) async throws -> any SFTPServerFile
+    func openDirectory(_ path: SFTPPath) async throws -> any SFTPServerDirectory
+    func removeFile(_ path: SFTPPath) async throws
+    func createDirectory(_ path: SFTPPath, attributes: SFTPFileAttributes) async throws
+    func removeDirectory(_ path: SFTPPath) async throws
     /// `replacingExisting == false` 是 SSH_FXP_RENAME（OpenSSH 语义：目标已存在就失败），
     /// `true` 是 `posix-rename@openssh.com`（`rename(2)`）。
-    func rename(_ oldPath: String, to newPath: String, replacingExisting: Bool) async throws
-    func readLink(_ path: String) async throws -> String
-    func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws
-    func createHardLink(at newPath: String, pointingTo existingPath: String) async throws
-    func fileSystemStats(at path: String) async throws -> SFTPFileSystemStats
+    func rename(_ oldPath: SFTPPath, to newPath: SFTPPath, replacingExisting: Bool) async throws
+    func readLink(_ path: SFTPPath) async throws -> SFTPPath
+    func createSymlink(at linkPath: SFTPPath, pointingTo targetPath: SFTPPath) async throws
+    func createHardLink(at newPath: SFTPPath, pointingTo existingPath: SFTPPath) async throws
+    func fileSystemStats(at path: SFTPPath) async throws -> SFTPFileSystemStats
 }
 
 extension SFTPServerFileSystem {
-    public func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool) async throws {
+    public func setAttributes(_ attributes: SFTPFileAttributes, at path: SFTPPath, followingSymlinks: Bool) async throws {
         throw SFTPServerStatusError.unsupported()
     }
 
-    public func readLink(_ path: String) async throws -> String {
+    public func readLink(_ path: SFTPPath) async throws -> SFTPPath {
         throw SFTPServerStatusError.unsupported()
     }
 
-    public func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws {
+    public func createSymlink(at linkPath: SFTPPath, pointingTo targetPath: SFTPPath) async throws {
         throw SFTPServerStatusError.unsupported()
     }
 
-    public func createHardLink(at newPath: String, pointingTo existingPath: String) async throws {
+    public func createHardLink(at newPath: SFTPPath, pointingTo existingPath: SFTPPath) async throws {
         throw SFTPServerStatusError.unsupported()
     }
 
-    public func fileSystemStats(at path: String) async throws -> SFTPFileSystemStats {
+    public func fileSystemStats(at path: SFTPPath) async throws -> SFTPFileSystemStats {
         throw SFTPServerStatusError.unsupported()
     }
 }

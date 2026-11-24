@@ -346,14 +346,21 @@ final class SFTPCodecTests: XCTestCase {
                        .status(id: 5, code: .noSuchFile, message: "", languageTag: ""))
     }
 
-    func testInvalidUTF8IsReplacedNotRejected() throws {
+    func testInvalidUTF8PathsRoundTripAsBytes() throws {
         var frame = ByteBuffer()
         frame.writeInteger(SFTPPacketType.stat.rawValue)
         frame.writeInteger(UInt32(1))
         frame.writeInteger(UInt32(2))
         frame.writeBytes([0xFF, 0xFE])
         guard case .stat(1, let path) = try SFTPRequest.decode(frame: frame) else { return XCTFail("not a stat") }
-        XCTAssertEqual(path.unicodeScalars.count, 2)
+        // 路径原样保留字节；只有给人看的 `string` 才做替换。
+        XCTAssertEqual(path.bytes, [0xFF, 0xFE])
+        XCTAssertFalse(path.isLosslessUTF8)
+        XCTAssertEqual(path.string.unicodeScalars.count, 2)
+        var again = ByteBuffer()
+        SFTPRequest.stat(id: 1, path: path).encode(into: &again)
+        again.moveReaderIndex(forwardBy: 4)
+        XCTAssertEqual(again, frame)
     }
 
     // MARK: - 属性
@@ -370,6 +377,13 @@ final class SFTPCodecTests: XCTestCase {
         let times = SFTPFileTimes(accessDate: Date(timeIntervalSince1970: -5), modificationDate: .distantFuture)
         XCTAssertEqual(times.accessSeconds, 0)
         XCTAssertEqual(times.modificationSeconds, .max)
+        XCTAssertNil(SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: -5), modificationDate: Date()))
+        XCTAssertNil(SFTPFileTimes(exactAccessDate: Date(), modificationDate: .distantFuture))
+        XCTAssertNil(SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: .nan), modificationDate: Date()))
+        let exact = SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: 0),
+                                  modificationDate: Date(timeIntervalSince1970: Double(UInt32.max) + 0.5))
+        XCTAssertEqual(exact, SFTPFileTimes(accessSeconds: 0, modificationSeconds: .max))
+        XCTAssertEqual(SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: 1.9), modificationDate: Date(timeIntervalSince1970: 2))?.accessSeconds, 1)
         XCTAssertEqual(SFTPStatusCode.noSuchFile.description, "SSH_FX_NO_SUCH_FILE")
         XCTAssertEqual(SFTPStatusCode(999).description, "SSH_FX(999)")
     }

@@ -27,23 +27,29 @@ final class SFTPLoopbackPair: Sendable {
     }
 
     /// - Parameters:
+    ///   - custom: 非 nil 时服务端用它，而不是那个临时目录。
+    ///   - configureFaults: 在连接建立（握手）之前装故障规则。
     ///   - fragmentInboundTo: 非 nil 时，客户端收到的每块数据先切成这么大的碎片再往上交（测任意切分）。
     ///   - lowWriteWatermark: 非 nil 时把客户端通道的写缓冲水位压得很低，逼出「不可写 → 排队」那条路。
     static func make(
         server configuration: SFTPServer.Configuration = SFTPServer.Configuration(),
         client clientConfiguration: SFTPClient.Configuration = SFTPClient.Configuration(),
         fragmentInboundTo fragmentSize: Int? = nil,
-        lowWriteWatermark: Bool = false
+        lowWriteWatermark: Bool = false,
+        serving custom: (any SFTPServerFileSystem)? = nil,
+        configureFaults: (SFTPFaultInjector) -> Void = { _ in }
     ) async throws -> SFTPLoopbackPair {
         let fileSystem = try SFTPLocalFileSystem.makeTemporary()
+        let served: any SFTPServerFileSystem = custom ?? fileSystem
         let faults = SFTPFaultInjector()
+        configureFaults(faults)
         let servers = NIOLockedValueBox<[SFTPServer]>([])
         let group = MultiThreadedEventLoopGroup.singleton
         let listener = try await ServerBootstrap(group: group)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { channel in
                 channel.eventLoop.makeCompletedFuture {
-                    let server = try SFTPServer.install(on: channel, fileSystem: fileSystem,
+                    let server = try SFTPServer.install(on: channel, fileSystem: served,
                                                         configuration: configuration, faults: faults)
                     servers.withLockedValue { $0.append(server) }
                 }
@@ -172,5 +178,112 @@ func XCTAssertSFTPError(
         XCTAssertEqual(error, expected, file: file, line: line)
     } catch {
         XCTFail("expected \(expected), got \(type(of: error)): \(error)", file: file, line: line)
+    }
+}
+
+/// 系统自带的 OpenSSH sftp-server（`/usr/libexec/sftp-server`）：子进程的 stdin / stdout 接到
+/// `NIOPipeBootstrap` 的通道上，中间没有 SSH。以 `-d <临时目录>` 启动；没有这个程序时抛 `XCTSkip`。
+final class OpenSSHServer: Sendable {
+    static let executable = "/usr/libexec/sftp-server"
+
+    let process: Process
+    let exit: ProcessExitSignal
+    let client: SFTPClient
+    /// 临时目录的真实路径。
+    let root: String
+
+    private init(process: Process, exit: ProcessExitSignal, client: SFTPClient, root: String) {
+        self.process = process
+        self.exit = exit
+        self.client = client
+        self.root = root
+    }
+
+    static func start(configuration: SFTPClient.Configuration = SFTPClient.Configuration()) async throws -> OpenSSHServer {
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            throw XCTSkip("\(executable) not available")
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usshcore-openssh-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let root = try XCTUnwrap(directory.path.withCString { pointer -> String? in
+            guard let resolved = realpath(pointer, nil) else { return nil }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        })
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = ["-d", root, "-e", "-l", "ERROR"]
+        let toServer = Pipe()
+        let fromServer = Pipe()
+        process.standardInput = toServer
+        process.standardOutput = fromServer
+        process.standardError = FileHandle.nullDevice
+        // 不用 `waitUntilExit()`：它在测试的异步 tearDown 里转主线程的 run loop，实测会偶发地永远等不到结束。
+        let exit = ProcessExitSignal()
+        process.terminationHandler = { _ in exit.signal() }
+        try process.run()
+
+        // NIO 接管的是复制出来的描述符；Pipe 自己那份关掉，子进程才能在通道关闭时读到 EOF。
+        let input = dup(fromServer.fileHandleForReading.fileDescriptor)
+        let output = dup(toServer.fileHandleForWriting.fileDescriptor)
+        try fromServer.fileHandleForReading.close()
+        try toServer.fileHandleForWriting.close()
+        let channel = try await NIOPipeBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .takingOwnershipOfDescriptors(input: input, output: output).get()
+        let client = try await SFTPClient.start(on: channel, configuration: configuration)
+        return OpenSSHServer(process: process, exit: exit, client: client, root: root)
+    }
+
+    /// 关通道 = 关掉子进程的 stdin，sftp-server 读到 EOF 自己退出；等不到再发 SIGTERM。
+    func stop() async {
+        await client.close()
+        if await !exit.wait(timeout: .seconds(5)) {
+            process.terminate()
+            _ = await exit.wait(timeout: .seconds(5))
+        }
+        try? FileManager.default.removeItem(atPath: root)
+    }
+}
+
+/// 子进程结束的信号（`terminationHandler` 里触发），可以带时限地等。
+final class ProcessExitSignal: Sendable {
+    private let state = NIOLockedValueBox<(exited: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+
+    func signal() {
+        resumeWaiters(markingExited: true)
+    }
+
+    private func resumeWaiters(markingExited: Bool) {
+        let waiters = state.withLockedValue { state -> [CheckedContinuation<Void, Never>] in
+            if markingExited { state.exited = true }
+            defer { state.waiters = [] }
+            return state.waiters
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    private func wait() async {
+        await withCheckedContinuation { continuation in
+            let exited = state.withLockedValue { state -> Bool in
+                if !state.exited { state.waiters.append(continuation) }
+                return state.exited
+            }
+            if exited { continuation.resume() }
+        }
+    }
+
+    /// 在时限内结束了返回 true。
+    func wait(timeout: Duration) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await self.wait(); return true }
+            group.addTask { try? await Task.sleep(for: timeout); return false }
+            let first = await group.next() ?? false
+            group.cancelAll()
+            // 超时：放走还挂着的等待者（不当作已结束），任务组才能收尾。
+            if !first { self.resumeWaiters(markingExited: false) }
+            return first
+        }
     }
 }
