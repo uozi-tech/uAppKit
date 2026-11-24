@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 /// An error thrown by NIOSSH.
@@ -27,6 +29,23 @@ public struct NIOSSHError: Error {
     public var type: ErrorType
 
     private var diagnostics: String?
+
+    /// For `.channelSetupRejected`: the reason code and description of SSH_MSG_CHANNEL_OPEN_FAILURE.
+    private var channelOpenFailure: (reasonCode: UInt32, description: String)? = nil
+}
+
+extension NIOSSHError {
+    /// For a `.channelSetupRejected` error, the reason code of the SSH_MSG_CHANNEL_OPEN_FAILURE (RFC 4254 §5.1:
+    /// 1 administratively prohibited, 2 connect failed, 3 unknown channel type, 4 resource shortage, or a
+    /// private code). `nil` for every other error.
+    public var channelOpenFailureReasonCode: UInt32? {
+        self.channelOpenFailure?.reasonCode
+    }
+
+    /// For a `.channelSetupRejected` error, the peer's human-readable description (may be empty). `nil` otherwise.
+    public var channelOpenFailureDescription: String? {
+        self.channelOpenFailure?.description
+    }
 }
 
 // MARK: - Internal helper functions for error construction.
@@ -103,7 +122,11 @@ extension NIOSSHError {
 
     @inline(never)
     internal static func channelSetupRejected(reasonCode: UInt32, reason: String) -> NIOSSHError {
-        NIOSSHError(type: .channelSetupRejected, diagnostics: "Reason: \(reasonCode) \(reason)")
+        NIOSSHError(
+            type: .channelSetupRejected,
+            diagnostics: "Reason: \(reasonCode) \(reason)",
+            channelOpenFailure: (reasonCode, reason)
+        )
     }
 
     @inline(never)
@@ -119,6 +142,11 @@ extension NIOSSHError {
     internal static let tcpShutdown = NIOSSHError(type: .tcpShutdown, diagnostics: nil)
 
     internal static let invalidUserAuthSignature = NIOSSHError(type: .invalidUserAuthSignature, diagnostics: nil)
+
+    internal static let noFurtherAuthenticationOffers = NIOSSHError(
+        type: .noFurtherAuthenticationOffers,
+        diagnostics: "The user authentication delegate has no further offers"
+    )
 
     @inline(never)
     internal static func unknownPacketType(diagnostic: String) -> NIOSSHError {
@@ -207,6 +235,7 @@ extension NIOSSHError {
             case invalidHostKeyForKeyExchange
             case invalidOpenSSHPublicKey
             case invalidCertificate
+            case noFurtherAuthenticationOffers
         }
 
         private var base: Base
@@ -304,6 +333,10 @@ extension NIOSSHError {
 
         /// A certificate failed validation.
         public static let invalidCertificate: ErrorType = .init(.invalidCertificate)
+
+        /// The client's user authentication delegate offered nothing more (completed its promise with `nil`)
+        /// before the server accepted an offer: user authentication has failed.
+        public static let noFurtherAuthenticationOffers: ErrorType = .init(.noFurtherAuthenticationOffers)
     }
 }
 

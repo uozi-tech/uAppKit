@@ -34,6 +34,10 @@ public struct SSHClientConfiguration {
     /// that are neither built in nor registered are not offered.
     public var keyExchangeAlgorithms: [String] = SSHKeyExchangeStateMachine.defaultKeyExchangeAlgorithms
 
+    /// Whether to announce strict key exchange (`kex-strict-*-v00@openssh.com`) in the first KEXINIT. Always on;
+    /// tests turn it off to play a peer that predates it.
+    internal var offersStrictKeyExchange = true
+
     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17` (128 KiB).

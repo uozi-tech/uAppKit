@@ -83,4 +83,47 @@ final class ChildChannelStateMachineTests: XCTestCase {
         XCTAssertFalse(afterEOF.sentClose)
         XCTAssertFalse(afterEOF.canSendWindowAdjust)
     }
+
+    // MARK: EOF in both directions
+
+    func testEOFOrderings() throws {
+        // We send EOF first, then the peer.
+        var localFirst = try self.activeOutboundChannel()
+        try localFirst.sendChannelEOF(.init(recipientChannel: 2))
+        XCTAssertTrue(localFirst.isActiveOnChannel)
+        try localFirst.receiveChannelEOF(.init(recipientChannel: 1))
+        XCTAssertNoThrow(try localFirst.sendChannelClose(.init(recipientChannel: 2)))
+
+        // The peer sends EOF first, then we do: the end of a `-L` stream whose server half-closes first, or EOF on an
+        // exec whose output already ended. Used to throw "Sent EOF out of sequence.".
+        var remoteFirst = try self.activeOutboundChannel()
+        try remoteFirst.receiveChannelEOF(.init(recipientChannel: 1))
+        XCTAssertNoThrow(try remoteFirst.sendChannelData(.init(recipientChannel: 2, data: ByteBuffer())))
+        XCTAssertNoThrow(try remoteFirst.sendChannelEOF(.init(recipientChannel: 2)))
+        XCTAssertThrowsError(try remoteFirst.sendChannelData(.init(recipientChannel: 2, data: ByteBuffer())))
+        XCTAssertThrowsError(try remoteFirst.receiveChannelEOF(.init(recipientChannel: 1)))
+        XCTAssertNoThrow(try remoteFirst.sendChannelClose(.init(recipientChannel: 2)))
+        XCTAssertNoThrow(try remoteFirst.receiveChannelClose(.init(recipientChannel: 1)))
+        XCTAssertTrue(remoteFirst.isClosed)
+
+        // We may send EOF only once...
+        var localTwice = try self.activeOutboundChannel()
+        try localTwice.sendChannelEOF(.init(recipientChannel: 2))
+        XCTAssertThrowsError(try localTwice.sendChannelEOF(.init(recipientChannel: 2))) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .protocolViolation)
+        }
+
+        // ... and so may the peer.
+        var remoteTwice = try self.activeOutboundChannel()
+        try remoteTwice.receiveChannelEOF(.init(recipientChannel: 1))
+        XCTAssertThrowsError(try remoteTwice.receiveChannelEOF(.init(recipientChannel: 1))) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .protocolViolation)
+        }
+
+        // Both EOFs sent and received: a third one either way is out of sequence.
+        var quiescent = try self.activeOutboundChannel()
+        try quiescent.receiveChannelEOF(.init(recipientChannel: 1))
+        try quiescent.sendChannelEOF(.init(recipientChannel: 2))
+        XCTAssertThrowsError(try quiescent.sendChannelEOF(.init(recipientChannel: 2)))
+    }
 }

@@ -26,6 +26,9 @@ struct UserAuthenticationStateMachine {
     /// disconnecting. Taken from `SSHServerConfiguration`; `.max` for clients, which never enforce it.
     private let maxAuthAttempts: Int
 
+    /// The RFC 8308 `server-sig-algs` the server announced, if any (clients only).
+    private(set) var serverSignatureAlgorithms: [String]? = nil
+
     init(role: SSHConnectionRole, loop: EventLoop, sessionID: ByteBuffer) {
         self.state = .idle
         self.delegate = UserAuthDelegate(role: role)
@@ -462,6 +465,19 @@ extension UserAuthenticationStateMachine {
     }
 }
 
+// MARK: Extension negotiation
+
+extension UserAuthenticationStateMachine {
+    /// SSH_MSG_EXT_INFO from the server (RFC 8308). Clients remember `server-sig-algs`; extensions we do not know
+    /// are ignored, and a server ignores the message altogether (we never announce `ext-info-s`).
+    mutating func receiveExtensionInfo(_ message: SSHMessage.ExtensionInfoMessage) {
+        guard case .client = self.delegate, let algorithms = message.serverSignatureAlgorithms else {
+            return
+        }
+        self.serverSignatureAlgorithms = algorithms
+    }
+}
+
 // MARK: Interacting with client delegate
 
 extension UserAuthenticationStateMachine {
@@ -470,7 +486,11 @@ extension UserAuthenticationStateMachine {
         delegate: NIOSSHClientUserAuthenticationDelegate
     ) -> EventLoopFuture<SSHMessage.UserAuthRequestMessage?> {
         let promise = self.loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
-        delegate.nextAuthenticationType(availableMethods: methods, nextChallengePromise: promise)
+        delegate.nextAuthenticationType(
+            availableMethods: methods,
+            serverSignatureAlgorithms: self.serverSignatureAlgorithms,
+            nextChallengePromise: promise
+        )
 
         // The explicit capture list is here to force a copy of the buffer, rather than capturing self.
         return promise.futureResult.flatMapThrowing { [sessionID = self.sessionID] request in

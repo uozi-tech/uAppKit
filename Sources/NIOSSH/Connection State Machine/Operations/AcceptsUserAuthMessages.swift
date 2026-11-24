@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -59,8 +61,8 @@ extension AcceptsUserAuthMessages {
 
         if let future = result {
             return .possibleFutureMessage(
-                future.map {
-                    Self.transform($0)
+                future.flatMapThrowing {
+                    try Self.transform($0)
                 }
             )
         } else {
@@ -102,8 +104,8 @@ extension AcceptsUserAuthMessages {
 
         if let future = result {
             return .possibleFutureMessage(
-                future.map {
-                    Self.transform($0)
+                future.flatMapThrowing {
+                    try Self.transform($0)
                 }
             )
         } else {
@@ -143,7 +145,12 @@ extension AcceptsUserAuthMessages {
         }
     }
 
-    private static func transform(_ result: SSHMessage.UserAuthRequestMessage?) -> SSHMultiMessage? {
-        result.map { SSHMultiMessage(.userAuthRequest($0)) }
+    private static func transform(_ result: SSHMessage.UserAuthRequestMessage?) throws -> SSHMultiMessage? {
+        // The client's delegate has nothing more to offer: authentication has failed. Say so instead of leaving
+        // the connection waiting forever.
+        guard let result = result else {
+            throw NIOSSHError.noFurtherAuthenticationOffers
+        }
+        return SSHMultiMessage(.userAuthRequest(result))
     }
 }

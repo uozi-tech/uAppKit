@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -38,4 +40,27 @@ public protocol NIOSSHClientUserAuthenticationDelegate {
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     )
+
+    /// The same, plus the public key algorithms the server accepts for user authentication, as announced in the
+    /// RFC 8308 `server-sig-algs` extension (`nil` if the server did not send it). This is the variant NIOSSH calls;
+    /// the default implementation drops `serverSignatureAlgorithms` and calls the variant above.
+    ///
+    /// Implement it to pick, say, `rsa-sha2-512` / `rsa-sha2-256` / `ssh-rsa` for an RSA key without spending
+    /// authentication attempts on algorithms the server refuses. The extension, when sent, arrives before the
+    /// first call; a server may update it right before authentication succeeds, which no later call observes.
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    )
+}
+
+extension NIOSSHClientUserAuthenticationDelegate {
+    public func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
+        self.nextAuthenticationType(availableMethods: availableMethods, nextChallengePromise: nextChallengePromise)
+    }
 }

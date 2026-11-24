@@ -1,9 +1,12 @@
-# NIOSSH 的两个扩展接口
+# NIOSSH 的扩展接口与新增公开 API
 
-补丁 0003 / 0004（见 [PATCHES.md](PATCHES.md)）给 NIOSSH 开的口子：NIOSSH 自己不带的公钥算法与密钥交换算法，
-在 NIOSSH 之外实现、登记进来。这里是这两个接口的**完整公开 API**（以 `Sources/NIOSSH` 里的源码为准，
+补丁 0005 / 0006（见 [PATCHES.md](PATCHES.md)）给 NIOSSH 开的两个口子：NIOSSH 自己不带的公钥算法与密钥交换算法，
+在 NIOSSH 之外实现、登记进来（第一、二节）。补丁 0007 / 0008 加的 strict KEX 与 `server-sig-algs`（第三、四节）
+不需要登记，但改变了线上行为、多了两个公开入口。补丁 0009–0011 的三处小 API（全局请求、OPEN_FAILURE 原因码、
+认证用完的错误）在第五节。这里是**全部新增的公开 API**（以 `Sources/NIOSSH` 里的源码为准，
 文档注释更细）。下面的代码都在 `import NIOSSH` 之后；测试里的玩具实现见
-`Tests/NIOSSHTests/CustomKeyTests.swift`、`CustomKeyExchangeTests.swift`。
+`Tests/NIOSSHTests/CustomKeyTests.swift`、`CustomKeyExchangeTests.swift`、`StrictKeyExchangeTests.swift`、
+`ExtensionInfoTests.swift`。
 
 ## 通用规则
 
@@ -100,8 +103,8 @@ extension NIOSSHPrivateKey {
   没有按连接关掉的开关。主机回复里要求：(主机密钥类型, 协商的算法) 已登记，且签名的 `signaturePrefix` 就是协商的
   算法，否则 `.invalidHostKeyForKeyExchange`；然后用 `isValidSignature` 验 H。
 - 客户端 userauth：`.privateKey(.init(privateKey: NIOSSHPrivateKey(custom: k)))` 时，请求与待签数据里的算法名取
-  `K.keyPrefix`，公钥 blob 用公钥的格式名。NIOSSH 0.15.2 没有 `server-sig-algs`（`ext-info-c`），客户端事先不知道
-  服务端接受哪个 RSA 算法，只能在 `NIOSSHClientUserAuthenticationDelegate` 里逐个试（每试一次算一次认证尝试）。
+  `K.keyPrefix`，公钥 blob 用公钥的格式名。用哪个 RSA 算法，按服务端的 `server-sig-algs` 挑（第四节）；服务端没发
+  时只能逐个试（每试一次算一次认证尝试）。
 - 服务端：userauth 请求的算法名必须已登记且对该密钥格式登记过、签名算法与之相同，否则请求按格式错误处理；
   算法名不认识则按「不认识的算法」回失败（不会问认证委托）。PK_OK 原样回请求里的算法名。服务端报的主机密钥算法
   只来自 `hostKeys`：同一把密钥要以几个算法提供，就放几个 `NIOSSHPrivateKey(custom:)`（每个算法一个私钥类型），
@@ -154,7 +157,7 @@ struct RSAPrivateKey<H: RSAHash>: NIOSSHPrivateKeyProtocol {
 NIOSSHAlgorithms.register(publicKey: RSAPublicKey.self, signature: RSASignature<SHA2_512>.self)
 NIOSSHAlgorithms.register(publicKey: RSAPublicKey.self, signature: RSASignature<SHA2_256>.self)
 
-// 用户认证：先试 rsa-sha2-512，被拒再试 rsa-sha2-256。
+// 用户认证：按 server-sig-algs 挑算法，见第四节的例子。
 let offer = NIOSSHUserAuthenticationOffer(
     username: "me", serviceName: "",
     offer: .privateKey(.init(privateKey: NIOSSHPrivateKey(custom: RSAPrivateKey<SHA2_512>(key: k)))))
@@ -254,9 +257,152 @@ var configuration = SSHClientConfiguration(userAuthDelegate: auth, serverAuthDel
 configuration.keyExchangeAlgorithms += ["diffie-hellman-group14-sha256"]
 ```
 
+## 三、严格密钥交换（strict KEX，补丁 0007）
+
+没有新的公开 API，**默认开启、不能关**（和 OpenSSH 一样）。行为（OpenSSH `PROTOCOL` §1.10，CVE-2023-48795）：
+
+- 每个连接的**第一个** KEXINIT 在密钥交换算法列表末尾自动追加标记：客户端 `kex-strict-c-v00@openssh.com`，
+  服务端 `kex-strict-s-v00@openssh.com`。配置了 `keyExchangeAlgorithms` 也照样追加；重新交换的 KEXINIT 不带。
+  标记不是算法：写进 `keyExchangeAlgorithms` 会被滤掉，`register(keyExchangeAlgorithm:)` 用这些名字会 precondition。
+- 双方都宣告时：对端的 KEXINIT 必须是它的第一个包；收到对端 NEWKEYS 之前，任何非密钥交换消息（包括
+  SSH_MSG_IGNORE / DEBUG）都以 `NIOSSHError` 的 `.protocolViolation` 断开；每次 NEWKEYS 之后两个方向的包序号归零。
+- 只有一端宣告时，一切和以前一样。
+
+对 `NIOSSHTransportProtection` 实现方：`encryptPacket` / `decryptAndVerifyRemainingPacket` 收到的 `sequenceNumber`
+在严格模式下每次换密钥都从 0 开始，用序号做 MAC / nonce 的算法（`hmac-*`、`chacha20-poly1305@openssh.com`）
+要按收到的值算，别自己数。Terrapin 能攻击的正是这两类（chacha20-poly1305、`*-etm` 的 CBC）；对端不支持 strict KEX
+时，客户端应把 AES-GCM 排在它们前面（`transportProtectionSchemes` 的顺序就是偏好顺序）。
+
+## 四、扩展协商与 `server-sig-algs`（RFC 8308，补丁 0008）
+
+客户端在第一个 KEXINIT 自动追加 `ext-info-c`（在 strict 标记之前）。服务端回的 SSH_MSG_EXT_INFO 里的
+`server-sig-algs` 交给用户认证委托：
+
+```swift
+public protocol NIOSSHClientUserAuthenticationDelegate {
+    // 原有，仍是必须实现的要求。
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    )
+    // 新增。NIOSSH 调的是这一个；默认实现丢掉 serverSignatureAlgorithms，转调上面那个。
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,   // 服务端没发 server-sig-algs 时为 nil
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    )
+}
+
+extension SSHServerConfiguration {
+    /// 设了、且客户端宣告了 ext-info-c，服务端就在第一次 NEWKEYS 之后发 EXT_INFO（只有 server-sig-algs）。
+    /// 默认 nil：不发，和以前一样。
+    public var serverSignatureAlgorithms: [String]?
+}
+```
+
+- EXT_INFO 紧跟服务端的 NEWKEYS，一定早于 SERVICE_ACCEPT，所以委托**第一次**被调用时值已经在了；之后每次调用传的
+  都是最新值。RFC 允许服务端在 USERAUTH_SUCCESS 之前再发一次（更新给认证之后用），NIOSSH 收下但不会再调委托。
+  其他时候收到 EXT_INFO 仍是协议错误。strict KEX 下它是新密钥下序号 0 的那个包，合法。
+- 解析是防御式的：扩展个数超过包能装下的上限就当格式错误；未知扩展忽略；`server-sig-algs` 按逗号分隔取出，
+  原样（包括大小写与顺序）交出。
+- 服务端对客户端的 `ext-info-c` 只是容忍，不宣告 `ext-info-s`，也不读客户端的 EXT_INFO。
+- 想用新参数的委托两个方法都要实现：两参数的那个通常写成
+  `nextAuthenticationType(availableMethods:serverSignatureAlgorithms: nil, nextChallengePromise:)` 的转调。
+  只实现两参数版本的老委托不用改。
+
+### RSA 实现怎么用
+
+```swift
+final class RSAAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
+    private var remaining: [NIOSSHPrivateKey]?     // 第一次调用时按 server-sig-algs 定下来
+
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
+        self.nextAuthenticationType(availableMethods: availableMethods, serverSignatureAlgorithms: nil,
+                                    nextChallengePromise: nextChallengePromise)
+    }
+
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
+        if self.remaining == nil {
+            let candidates: [(algorithm: String, key: NIOSSHPrivateKey)] = [
+                (RSAPrivateKey<SHA2_512>.keyPrefix, NIOSSHPrivateKey(custom: RSAPrivateKey<SHA2_512>(key: k))),
+                (RSAPrivateKey<SHA2_256>.keyPrefix, NIOSSHPrivateKey(custom: RSAPrivateKey<SHA2_256>(key: k))),
+                (RSAPrivateKey<SHA1>.keyPrefix, NIOSSHPrivateKey(custom: RSAPrivateKey<SHA1>(key: k))),  // ssh-rsa
+            ]
+            if let accepted = serverSignatureAlgorithms {
+                // 服务端说了：只试它接受的，按我们的偏好顺序，通常一次就中。
+                self.remaining = candidates.filter { accepted.contains($0.algorithm) }.map(\.key)
+            } else {
+                // 没说（老服务端，或 OpenSSH < 7.2）：先 SHA-2，SHA-1 放最后（或者干脆不试，看产品取舍）。
+                self.remaining = candidates.map(\.key)
+            }
+        }
+        guard availableMethods.contains(.publicKey), let key = self.remaining?.first else {
+            nextChallengePromise.succeed(nil)
+            return
+        }
+        self.remaining!.removeFirst()
+        nextChallengePromise.succeed(.init(username: user, serviceName: "", offer: .privateKey(.init(privateKey: key))))
+    }
+}
+```
+
+OpenSSH 7.2+ 都发 `server-sig-algs`；里面没有任何 RSA 算法时就别再试 RSA 了。
+
+## 五、其他新增的公开 API（补丁 0009–0011）与客户端层要知道的行为
+
+```swift
+extension GlobalRequest {
+    public enum GenericResponse: Hashable, Sendable {
+        case success(ByteBuffer)   // REQUEST_SUCCESS 之后的附带数据（通常为空）；wantReply: false 时写出即 .success(空)
+        case failure               // REQUEST_FAILURE：拒绝或不认识，不是错误
+    }
+}
+
+extension NIOSSHHandler {
+    /// 只能在 channel 的 event loop 上调用。连接建立前调用会排队，建立后按顺序发出。
+    public func sendGlobalRequest(
+        type: String,                      // 例如 "keepalive@openssh.com"
+        payload: ByteBuffer?,              // want_reply 之后的数据，nil = 没有
+        wantReply: Bool,
+        promise: EventLoopPromise<GlobalRequest.GenericResponse>? = nil
+    )
+}
+
+extension NIOSSHError {
+    /// 只在 .channelSetupRejected 时有值：SSH_MSG_CHANNEL_OPEN_FAILURE 的原因码（RFC 4254 §5.1：
+    /// 1 管理上禁止、2 连接失败、3 未知 channel 类型、4 资源不足）与对端的描述。
+    public var channelOpenFailureReasonCode: UInt32? { get }
+    public var channelOpenFailureDescription: String? { get }
+}
+
+extension NIOSSHError.ErrorType {
+    /// 客户端认证委托以 nil 完成了 promise（没有更多可试的），服务端还没接受任何一次：认证失败。
+    public static let noFurtherAuthenticationOffers: NIOSSHError.ErrorType
+}
+```
+
+- **保活**：`sendGlobalRequest(type: "keepalive@openssh.com", payload: nil, wantReply: true, promise:)`，收到
+  `.success` 或 `.failure` 都说明对端活着；promise 失败（`ChannelError.eof` 等）说明连接已经断了或请求发不出去。
+  回复与 `sendTCPForwardingRequest` 的回复共用一个队列、按发送顺序配对，可以随意交错。未知的**入站**全局请求
+  NIOSSH 照旧回 REQUEST_FAILURE。OpenSSH 服务端的 ClientAliveInterval 保活（`keepalive@openssh.com`，走全局请求或
+  channel 请求）NIOSSH 都回失败，OpenSSH 把失败也当作对端活着。
+- **认证用完**：委托以 nil 完成 promise 后，pipeline 上会收到 `noFurtherAuthenticationOffers` 错误（以前是一直挂着）。
+  NIOSSH 不替你关连接：收到这个错误就关。
+- **半关闭**（补丁 0004）：对端先发 EOF 之后，我方照常写数据、再 `close(mode: .output)` 发 EOF 是合法的，channel
+  不再被拆掉；之后 `close()` 干净关闭。
+- **closeFuture**（补丁 0002）：child channel 的 `closeFuture` 永不失败，出错的原因看 `errorCaught`。
+
 ## 给实现方的提醒
 
 - 实例方法都在连接的 event loop 上同步调用。2048 位以上的模幂（尤其非常数时间的 BigInt）会占住 event loop
   几十毫秒；`init()` 与 `sharedSecret` 各一次。
-- 这两个接口不碰 `ext-info` / `server-sig-algs`、strict KEX（Terrapin 对策），NIOSSH 0.15.2 本身也没有。
-- 不要在 NIOSSH 里加算法实现；需要接口没有的能力时，改补丁 0003 / 0004 并更新这份文档。
+- 会话密钥按 RFC 4253 §7.2 续长（补丁 0003），自定义传输保护要多长的密钥都行（`keySizes`）。
+- NIOSSH 仍然没有 `publickey-hostbound@openssh.com`、`ping@openssh.com` 等其他 OpenSSH 扩展，收到了也只是忽略。
+- 不要在 NIOSSH 里加算法实现；需要接口没有的能力时，改补丁 0005 / 0006 并更新这份文档。

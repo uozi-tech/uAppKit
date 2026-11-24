@@ -220,7 +220,8 @@ final class CustomKeyExchangeTests: CustomAlgorithmTestCase {
         )
         XCTAssertEqual(
             client.createKeyExchangeMessage().keyExchangeAlgorithms,
-            [Substring(Self.toyMPInt), "curve25519-sha256"]
+            // The extension markers are always appended to the first KEXINIT.
+            [Substring(Self.toyMPInt), "curve25519-sha256", "ext-info-c", "kex-strict-c-v00@openssh.com"]
         )
     }
 
