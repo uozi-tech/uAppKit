@@ -14,7 +14,10 @@ final class SSHAlgorithmPresetTests: XCTestCase {
     func testBuiltInOnlyIsExactlyNIOSSHDefaults() {
         let preset = SSHAlgorithms.builtInOnly
         XCTAssertEqual(names(preset.transportProtectionSchemes), names(Constants.bundledTransportProtectionSchemes))
-        XCTAssertEqual(preset.keyExchangeAlgorithms, Self.nioDefaultKeyExchangeAlgorithms())
+        // 集合和 NIOSSH 的默认值相同，顺序是我们自己定的：curve25519 在前（NIOSSH 默认把 P-384 排最前）。
+        XCTAssertEqual(preset.keyExchangeAlgorithms, Self.preferredBuiltInKeyExchangeAlgorithms)
+        XCTAssertEqual(Set(preset.keyExchangeAlgorithms), Set(Self.nioDefaultKeyExchangeAlgorithms()))
+        XCTAssertEqual(preset.keyExchangeAlgorithms.count, Self.nioDefaultKeyExchangeAlgorithms().count)
         XCTAssertEqual(preset.hostKeyAlgorithms, ["ssh-ed25519", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp521"])
         XCTAssertFalse(preset.allowsLegacyAlgorithms)
         // 默认构造的就是它（`SSHClient.Configuration` 的默认值）。
@@ -35,7 +38,7 @@ final class SSHAlgorithmPresetTests: XCTestCase {
             names(Constants.bundledTransportProtectionSchemes)
                 + Self.ctr(["hmac-sha2-256-etm@openssh.com", "hmac-sha2-512-etm@openssh.com"])
                 + Self.ctr(["hmac-sha2-256", "hmac-sha2-512"]))
-        XCTAssertEqual(preset.keyExchangeAlgorithms, Self.nioDefaultKeyExchangeAlgorithms() + [
+        XCTAssertEqual(preset.keyExchangeAlgorithms, Self.preferredBuiltInKeyExchangeAlgorithms + [
             "diffie-hellman-group16-sha512", "diffie-hellman-group14-sha256",
         ])
         XCTAssertEqual(preset.hostKeyAlgorithms, SSHAlgorithms.builtInHostKeyAlgorithms + ["rsa-sha2-512", "rsa-sha2-256"])
@@ -188,6 +191,12 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         XCTAssertEqual(SSHAlgorithms.builtInHostKeyAlgorithms,
                        SSHKeyExchangeStateMachine.supportedServerHostKeyAlgorithms.map(String.init))
     }
+
+    /// 自带密钥交换算法里我们的先后：curve25519 优先，然后 P-256 / P-384 / P-521。
+    private static let preferredBuiltInKeyExchangeAlgorithms = [
+        "curve25519-sha256", "curve25519-sha256@libssh.org",
+        "ecdh-sha2-nistp256", "ecdh-sha2-nistp384", "ecdh-sha2-nistp521",
+    ]
 
     /// NIOSSH 客户端配置里 `keyExchangeAlgorithms` 的默认值。
     private static func nioDefaultKeyExchangeAlgorithms() -> [String] {

@@ -128,6 +128,19 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
         await XCTAssertThrowsAsync(try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: .standard))
     }
 
+    // MARK: - 自带密钥交换的先后
+
+    /// sshd 不做任何限制时，三套预设都应该协商到 curve25519（我们把它排在最前，NIOSSH 自己的默认顺序是 P-384 在前）。
+    func testDefaultKeyExchangeAgainstSSHDIsCurve25519() async throws {
+        for (label, preset) in [("builtInOnly", SSHAlgorithms.builtInOnly), ("standard", .standard), ("legacyCompatible", .legacyCompatible)] {
+            let fixture = try await start(logLevel: "DEBUG1")
+            let client = try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: preset)
+            await client.close()
+            let negotiated = await waitForLog(fixture, "kex: algorithm: curve25519-sha256")
+            XCTAssertTrue(negotiated, label)
+        }
+    }
+
     // MARK: - 有限域 DH
 
     /// sshd 钉死一种 DH，`RekeyLimit 64K` 让它在 300 KB 输出期间至少换钥一次。顺带量一次握手的耗时（客户端一侧）。

@@ -251,10 +251,12 @@ public struct SSHAlgorithms: Sendable {
         self.allowsLegacyAlgorithms = allowsLegacyAlgorithms
     }
 
-    /// NIOSSH 0.15.2 自带的密钥交换算法，按它的默认顺序（`SSHClientConfiguration.keyExchangeAlgorithms` 的默认值）。
+    /// NIOSSH 0.15.2 自带的密钥交换算法，**按我们的偏好排序**：curve25519 在前，然后是 ECDH 的 P-256 / P-384 / P-521
+    /// （和 OpenSSH 自带算法的先后一致）。NIOSSH 自己的默认顺序是 P-384 排最前、curve25519 排第四；
+    /// curve25519 算得更快，也是主流服务器的首选，所以这里不照搬。集合与 NIOSSH 的默认值相同，只是顺序不同。
     public static let builtInKeyExchangeAlgorithms: [String] = [
-        "ecdh-sha2-nistp384", "ecdh-sha2-nistp256", "ecdh-sha2-nistp521",
         "curve25519-sha256", "curve25519-sha256@libssh.org",
+        "ecdh-sha2-nistp256", "ecdh-sha2-nistp384", "ecdh-sha2-nistp521",
     ]
 
     /// NIOSSH 0.15.2 自带的主机密钥算法，按它的默认顺序。
@@ -264,7 +266,8 @@ public struct SSHAlgorithms: Sendable {
 
     // MARK: 预设
 
-    /// 只用 NIOSSH 自带的：AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥（今天 app 发出去的就是这一套）。
+    /// 只用 NIOSSH 自带的：AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥（今天 app 发出去的就是这一套，
+    /// 只是密钥交换改成 curve25519 优先，见 `builtInKeyExchangeAlgorithms`）。
     /// RSA 用户密钥照样能用（`rsa-sha2-512` → `rsa-sha2-256`），不报、不接受 RSA 主机密钥。
     public static let builtInOnly = SSHAlgorithms()
 
