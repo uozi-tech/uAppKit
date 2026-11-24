@@ -25,6 +25,10 @@ public enum SFTPError: Error, Hashable, Sendable, CustomStringConvertible {
     case handleClosed
     /// 便捷读（`readAll`）读到的数据超过了调用方给的上限。
     case limitExceeded(maximumBytes: Int)
+    /// `readAll(expectedLength:)` 在读满之前就到了文件尾（文件在这期间变短了，或者服务端谎报 EOF）。
+    case shortRead(expected: Int, actual: Int)
+    /// 请求的区间越过了 `UInt64` 的上限（offset + 长度溢出），请求没有发出去。
+    case offsetOutOfRange
 
     /// 服务端状态码；不是 `.status` 时为 nil。
     public var statusCode: SFTPStatusCode? {
@@ -50,6 +54,10 @@ public enum SFTPError: Error, Hashable, Sendable, CustomStringConvertible {
             return "SFTP handle already closed"
         case .limitExceeded(let maximumBytes):
             return "SFTP read exceeded \(maximumBytes) bytes"
+        case .shortRead(let expected, let actual):
+            return "SFTP read ended after \(actual) of \(expected) bytes"
+        case .offsetOutOfRange:
+            return "SFTP offset range overflows UInt64"
         }
     }
 }

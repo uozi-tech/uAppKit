@@ -28,8 +28,9 @@ extension SSHClient {
     /// subsystem 请求成功之后返回；返回的子通道 pipeline 上只收发 `ByteBuffer`（只有通道数据，
     /// 扩展数据被丢掉），字节流协议的 handler 直接加在末尾即可。
     ///
-    /// 请求成功到调用方加上 handler 之间如果对端先发了数据，那些数据会落到 pipeline 末尾被丢掉——
-    /// 对 sftp 这类客户端先说话的协议没有影响；服务器先说话的协议用带 `initializer` 的版本。
+    /// ⚠️ 只适用于**客户端先说话**的协议（sftp：服务端在收到 SSH_FXP_INIT 之前什么也不发）。请求成功到调用方
+    /// 加上 handler 之间对端发来的数据会落到 pipeline 末尾被丢掉；服务端可能先发数据的协议必须用带
+    /// `initializer` 的版本。
     public func openSubsystemChannel(_ name: String) async throws -> any Channel {
         try await openSubsystemChannel(name, initializer: { _ in })
     }
@@ -150,6 +151,7 @@ extension SSHClient {
 
     private struct SessionParts: Sendable {
         var requests: NIOLoopBound<SSHChannelRequestHandler>
+        var outputHandler: NIOLoopBound<SSHSessionOutputHandler>
         var output: SSHChannelOutput
     }
 
@@ -158,6 +160,7 @@ extension SSHClient {
         let parts = NIOLockedValueBox<SessionParts?>(nil)
         let isSubsystem: Bool
         if case .subsystem = start { isSubsystem = true } else { isSubsystem = false }
+        let lifecycle = self.lifecycle
         let channel = try await openChildChannel(type: .session) { child in
             child.setOption(ChannelOptions.allowRemoteHalfClosure, value: true).flatMapThrowing {
                 let requests = SSHChannelRequestHandler(eventLoop: child.eventLoop)
@@ -165,15 +168,19 @@ extension SSHClient {
                 try sync.addHandler(requests)
                 // NIOLoopBound 只能在 EventLoop 上建，输出序列因此总在这里建；subsystem 的句柄用不到它
                 // （数据走 pipeline），那个 handler 不进 pipeline，序列始终是空的。
-                let (handler, producer) = SSHSessionOutputHandler.make(eventLoop: child.eventLoop)
+                let (handler, producer) = SSHSessionOutputHandler.make(eventLoop: child.eventLoop, lifecycle: lifecycle)
                 let output = SSHChannelOutput(producer: producer)
                 if isSubsystem {
                     try sync.addHandler(SSHChannelDataCodec())
                 } else {
                     try sync.addHandler(handler)
                 }
-                let bound = NIOLoopBound(requests, eventLoop: child.eventLoop)
-                parts.withLockedValue { $0 = SessionParts(requests: bound, output: output) }
+                parts.withLockedValue {
+                    $0 = SessionParts(
+                        requests: NIOLoopBound(requests, eventLoop: child.eventLoop),
+                        outputHandler: NIOLoopBound(handler, eventLoop: child.eventLoop),
+                        output: output)
+                }
             }
         }
         guard let session = parts.withLockedValue({ $0 }) else {
@@ -208,14 +215,8 @@ extension SSHClient {
                     SSHChannelRequestEvent.ShellRequest(wantReply: true), kind: .shell, wantReply: true))
             case .subsystem(let name, let initializer):
                 let child = channel
-                handler.onSuccess[.subsystem(name)] = {
-                    do {
-                        try initializer(child)
-                    } catch {
-                        child.pipeline.fireErrorCaught(error)
-                        child.close(promise: nil)
-                    }
-                }
+                // 抛错就让这个请求失败（带那个错误）、关掉通道，openSubsystemChannel 随之抛出。
+                handler.onSuccess[.subsystem(name)] = { try initializer(child) }
                 pending.append(handler.send(
                     SSHChannelRequestEvent.SubsystemRequest(subsystem: name, wantReply: true),
                     kind: .subsystem(name), wantReply: true))
@@ -223,18 +224,26 @@ extension SSHClient {
             return EventLoopFuture.andAllSucceed(pending, on: channel.eventLoop)
         }
         do {
-            try await withTaskCancellationHandler {
-                try await replies.get()
-            } onCancel: {
-                channel.close(promise: nil)
-            }
-            try Task.checkCancellation()
+            // 可取消地等：链路卡死时回应永远不来，任务取消必须能立刻返回。
+            try await replies.getCancellable { _ in }
+        } catch is CancellationError {
+            channel.close(promise: nil)
+            throw CancellationError()
+        } catch let error as SSHChannelError {
+            channel.close(promise: nil)
+            throw error
         } catch {
             channel.close(promise: nil)
-            try Task.checkCancellation()
-            throw mapChannelError(error)
+            if error is NIOSSHError || error is ChannelError { throw await mapChannelError(error) }
+            // subsystem initializer 抛出的错误原样交出。
+            throw error
         }
-        return SSHSessionHandle(channel: channel, output: session.output, requests: requests, lifecycle: lifecycle)
+        if Task.isCancelled {
+            channel.close(promise: nil)
+            throw CancellationError()
+        }
+        return SSHSessionHandle(channel: channel, output: session.output, requests: requests,
+                                outputHandler: session.outputHandler, client: self)
     }
 }
 

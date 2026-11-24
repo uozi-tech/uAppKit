@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -81,10 +83,22 @@ struct SSHPacketParser {
         self.buffer.writeBuffer(&bytes)
     }
 
+    /// Set once strict key exchange was negotiated: from then on every new set of keys restarts the sequence
+    /// number at zero (OpenSSH PROTOCOL §1.10).
+    private var resetsSequenceNumberWithNewKeys = false
+
+    /// Encrypted packets and bytes received under the current keys (for automatic rekeying).
+    private(set) var trafficSinceNewKeys = SSHTrafficCounter()
+
     /// Encryption schemes can be added to a packet parser whenever encryption is negotiated.
     /// They must be added monotonically, and may only be added once, while the parser is in an
     /// idle state.
-    mutating func addEncryption(_ protection: NIOSSHTransportProtection) {
+    mutating func addEncryption(_ protection: NIOSSHTransportProtection, strictKeyExchange: Bool = false) {
+        self.resetsSequenceNumberWithNewKeys = self.resetsSequenceNumberWithNewKeys || strictKeyExchange
+        if self.resetsSequenceNumberWithNewKeys {
+            self.sequenceNumber = 0
+        }
+        self.trafficSinceNewKeys = SSHTrafficCounter()
         switch self.state {
         case .cleartextWaitingForLength:
             self.state = .encryptedWaitingForLength(protection)
@@ -136,6 +150,7 @@ struct SSHPacketParser {
             if let message = try self.parseCiphertext(length: length, protection: protection) {
                 self.state = .encryptedWaitingForLength(protection)
                 self.sequenceNumber &+= 1
+                self.trafficSinceNewKeys.record(bytes: Int(length) + 4)
                 return message
             }
             self.state = .encryptedWaitingForBytes(length, protection)
@@ -144,6 +159,7 @@ struct SSHPacketParser {
             if let message = try self.parseCiphertext(length: length, protection: protection) {
                 self.state = .encryptedWaitingForLength(protection)
                 self.sequenceNumber &+= 1
+                self.trafficSinceNewKeys.record(bytes: Int(length) + 4)
                 return message
             }
             return nil

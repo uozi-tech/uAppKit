@@ -63,7 +63,8 @@ public protocol NIOSSHKeyExchangeAlgorithmProtocol: _NIOSSHSendableMetatype {
     /// `publicValue`), as an unsigned big-endian magnitude. NIOSSH encodes it as an mpint.
     ///
     /// Called once per exchange. Validate the peer's value here (for Diffie-Hellman: `1 < f < p - 1`) and throw if
-    /// it is unacceptable; that aborts the key exchange. A shared secret of zero is rejected by NIOSSH.
+    /// it is unacceptable; that aborts the key exchange. As a backstop NIOSSH rejects an empty peer value, with
+    /// `.mpint` encoding also 0 and 1, and a shared secret of 0 or 1; it cannot check the upper bound.
     mutating func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8]
 }
 
@@ -84,7 +85,8 @@ extension NIOSSHAlgorithms {
     ) {
         for name in KeyExchange.keyExchangeAlgorithmNames {
             precondition(
-                !SSHKeyExchangeStateMachine.supportedKeyExchangeAlgorithms.contains(name),
+                !SSHKeyExchangeStateMachine.supportedKeyExchangeAlgorithms.contains(name)
+                    && !SSHKeyExchangeStateMachine.keyExchangeExtensionMarkerNames.contains(name),
                 "\(name) is a built-in key exchange method"
             )
         }
@@ -236,7 +238,10 @@ struct CustomKeyExchange<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>: Ellipti
         expectedKeySizes: ExpectedKeySizes
     ) throws -> (KeyExchangeResult, Algorithm.Hasher.Digest) {
         let secret = try self.algorithm.sharedSecret(peerPublicValue: peerValue)
-        guard secret.contains(where: { $0 != 0 }) else {
+        // K = 0 or K = 1 means the exchange produced nothing secret (a peer value of 0, 1 or p - 1 in
+        // finite-field Diffie-Hellman). The implementation should have rejected the peer value; check anyway.
+        let significant = secret.drop(while: { $0 == 0 })
+        guard !significant.isEmpty, Array(significant) != [1] else {
             throw NIOSSHError.weakSharedSecret(exchangeAlgorithm: String(Algorithm.keyExchangeAlgorithmNames.first ?? ""))
         }
         var encodedSecret = allocator.buffer(capacity: secret.count + 5)
@@ -276,21 +281,11 @@ struct CustomKeyExchange<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>: Ellipti
         sessionID: ByteBuffer,
         expectedKeySizes: ExpectedKeySizes
     ) -> NIOSSHSessionKeys {
+        var base = Algorithm.Hasher()
+        base.update(data: encodedSecret.readableBytesView)
+        exchangeHash.withUnsafeBytes { base.update(bufferPointer: $0) }
         func derive(_ letter: Character, _ length: Int) -> [UInt8] {
-            var base = Algorithm.Hasher()
-            base.update(data: encodedSecret.readableBytesView)
-            exchangeHash.withUnsafeBytes { base.update(bufferPointer: $0) }
-
-            var first = base
-            first.update(data: [letter.asciiValue!])
-            first.update(data: sessionID.readableBytesView)
-            var key = Array(first.finalize())
-            while key.count < length {
-                var next = base
-                next.update(data: key)
-                key.append(contentsOf: next.finalize())
-            }
-            return Array(key.prefix(length))
+            base.sshDerivedKey(discriminatorByte: letter.asciiValue!, sessionID: sessionID, length: length)
         }
 
         let ivClientToServer = derive("A", expectedKeySizes.ivSize)
@@ -338,6 +333,9 @@ struct CustomKeyExchange<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>: Ellipti
     /// Undoes `wireValue` for the peer's value.
     private static func peerValue(_ wire: ByteBuffer) throws -> [UInt8] {
         let bytes = Array(wire.readableBytesView)
+        guard !bytes.isEmpty else {
+            throw NIOSSHError.invalidSSHMessage(reason: "empty public value in key exchange")
+        }
         switch Algorithm.publicValueEncoding {
         case .string:
             return bytes
@@ -345,7 +343,13 @@ struct CustomKeyExchange<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>: Ellipti
             guard (bytes.first ?? 0) & 0x80 == 0 else {
                 throw NIOSSHError.invalidSSHMessage(reason: "negative mpint in key exchange")
             }
-            return Array(bytes.drop(while: { $0 == 0 }))
+            let magnitude = Array(bytes.drop(while: { $0 == 0 }))
+            // 0 and 1 are never valid Diffie-Hellman public values (RFC 4253 §8 requires 1 < f < p - 1; NIOSSH
+            // does not know p, so the upper bound stays with the implementation).
+            guard !magnitude.isEmpty, magnitude != [1] else {
+                throw NIOSSHError.invalidSSHMessage(reason: "degenerate public value in key exchange")
+            }
+            return magnitude
         }
     }
 

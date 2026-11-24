@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 12:56:21 +0800
+Subject: [PATCH 10/14] =?UTF-8?q?NIOSSH:=20=E5=85=AC=E5=BC=80=20CHANNEL=5F?=
+ =?UTF-8?q?OPEN=5FFAILURE=20=E7=9A=84=E5=8E=9F=E5=9B=A0=E7=A0=81=EF=BC=88c?=
+ =?UTF-8?q?hannel=20open=20failure=20reason=20code=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+对端拒绝打开 channel 时 NIOSSH 抛 NIOSSHError.channelSetupRejected，RFC 4254 §5.1 的原因码
+（1 管理上禁止、2 连接失败、3 未知 channel 类型、4 资源不足）只写进了不公开的诊断字符串，调用方只能去
+解析 description。客户端层要靠它区分「服务端禁止转发」和「目标连不上」，给出不同的提示。
+
+NIOSSHError 多存一个 private 的 (reasonCode, description)，只由 channelSetupRejected 设；新增公开的
+channelOpenFailureReasonCode / channelOpenFailureDescription，其他错误为 nil。NIOSSHError 本来就不可比较，
+既有的构造方式不变。
+
+测试（ChannelOpenFailureTests）：构造出的错误带出原因码与描述、其他错误为 nil；端到端由拒绝一切 channel 的
+NIOSSH 服务端回 OPEN_FAILURE（原因码 2），客户端拿到的错误带着它。
+
+可以提给上游。
+---
+ Sources/NIOSSH/NIOSSHError.swift              | 23 ++++++-
+ .../NIOSSHTests/ChannelOpenFailureTests.swift | 67 +++++++++++++++++++
+ 2 files changed, 89 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/NIOSSHTests/ChannelOpenFailureTests.swift
+
+diff --git a/Sources/NIOSSH/NIOSSHError.swift b/Sources/NIOSSH/NIOSSHError.swift
+index c2b8a54..ade9823 100644
+--- a/Sources/NIOSSH/NIOSSHError.swift
++++ b/Sources/NIOSSH/NIOSSHError.swift
+@@ -27,6 +27,23 @@ public struct NIOSSHError: Error {
+     public var type: ErrorType
+ 
+     private var diagnostics: String?
++
++    /// For `.channelSetupRejected`: the reason code and description of SSH_MSG_CHANNEL_OPEN_FAILURE.
++    private var channelOpenFailure: (reasonCode: UInt32, description: String)? = nil
++}
++
++extension NIOSSHError {
++    /// For a `.channelSetupRejected` error, the reason code of the SSH_MSG_CHANNEL_OPEN_FAILURE (RFC 4254 §5.1:
++    /// 1 administratively prohibited, 2 connect failed, 3 unknown channel type, 4 resource shortage, or a
++    /// private code). `nil` for every other error.
++    public var channelOpenFailureReasonCode: UInt32? {
++        self.channelOpenFailure?.reasonCode
++    }
++
++    /// For a `.channelSetupRejected` error, the peer's human-readable description (may be empty). `nil` otherwise.
++    public var channelOpenFailureDescription: String? {
++        self.channelOpenFailure?.description
++    }
+ }
+ 
+ // MARK: - Internal helper functions for error construction.
+@@ -103,7 +120,11 @@ extension NIOSSHError {
+ 
+     @inline(never)
+     internal static func channelSetupRejected(reasonCode: UInt32, reason: String) -> NIOSSHError {
+-        NIOSSHError(type: .channelSetupRejected, diagnostics: "Reason: \(reasonCode) \(reason)")
++        NIOSSHError(
++            type: .channelSetupRejected,
++            diagnostics: "Reason: \(reasonCode) \(reason)",
++            channelOpenFailure: (reasonCode, reason)
++        )
+     }
+ 
+     @inline(never)
+diff --git a/Tests/NIOSSHTests/ChannelOpenFailureTests.swift b/Tests/NIOSSHTests/ChannelOpenFailureTests.swift
+new file mode 100644
+index 0000000..e023cf7
+--- /dev/null
++++ b/Tests/NIOSSHTests/ChannelOpenFailureTests.swift
+@@ -0,0 +1,67 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++final class ChannelOpenFailureTests: XCTestCase {
++    func testReasonCodeIsExposed() {
++        let error = NIOSSHError.channelSetupRejected(reasonCode: 1, reason: "administratively prohibited")
++        XCTAssertEqual(error.type, .channelSetupRejected)
++        XCTAssertEqual(error.channelOpenFailureReasonCode, 1)
++        XCTAssertEqual(error.channelOpenFailureDescription, "administratively prohibited")
++
++        XCTAssertNil(NIOSSHError.tcpShutdown.channelOpenFailureReasonCode)
++        XCTAssertNil(NIOSSHError.tcpShutdown.channelOpenFailureDescription)
++    }
++
++    func testPeerRejectionCarriesTheReasonCode() throws {
++        let channel = BackToBackEmbeddedChannel()
++        defer { XCTAssertNoThrow(try channel.finish()) }
++
++        enum Refused: Error { case no }
++        let clientHandler = NIOSSHHandler(
++            role: .client(
++                .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
++            ),
++            allocator: channel.client.allocator,
++            inboundChildChannelInitializer: nil
++        )
++        // The server refuses every channel: NIOSSH answers with SSH_MSG_CHANNEL_OPEN_FAILURE, reason 2.
++        let serverHandler = NIOSSHHandler(
++            role: .server(
++                .init(hostKeys: [.init(ed25519Key: .init())], userAuthDelegate: DenyThenAcceptDelegate(messagesToDeny: 0))
++            ),
++            allocator: channel.server.allocator
++        ) { child, _ in
++            child.eventLoop.makeFailedFuture(Refused.no)
++        }
++        XCTAssertNoThrow(try channel.client.pipeline.syncOperations.addHandler(clientHandler))
++        XCTAssertNoThrow(try channel.server.pipeline.syncOperations.addHandler(serverHandler))
++        XCTAssertNoThrow(try channel.activate())
++        XCTAssertNoThrow(try channel.interactInMemory())
++
++        let promise = channel.client.eventLoop.makePromise(of: Channel.self)
++        clientHandler.createChannel(promise) { child, _ in child.eventLoop.makeSucceededVoidFuture() }
++        XCTAssertNoThrow(try channel.interactInMemory())
++        XCTAssertThrowsError(try promise.futureResult.wait()) { error in
++            let error = error as? NIOSSHError
++            XCTAssertEqual(error?.type, .channelSetupRejected)
++            XCTAssertEqual(error?.channelOpenFailureReasonCode, 2)
++            XCTAssertEqual(error?.channelOpenFailureDescription, "")
++        }
++    }
++}

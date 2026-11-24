@@ -1,0 +1,208 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 12:57:35 +0800
+Subject: [PATCH 11/14] =?UTF-8?q?NIOSSH:=20=E5=AE=A2=E6=88=B7=E7=AB=AF?=
+ =?UTF-8?q?=E8=AE=A4=E8=AF=81=E5=A7=94=E6=89=98=E6=B2=A1=E6=9C=89=E5=8F=AF?=
+ =?UTF-8?q?=E6=8F=90=E4=BE=9B=E7=9A=84=E4=BA=86=E5=B0=B1=E7=AB=8B=E5=8D=B3?=
+ =?UTF-8?q?=E6=8A=A5=E9=94=99=EF=BC=8C=E4=B8=8D=E5=86=8D=E6=8C=82=E4=BD=8F?=
+ =?UTF-8?q?=EF=BC=88authentication=20offers=20exhausted=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+NIOSSHClientUserAuthenticationDelegate 用 nil 完成 promise 表示「没有更多可试的认证方式」。NIOSSH 收到 nil
+之后什么也不做（UserAuthenticationStateMachine.noFurtherMethods 存在但没人调用），连接就停在认证阶段，直到
+对端超时断开；客户端层只能自己判断委托用完了、再去关连接。
+
+AcceptsUserAuthMessages 里把请求转成待发消息的 transform 改成遇到 nil 抛新的
+NIOSSHError.ErrorType.noFurtherAuthenticationOffers（经 flatMapThrowing，两处调用点各改一行），错误照常经
+fireErrorCaught 交给 pipeline，由使用方决定关连接。只影响客户端（服务端不走这条路径），内部的
+UserAuthenticationStateMachine 及其测试不变。
+
+测试（AuthenticationOffersExhaustedTests）：委托一开始就没有可提供的、唯一的一次尝试被拒之后，都以
+noFurtherAuthenticationOffers 结束；正常认证不受影响。UnregisteredCustomKeyTests 里「没登记的用户密钥被拒」
+的用例从「不报错但不认证」改成断言这个错误。
+
+可以提给上游（行为变化：以前挂住的连接现在报错）。
+---
+ .../Operations/AcceptsUserAuthMessages.swift  | 17 +++--
+ Sources/NIOSSH/NIOSSHError.swift              | 10 +++
+ .../AuthenticationOffersExhaustedTests.swift  | 75 +++++++++++++++++++
+ Tests/NIOSSHTests/CustomKeyTests.swift        |  6 +-
+ 4 files changed, 100 insertions(+), 8 deletions(-)
+ create mode 100644 Tests/NIOSSHTests/AuthenticationOffersExhaustedTests.swift
+
+diff --git a/Sources/NIOSSH/Connection State Machine/Operations/AcceptsUserAuthMessages.swift b/Sources/NIOSSH/Connection State Machine/Operations/AcceptsUserAuthMessages.swift
+index 4cb943c..33fc190 100644
+--- a/Sources/NIOSSH/Connection State Machine/Operations/AcceptsUserAuthMessages.swift	
++++ b/Sources/NIOSSH/Connection State Machine/Operations/AcceptsUserAuthMessages.swift	
+@@ -59,8 +59,8 @@ extension AcceptsUserAuthMessages {
+ 
+         if let future = result {
+             return .possibleFutureMessage(
+-                future.map {
+-                    Self.transform($0)
++                future.flatMapThrowing {
++                    try Self.transform($0)
+                 }
+             )
+         } else {
+@@ -102,8 +102,8 @@ extension AcceptsUserAuthMessages {
+ 
+         if let future = result {
+             return .possibleFutureMessage(
+-                future.map {
+-                    Self.transform($0)
++                future.flatMapThrowing {
++                    try Self.transform($0)
+                 }
+             )
+         } else {
+@@ -143,7 +143,12 @@ extension AcceptsUserAuthMessages {
+         }
+     }
+ 
+-    private static func transform(_ result: SSHMessage.UserAuthRequestMessage?) -> SSHMultiMessage? {
+-        result.map { SSHMultiMessage(.userAuthRequest($0)) }
++    private static func transform(_ result: SSHMessage.UserAuthRequestMessage?) throws -> SSHMultiMessage? {
++        // The client's delegate has nothing more to offer: authentication has failed. Say so instead of leaving
++        // the connection waiting forever.
++        guard let result = result else {
++            throw NIOSSHError.noFurtherAuthenticationOffers
++        }
++        return SSHMultiMessage(.userAuthRequest(result))
+     }
+ }
+diff --git a/Sources/NIOSSH/NIOSSHError.swift b/Sources/NIOSSH/NIOSSHError.swift
+index ade9823..51a7ba4 100644
+--- a/Sources/NIOSSH/NIOSSHError.swift
++++ b/Sources/NIOSSH/NIOSSHError.swift
+@@ -141,6 +141,11 @@ extension NIOSSHError {
+ 
+     internal static let invalidUserAuthSignature = NIOSSHError(type: .invalidUserAuthSignature, diagnostics: nil)
+ 
++    internal static let noFurtherAuthenticationOffers = NIOSSHError(
++        type: .noFurtherAuthenticationOffers,
++        diagnostics: "The user authentication delegate has no further offers"
++    )
++
+     @inline(never)
+     internal static func unknownPacketType(diagnostic: String) -> NIOSSHError {
+         NIOSSHError(type: .unknownPacketType, diagnostics: diagnostic)
+@@ -228,6 +233,7 @@ extension NIOSSHError {
+             case invalidHostKeyForKeyExchange
+             case invalidOpenSSHPublicKey
+             case invalidCertificate
++            case noFurtherAuthenticationOffers
+         }
+ 
+         private var base: Base
+@@ -325,6 +331,10 @@ extension NIOSSHError {
+ 
+         /// A certificate failed validation.
+         public static let invalidCertificate: ErrorType = .init(.invalidCertificate)
++
++        /// The client's user authentication delegate offered nothing more (completed its promise with `nil`)
++        /// before the server accepted an offer: user authentication has failed.
++        public static let noFurtherAuthenticationOffers: ErrorType = .init(.noFurtherAuthenticationOffers)
+     }
+ }
+ 
+diff --git a/Tests/NIOSSHTests/AuthenticationOffersExhaustedTests.swift b/Tests/NIOSSHTests/AuthenticationOffersExhaustedTests.swift
+new file mode 100644
+index 0000000..527f2ca
+--- /dev/null
++++ b/Tests/NIOSSHTests/AuthenticationOffersExhaustedTests.swift
+@@ -0,0 +1,75 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++/// A client delegate whose offers run out: authentication fails with an error instead of hanging.
++final class AuthenticationOffersExhaustedTests: XCTestCase {
++    private var channel: BackToBackEmbeddedChannel!
++
++    override func setUp() {
++        super.setUp()
++        self.channel = BackToBackEmbeddedChannel()
++    }
++
++    override func tearDown() {
++        try? self.channel.finish()
++        self.channel = nil
++        super.tearDown()
++    }
++
++    final class NothingToOffer: NIOSSHClientUserAuthenticationDelegate {
++        func nextAuthenticationType(
++            availableMethods: NIOSSHAvailableUserAuthenticationMethods,
++            nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
++        ) {
++            nextChallengePromise.succeed(nil)
++        }
++    }
++
++    func testNoOfferAtAllFailsAuthentication() throws {
++        var harness = TestHarness()
++        harness.clientAuthDelegate = NothingToOffer()
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .noFurtherAuthenticationOffers)
++        }
++    }
++
++    func testRejectedLastOfferFailsAuthentication() throws {
++        var harness = TestHarness()
++        harness.clientAuthDelegate = SimplePasswordDelegate(username: "foo", password: "wrong")
++        harness.serverAuthDelegate = DenyThenAcceptDelegate(messagesToDeny: 1)
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .noFurtherAuthenticationOffers)
++        }
++    }
++
++    func testSuccessfulOffersAreUnaffected() throws {
++        var harness = TestHarness()
++        harness.clientAuthDelegate = SimplePasswordDelegate(username: "foo", password: "right")
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        self.channel.clientSSHHandler?.createChannel(nil, nil)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(self.channel.activeServerChannels.count, 1)
++    }
++}
+diff --git a/Tests/NIOSSHTests/CustomKeyTests.swift b/Tests/NIOSSHTests/CustomKeyTests.swift
+index 7eef49d..9fe1f8e 100644
+--- a/Tests/NIOSSHTests/CustomKeyTests.swift
++++ b/Tests/NIOSSHTests/CustomKeyTests.swift
+@@ -708,8 +708,10 @@ final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
+         XCTAssertNoThrow(try self.channel.client.pipeline.syncOperations.addHandler(successes))
+         XCTAssertNoThrow(try self.channel.activate())
+         // The server does not know the algorithm: it answers with a failure without consulting its delegate, the
+-        // client has nothing else to offer, and the connection never authenticates. Nothing traps.
+-        XCTAssertNoThrow(try self.channel.interactInMemory())
++        // client has nothing else to offer, and authentication fails cleanly. Nothing traps.
++        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .noFurtherAuthenticationOffers)
++        }
+         XCTAssertEqual(serverAuth.requests, 0)
+         XCTAssertEqual(successes.successes, 0)
+     }

@@ -14,6 +14,8 @@ final class SSHTestGlueHandler: ChannelDuplexHandler {
     private var partner: SSHTestGlueHandler?
     private var context: ChannelHandlerContext?
     private var pendingRead = false
+    /// 最后一笔写入：半关闭要等它真的写出去。NIO 的 socket 在 `close(mode: .output)` 时会让还没写出的数据失败。
+    private var lastWrite: EventLoopFuture<Void>?
 
     static func pair() -> (SSHTestGlueHandler, SSHTestGlueHandler) {
         let first = SSHTestGlueHandler()
@@ -33,7 +35,10 @@ final class SSHTestGlueHandler: ChannelDuplexHandler {
     }
 
     private func partnerWrite(_ data: NIOAny) {
-        context?.write(data, promise: nil)
+        guard let context else { return }
+        let promise = context.eventLoop.makePromise(of: Void.self)
+        lastWrite = promise.futureResult
+        context.write(data, promise: promise)
     }
 
     private func partnerFlush() {
@@ -41,7 +46,14 @@ final class SSHTestGlueHandler: ChannelDuplexHandler {
     }
 
     private func partnerWriteEOF() {
-        context?.close(mode: .output, promise: nil)
+        guard let context else { return }
+        // 对端的 EOF 可能和最后一块数据在同一批里到、排在 channelReadComplete 之前：先冲出去，等写完再半关。
+        context.flush()
+        if let lastWrite {
+            lastWrite.assumeIsolated().whenComplete { _ in context.close(mode: .output, promise: nil) }
+        } else {
+            context.close(mode: .output, promise: nil)
+        }
     }
 
     private func partnerCloseFull() {

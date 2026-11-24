@@ -319,9 +319,12 @@ final class SSHClientConnectionTests: XCTestCase {
         configuration.maximumPacketSize = 1
         XCTAssertEqual(configuration.effectiveMaximumPacketSize, 32_768)
         configuration.maximumPacketSize = .max
-        XCTAssertEqual(configuration.effectiveMaximumPacketSize, 1 << 24)
-        configuration.maximumPacketSize = 1 << 20
-        XCTAssertEqual(configuration.channelWindowSize, 64 << 20)
+        XCTAssertEqual(configuration.effectiveMaximumPacketSize, 1 << 19)
+        configuration.maximumPacketSize = 1 << 24
+        XCTAssertEqual(configuration.effectiveMaximumPacketSize, 1 << 19)
+        XCTAssertEqual(configuration.channelWindowSize, 32 << 20)
+        configuration.maximumPacketSize = 1 << 18
+        XCTAssertEqual(configuration.channelWindowSize, 16 << 20)
     }
 
     // MARK: - 跳板机
@@ -370,7 +373,8 @@ final class SSHClientConnectionTests: XCTestCase {
         try await probe.close()
         await XCTAssertThrowsAsync(try await outer.jump(
             to: "127.0.0.1", port: port, configuration: Harness.clientConfiguration())) { error in
-            guard case SSHChannelError.openRejected = error else { return XCTFail("unexpected \(error)") }
+            guard case SSHChannelError.openRejected(let failure) = error else { return XCTFail("unexpected \(error)") }
+            XCTAssertEqual(failure.reason, .connectFailed)
         }
         XCTAssertTrue(outer.isConnected)
         await outer.close()

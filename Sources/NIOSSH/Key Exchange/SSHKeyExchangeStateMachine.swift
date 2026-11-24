@@ -95,6 +95,19 @@ struct SSHKeyExchangeStateMachine {
     private var protectionSchemes: [NIOSSHTransportProtection.Type]
     private var previousSessionIdentifier: ByteBuffer?
 
+    /// The key exchange and host key algorithms of this key exchange, read once from the configuration and the
+    /// algorithm registry when it starts: what we offer in KEXINIT is exactly what we negotiate with, even if an
+    /// algorithm is registered in between.
+    private let configuredKeyExchangeAlgorithms: [Substring]
+    private let supportedHostKeyAlgorithms: [Substring]
+
+    /// Whether this is the initial key exchange and both peers announced strict key exchange
+    /// (OpenSSH `PROTOCOL` §1.10, the Terrapin mitigation). Decided when the peer's KEXINIT arrives.
+    private(set) var isStrictKeyExchange = false
+
+    /// Whether this is the initial key exchange and the client announced `ext-info-c` (RFC 8308).
+    private(set) var peerAcceptsExtensionInfo = false
+
     init(
         allocator: ByteBufferAllocator,
         loop: EventLoop,
@@ -110,6 +123,8 @@ struct SSHKeyExchangeStateMachine {
         self.state = .idle
         self.protectionSchemes = protectionSchemes
         self.previousSessionIdentifier = previousSessionIdentifier
+        self.configuredKeyExchangeAlgorithms = Self.configuredKeyExchangeAlgorithms(role: role)
+        self.supportedHostKeyAlgorithms = Self.supportedHostKeyAlgorithms(role: role)
 
         switch self.role {
         case .client:
@@ -131,7 +146,7 @@ struct SSHKeyExchangeStateMachine {
 
         return .init(
             cookie: rng.randomCookie(allocator: self.allocator),
-            keyExchangeAlgorithms: self.configuredKeyExchangeAlgorithms,
+            keyExchangeAlgorithms: self.configuredKeyExchangeAlgorithms + self.keyExchangeExtensionMarkers,
             serverHostKeyAlgorithms: self.supportedHostKeyAlgorithms,
             encryptionAlgorithmsClientToServer: encryptionAlgorithms,
             encryptionAlgorithmsServerToClient: encryptionAlgorithms,
@@ -146,6 +161,11 @@ struct SSHKeyExchangeStateMachine {
     }
 
     mutating func handle(keyExchange message: SSHMessage.KeyExchangeMessage) throws -> SSHMultiMessage? {
+        self.isStrictKeyExchange = self.peerAgreesToStrictKeyExchange(message)
+        self.peerAcceptsExtensionInfo =
+            self.previousSessionIdentifier == nil && self.role.isServer
+            && message.keyExchangeAlgorithms.contains(Self.extensionInfoClientMarker)
+
         switch self.state {
         case .keyExchangeSent(message: let ourMessage):
             switch self.role {
@@ -570,8 +590,8 @@ struct SSHKeyExchangeStateMachine {
 
     /// The key exchange methods from the configuration, in order of preference, keeping only those we can run:
     /// built-in ones and registered custom ones.
-    private var configuredKeyExchangeAlgorithms: [Substring] {
-        self.role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
+    private static func configuredKeyExchangeAlgorithms(role: SSHConnectionRole) -> [Substring] {
+        role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
             Self.supportedKeyExchangeAlgorithms.contains(name) || NIOSSHAlgorithms.keyExchangeType(named: name) != nil
         }
     }
@@ -584,12 +604,17 @@ struct SSHKeyExchangeStateMachine {
     }
 
     // The host key algorithms supported by this peer, in order of preference.
-    private var supportedHostKeyAlgorithms: [Substring] {
-        switch self.role {
-        case .client:
-            // Registered custom algorithms follow the built-in ones.
-            return Self.supportedServerHostKeyAlgorithms
+    private static func supportedHostKeyAlgorithms(role: SSHConnectionRole) -> [Substring] {
+        switch role {
+        case .client(let configuration):
+            // Registered custom algorithms follow the built-in ones, unless the configuration picks and orders them.
+            let available =
+                Self.supportedServerHostKeyAlgorithms
                 + NIOSSHAlgorithms.registeredPublicKeyAlgorithms.map { Substring($0) }
+            guard let configured = configuration.hostKeyAlgorithms else {
+                return available
+            }
+            return configured.map { Substring($0) }.filter { available.contains($0) }
         case .server(let configuration):
             return configuration.hostKeys.flatMap { $0.hostKeyAlgorithms }
         }
@@ -680,6 +705,69 @@ extension SSHKeyExchangeStateMachine {
             .newKeysSent(_, _, let negotiated):
             return negotiated.negotiatedHostKeyAlgorithm
         }
+    }
+}
+
+// MARK: Strict key exchange (OpenSSH PROTOCOL §1.10, CVE-2023-48795)
+
+extension SSHKeyExchangeStateMachine {
+    static let strictKeyExchangeClientMarker: Substring = "kex-strict-c-v00@openssh.com"
+    static let strictKeyExchangeServerMarker: Substring = "kex-strict-s-v00@openssh.com"
+
+    /// Pseudo-algorithms that announce protocol extensions in the KEXINIT algorithm list. They are never
+    /// negotiated: our own configured list never contains them.
+    static var keyExchangeExtensionMarkerNames: [Substring] {
+        [
+            Self.strictKeyExchangeClientMarker, Self.strictKeyExchangeServerMarker, Self.extensionInfoClientMarker,
+            "ext-info-s",
+        ]
+    }
+
+    /// Whether we announce strict key exchange at all (tests turn it off to play an old peer).
+    private var offersStrictKeyExchange: Bool {
+        switch self.role {
+        case .client(let configuration):
+            return configuration.offersStrictKeyExchange
+        case .server(let configuration):
+            return configuration.offersStrictKeyExchange
+        }
+    }
+
+    /// The markers appended to our KEXINIT: only in the first one of the connection.
+    private var keyExchangeExtensionMarkers: [Substring] {
+        guard self.previousSessionIdentifier == nil else {
+            return []
+        }
+        var markers: [Substring] = []
+        if self.role.isClient {
+            // RFC 8308: we accept SSH_MSG_EXT_INFO.
+            markers.append(Self.extensionInfoClientMarker)
+        }
+        if self.offersStrictKeyExchange {
+            markers.append(self.role.isClient ? Self.strictKeyExchangeClientMarker : Self.strictKeyExchangeServerMarker)
+        }
+        return markers
+    }
+
+    /// The SSH_MSG_EXT_INFO a server sends right after its first SSH_MSG_NEWKEYS: only if the client announced
+    /// `ext-info-c` and the configuration has `serverSignatureAlgorithms`.
+    var extensionInfoToSend: SSHMessage.ExtensionInfoMessage? {
+        guard self.peerAcceptsExtensionInfo, case .server(let configuration) = self.role,
+            let algorithms = configuration.serverSignatureAlgorithms
+        else {
+            return nil
+        }
+        return .init(extensions: [
+            .init(name: "server-sig-algs", value: ByteBuffer(string: algorithms.joined(separator: ",")))
+        ])
+    }
+
+    private func peerAgreesToStrictKeyExchange(_ message: SSHMessage.KeyExchangeMessage) -> Bool {
+        guard self.previousSessionIdentifier == nil, self.offersStrictKeyExchange else {
+            return false
+        }
+        let peerMarker = self.role.isClient ? Self.strictKeyExchangeServerMarker : Self.strictKeyExchangeClientMarker
+        return message.keyExchangeAlgorithms.contains(peerMarker)
     }
 }
 

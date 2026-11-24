@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -171,7 +173,8 @@ struct SSHConnectionStateMachine {
                         self = .receivedDisconnect(state.role)
                         return .disconnect
                     case .ignore, .debug:
-                        // Ignore these
+                        // Ignore these, except during a strict initial key exchange.
+                        try state.validateNonKeyExchangeMessage(message)
                         self = .keyExchange(state)
                         return .noMessage
                     case .unimplemented(let unimplemented):
@@ -230,7 +233,8 @@ struct SSHConnectionStateMachine {
                         self = .receivedDisconnect(state.role)
                         return .disconnect
                     case .ignore, .debug:
-                        // Ignore these
+                        // Ignore these, except during a strict initial key exchange.
+                        try state.validateNonKeyExchangeMessage(message)
                         self = .sentNewKeys(state)
                         return .noMessage
                     case .unimplemented(let unimplemented):
@@ -277,6 +281,12 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveServiceRequest(message)
                         self = .receivedNewKeys(state)
                         return result
+
+                    case .extensionInfo(let message):
+                        // RFC 8308: the server's first message under the new keys.
+                        state.userAuthStateMachine.receiveExtensionInfo(message)
+                        self = .receivedNewKeys(state)
+                        return .noMessage
 
                     case .disconnect:
                         self = .receivedDisconnect(state.role)
@@ -325,6 +335,12 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveServiceAccept(message)
                         self = .userAuthentication(state)
                         return result
+
+                    case .extensionInfo(let message):
+                        // RFC 8308: right after the server's NEWKEYS, or right before USERAUTH_SUCCESS.
+                        state.userAuthStateMachine.receiveExtensionInfo(message)
+                        self = .userAuthentication(state)
+                        return .noMessage
 
                     case .userAuthRequest(let message):
                         let result = try state.receiveUserAuthRequest(message)
@@ -1246,6 +1262,28 @@ extension SSHConnectionStateMachine {
         case .idle, .sentVersion, .keyExchange, .receivedNewKeys, .sentNewKeys, .userAuthentication,
             .receivedKexInitWhenActive, .sentKexInitWhenActive, .rekeying, .rekeyingReceivedNewKeysState,
             .rekeyingSentNewKeysState, .receivedDisconnect, .sentDisconnect:
+            return false
+        }
+    }
+
+    /// Encrypted traffic in each direction since the last key exchange. Only while active: the one state a key
+    /// re-exchange can be started from.
+    var trafficSinceKeyExchange: (inbound: SSHTrafficCounter, outbound: SSHTrafficCounter)? {
+        guard case .active(let state) = self.state else {
+            return nil
+        }
+        return (state.parser.trafficSinceNewKeys, state.serializer.trafficSinceNewKeys)
+    }
+
+    /// Whether channel messages may be sent now. During a key exchange they may not, from our KEXINIT until our
+    /// NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
+    var canSendChannelMessages: Bool {
+        switch self.state {
+        case .active, .rekeyingSentNewKeysState:
+            return true
+        case .idle, .sentVersion, .keyExchange, .receivedNewKeys, .sentNewKeys, .userAuthentication,
+            .receivedKexInitWhenActive, .sentKexInitWhenActive, .rekeying, .rekeyingReceivedNewKeysState,
+            .receivedDisconnect, .sentDisconnect:
             return false
         }
     }

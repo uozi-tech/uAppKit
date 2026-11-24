@@ -464,6 +464,192 @@ final class CustomKeyTests: CustomAlgorithmTestCase {
     }
 }
 
+/// Per-connection host key algorithms, certificate authority signatures and reserved names.
+final class CustomKeyPolicyTests: CustomAlgorithmTestCase {
+    private var channel: BackToBackEmbeddedChannel!
+    private let ed25519 = Curve25519.Signing.PrivateKey()
+
+    override func setUp() {
+        super.setUp()
+        self.channel = BackToBackEmbeddedChannel()
+    }
+
+    override func tearDown() {
+        try? self.channel.finish()
+        self.channel = nil
+        super.tearDown()
+    }
+
+    private func connect(clientHostKeyAlgorithms: [String]?, hostKeys: [NIOSSHPrivateKey]) throws -> RecordingHostKeyDelegate {
+        let recorder = RecordingHostKeyDelegate()
+        var client = SSHClientConfiguration(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: recorder)
+        client.hostKeyAlgorithms = clientHostKeyAlgorithms
+        let server = SSHServerConfiguration(hostKeys: hostKeys, userAuthDelegate: DenyThenAcceptDelegate(messagesToDeny: 0))
+        try self.channel.client.pipeline.syncOperations.addHandler(
+            NIOSSHHandler(role: .client(client), allocator: self.channel.client.allocator, inboundChildChannelInitializer: nil)
+        )
+        try self.channel.server.pipeline.syncOperations.addHandler(
+            NIOSSHHandler(role: .server(server), allocator: self.channel.server.allocator) { channel, _ in
+                channel.eventLoop.makeSucceededVoidFuture()
+            }
+        )
+        try self.channel.activate()
+        return recorder
+    }
+
+    func testHostKeyAlgorithmsConfigurationFiltersAndOrders() {
+        var configuration = SSHClientConfiguration(
+            userAuthDelegate: InfinitePasswordDelegate(),
+            serverAuthDelegate: AcceptAllHostKeysDelegate()
+        )
+        configuration.hostKeyAlgorithms = [ToyAltSignature.signaturePrefix, "ssh-ed25519", "not-registered@test.uappkit"]
+        let client = SSHKeyExchangeStateMachine(
+            allocator: ByteBufferAllocator(),
+            loop: EmbeddedEventLoop(),
+            role: .client(configuration),
+            remoteVersion: Constants.version,
+            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
+            previousSessionIdentifier: nil
+        )
+        XCTAssertEqual(
+            client.createKeyExchangeMessage().serverHostKeyAlgorithms,
+            [Substring(ToyAltSignature.signaturePrefix), "ssh-ed25519"]
+        )
+    }
+
+    func testConfiguredHostKeyAlgorithmIsTheOneNegotiated() throws {
+        // The server offers the same key under both algorithms, preferring toy-sig-alt; the client only allows toy-sig.
+        let recorder = try self.connect(
+            clientHostKeyAlgorithms: [ToySignature.signaturePrefix],
+            hostKeys: [
+                NIOSSHPrivateKey(custom: ToyAltPrivateKey(key: self.ed25519)),
+                NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519)),
+            ]
+        )
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertEqual(recorder.hostKeys, [NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey))])
+    }
+
+    func testRegisteredAlgorithmCanBeExcludedPerConnection() throws {
+        // Registered process-wide, but this connection only accepts ed25519: a toy-only server is refused.
+        _ = try self.connect(
+            clientHostKeyAlgorithms: ["ssh-ed25519"],
+            hostKeys: [NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))]
+        )
+        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .keyExchangeNegotiationFailure)
+        }
+    }
+
+    // MARK: Certificates signed by a custom authority
+
+    private func certificate(
+        authority: NIOSSHPublicKey,
+        sign: (ByteBuffer) throws -> NIOSSHSignature
+    ) throws -> NIOSSHCertifiedPublicKey {
+        let placeholder = try NIOSSHPrivateKey(ed25519Key: .init()).sign(digest: SHA256.hash(data: [UInt8]()))
+        var certificate = try NIOSSHCertifiedPublicKey(
+            nonce: ByteBuffer(bytes: [1, 2, 3]),
+            serial: 1,
+            type: .user,
+            key: NIOSSHPrivateKey(ed25519Key: .init()).publicKey,
+            keyID: "toy",
+            validPrincipals: ["foo"],
+            validAfter: 1_000_000_000,
+            validBefore: 4_000_000_000,
+            criticalOptions: [:],
+            extensions: [:],
+            signatureKey: authority,
+            signature: placeholder
+        )
+        certificate.signature = try sign(certificate.signableBytes)
+        return certificate
+    }
+
+    private func certificate(signedWith signer: some NIOSSHPrivateKeyProtocol) throws -> NIOSSHCertifiedPublicKey {
+        try self.certificate(authority: NIOSSHPublicKey(custom: signer.publicKey as! ToyPublicKey)) { bytes in
+            NIOSSHSignature(backingSignature: .custom(try signer.signature(for: bytes.readableBytesView)))
+        }
+    }
+
+    func testCertificateAuthoritySignatureHonoursTheAllowedAlgorithms() throws {
+        let certificate = try self.certificate(signedWith: ToyAltPrivateKey(key: self.ed25519))
+        let authority = certificate.signatureKey
+
+        XCTAssertNoThrow(try certificate.validate(principal: "foo", type: .user, allowedAuthoritySigningKeys: [authority]))
+        XCTAssertNoThrow(
+            try certificate.validate(
+                principal: "foo",
+                type: .user,
+                allowedAuthoritySigningKeys: [authority],
+                allowedSignatureAlgorithms: [ToyAltSignature.signaturePrefix]
+            )
+        )
+        XCTAssertThrowsError(
+            try certificate.validate(
+                principal: "foo",
+                type: .user,
+                allowedAuthoritySigningKeys: [authority],
+                allowedSignatureAlgorithms: [ToySignature.signaturePrefix, "ssh-ed25519"]
+            )
+        ) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidCertificate)
+        }
+
+        // The signature's algorithm must also be registered for the authority's key type.
+        NIOSSHAlgorithms._unregisterAllPublicKeyAlgorithms()
+        NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToySignature.self)
+        XCTAssertThrowsError(
+            try certificate.validate(principal: "foo", type: .user, allowedAuthoritySigningKeys: [authority])
+        ) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidCertificate)
+        }
+    }
+
+    func testBuiltInAuthoritiesAreUnaffectedByTheAlgorithmCheck() throws {
+        let authority = Curve25519.Signing.PrivateKey()
+        let certificate = try self.certificate(authority: NIOSSHPrivateKey(ed25519Key: authority).publicKey) { bytes in
+            NIOSSHSignature(backingSignature: .ed25519(.data(try authority.signature(for: bytes.readableBytesView))))
+        }
+        XCTAssertNoThrow(
+            try certificate.validate(principal: "foo", type: .user, allowedAuthoritySigningKeys: [certificate.signatureKey])
+        )
+        XCTAssertNoThrow(
+            try certificate.validate(
+                principal: "foo",
+                type: .user,
+                allowedAuthoritySigningKeys: [certificate.signatureKey],
+                allowedSignatureAlgorithms: ["ssh-ed25519"]
+            )
+        )
+        XCTAssertThrowsError(
+            try certificate.validate(
+                principal: "foo",
+                type: .user,
+                allowedAuthoritySigningKeys: [certificate.signatureKey],
+                allowedSignatureAlgorithms: ["ecdsa-sha2-nistp256"]
+            )
+        ) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidCertificate)
+        }
+    }
+
+    // MARK: Reserved names
+
+    func testBuiltInAndCertificateNamesAreReserved() {
+        for name in [
+            "ssh-ed25519", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521",
+            "ssh-ed25519-cert-v01@openssh.com", "ecdsa-sha2-nistp256-cert-v01@openssh.com",
+            "ecdsa-sha2-nistp384-cert-v01@openssh.com", "ecdsa-sha2-nistp521-cert-v01@openssh.com",
+        ] {
+            XCTAssertTrue(NIOSSHAlgorithms.isReservedPublicKeyName(name), name)
+        }
+        XCTAssertFalse(NIOSSHAlgorithms.isReservedPublicKeyName(ToyPublicKey.publicKeyPrefix))
+        XCTAssertFalse(NIOSSHAlgorithms.isReservedPublicKeyName("ssh-rsa"))
+        XCTAssertFalse(NIOSSHAlgorithms.isReservedPublicKeyName("rsa-sha2-512"))
+    }
+}
+
 /// The same scenarios with nothing registered: everything fails cleanly instead of trapping.
 final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
     override var registersToyKeys: Bool { false }
@@ -522,8 +708,10 @@ final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
         XCTAssertNoThrow(try self.channel.client.pipeline.syncOperations.addHandler(successes))
         XCTAssertNoThrow(try self.channel.activate())
         // The server does not know the algorithm: it answers with a failure without consulting its delegate, the
-        // client has nothing else to offer, and the connection never authenticates. Nothing traps.
-        XCTAssertNoThrow(try self.channel.interactInMemory())
+        // client has nothing else to offer, and authentication fails cleanly. Nothing traps.
+        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .noFurtherAuthenticationOffers)
+        }
         XCTAssertEqual(serverAuth.requests, 0)
         XCTAssertEqual(successes.successes, 0)
     }

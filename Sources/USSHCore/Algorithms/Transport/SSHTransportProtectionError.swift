@@ -15,4 +15,6 @@ public enum SSHTransportProtectionError: Error, Hashable, Sendable {
     case authenticationFailure
     /// 填充长度不合法：少于 4 字节，或比包体还长。
     case invalidPadding
+    /// `updateKeys` 给的某个方向的加密密钥与 IV 和当前的相同：CTR 会重复密钥流，拒绝。
+    case keyReuse
 }

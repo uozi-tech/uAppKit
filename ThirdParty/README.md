@@ -5,14 +5,14 @@ SSH 栈最底下的 swift-nio-ssh 带着补丁，没法作为普通依赖引用�
 
 | target | 上游 | 基线 | 许可证 | 补丁 |
 |---|---|---|---|---|
-| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 5 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
+| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 14 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
 
 每个组件一个目录：`UPSTREAM`（来源与基线）、`patches/`（按序重放的补丁，`git format-patch` 格式）、
 `PATCHES.md`（每个补丁为什么存在、什么时候能去掉）、上游的 `LICENSE`。
 
 为什么 NIOSSH 跟 apple/swift-nio-ssh：以前用的 Wellz26 fork 0.3.6 在 2022 年从 Apple 的 0.4.0 分出去，
 之后 Apple 的加固（超长 mpint、认证次数上限、缓冲上限、最大包长、`readVersion` 崩溃等）全都没有；而我们真正需要
-fork 的只有「自定义密钥 / 签名 / 密钥交换」的注册接口。现在这两个接口在 Apple 0.15.2 上作为补丁 0003 / 0004
+fork 的只有「自定义密钥 / 签名 / 密钥交换」的注册接口。现在这两个接口在 Apple 0.15.2 上作为补丁 0004 / 0005
 重做（公开 API 见 [swift-nio-ssh/EXTENSION-API.md](swift-nio-ssh/EXTENSION-API.md)），RSA、DH 等算法在
 USSHCore 里实现，不进 NIOSSH。
 
@@ -36,7 +36,8 @@ NIOSSH 连同上游自己的测试一起取（`UPSTREAM` 的 `PATHS` 有两项�
 - 模块名保持上游原名（`import NIOSSH` 不用改），代价是同一个构建图里不能再出现上游的 swift-nio-ssh 包，
   否则模块重名编不过。依赖本包的 app 不要再单独引用它（也别再引用上游的 Citadel：它依赖上游的 swift-nio-ssh）；
   app 只要 `import USSHKit`，`USSHCore` 被它转出去了。
-- Apache-2.0 第 4 条：NIOSSH 被改过的文件头部带一行修改声明（swift-nio-ssh 的补丁 0005），LICENSE.txt 随包保留。
+- Apache-2.0 第 4 条：NIOSSH 被改过的文件头部带一行修改声明（swift-nio-ssh 的最后一个补丁），LICENSE.txt 随包保留。
+  新补丁插在修改声明补丁之前，让它始终排在最后。
 
 ## 命令
 
@@ -77,6 +78,9 @@ bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 2026-11 改成「上游源码 + 补丁重放」：两个 fork 仓库不再需要，manifest 上的补丁（改依赖地址、裁掉示例与测试、放宽版本区间、
 导出 `CCitadelBcrypt`）随之全部消失，只剩源码补丁。
 2026-11-24 起 NIOSSH 的基线从 Wellz26 fork 0.3.6 换成 apple/swift-nio-ssh 0.15.2（连同它的测试），旧的 4 个补丁
-在新基线上重做或去掉，另加两个扩展接口，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
+在新基线上重做或去掉，另加两个扩展接口；同月又补上会话密钥续长、`sendChannelEOF` 状态写反、strict KEX
+（Terrapin 对策）、RFC 8308 `server-sig-algs`、公开的通用全局请求（keepalive）、CHANNEL_OPEN_FAILURE 原因码、认证委托用完
+即报错，又按安全审查加固了两个扩展接口、修了重新交换期间 channel 写入失败、加上按需与按流量的自动重新交换，
+共 14 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
 2026-11-24 起客户端层换成 USSHCore，Citadel（`ThirdParty/Citadel/` 与它唯一的补丁「login timeout 可配置、登录失败关 channel」）
 删除：USSHCore 把握手时限做成配置项、等主机密钥确认的时间单独计，失败时关通道，那个补丁要解决的问题不存在了。

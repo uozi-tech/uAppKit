@@ -104,6 +104,8 @@ public final class SSHAESCTRTransportProtection<Cipher: SSHAESCTRCipher, MAC: SS
         var encryptionKey: SymmetricKey
         var macKey: SymmetricKey
         var counter: SSHCTRCounter
+        /// 这组密钥的初始 IV（计数器从它开始），只用来在 `updateKeys` 时识别重复。
+        var initialIV: [UInt8]
     }
 
     private var inbound: Direction
@@ -126,12 +128,14 @@ public final class SSHAESCTRTransportProtection<Cipher: SSHAESCTRCipher, MAC: SS
         let inbound = Direction(
             encryptionKey: keys.inboundEncryptionKey,
             macKey: keys.inboundMACKey,
-            counter: try SSHCTRCounter(iv: keys.initialInboundIV)
+            counter: try SSHCTRCounter(iv: keys.initialInboundIV),
+            initialIV: keys.initialInboundIV
         )
         let outbound = Direction(
             encryptionKey: keys.outboundEncryptionKey,
             macKey: keys.outboundMACKey,
-            counter: try SSHCTRCounter(iv: keys.initialOutboundIV)
+            counter: try SSHCTRCounter(iv: keys.initialOutboundIV),
+            initialIV: keys.initialOutboundIV
         )
         return (inbound, outbound)
     }
@@ -239,8 +243,22 @@ extension SSHAESCTRTransportProtection: NIOSSHTransportProtection {
 
     public var lengthEncrypted: Bool { !MAC.encryptThenMAC }
 
+    /// 换成新一组密钥：两个方向的计数器都从新的 IV 重新开始。
+    ///
+    /// NIOSSH 换钥时实际上是新建实例（`init(initialKeys:)`），不调这里；这里防误用：CTR 下同一（密钥, IV）
+    /// 再从头开始就会重复密钥流（两段密文异或即得明文异或），所以任一方向的加密密钥与 IV 都和当前一样时抛
+    /// `SSHTransportProtectionError.keyReuse`，状态不变。真正的换钥（RFC 4253 §9）推出的是全新的密钥。
     public func updateKeys(_ newKeys: NIOSSHSessionKeys) throws {
-        (self.inbound, self.outbound) = try Self.directions(from: newKeys)
+        let (inbound, outbound) = try Self.directions(from: newKeys)
+        if Self.reusesKeystream(inbound, self.inbound) || Self.reusesKeystream(outbound, self.outbound) {
+            throw SSHTransportProtectionError.keyReuse
+        }
+        (self.inbound, self.outbound) = (inbound, outbound)
+    }
+
+    private static func reusesKeystream(_ new: Direction, _ current: Direction) -> Bool {
+        // SymmetricKey 的 == 是恒定时间比较。
+        new.encryptionKey == current.encryptionKey && new.initialIV == current.initialIV
     }
 
     public func decryptFirstBlock(_ source: inout ByteBuffer) throws {

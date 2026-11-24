@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
-Date: Tue, 24 Nov 2026 12:21:11 +0800
-Subject: [PATCH 4/5] =?UTF-8?q?NIOSSH:=20=E8=87=AA=E5=AE=9A=E4=B9=89?=
+Date: Tue, 24 Nov 2026 13:19:21 +0800
+Subject: [PATCH 06/14] =?UTF-8?q?NIOSSH:=20=E8=87=AA=E5=AE=9A=E4=B9=89?=
  =?UTF-8?q?=E5=AF=86=E9=92=A5=E4=BA=A4=E6=8D=A2=E7=9A=84=E6=89=A9=E5=B1=95?=
  =?UTF-8?q?=E6=8E=A5=E5=8F=A3=EF=BC=88custom=20key=20exchange=EF=BC=89?=
 MIME-Version: 1.0
@@ -18,7 +18,7 @@ K。其余全由 NIOSSH 做，和它自己的 ECDH 一模一样：经 SSH_MSG_KE
 30/31，与 KEXDH_INIT / _REPLY 相同；mpint 在线上与装着补码字节的 string 一致）收发公开值，
 算交换哈希 H = HASH(V_C‖V_S‖I_C‖I_S‖K_S‖e‖f‖K)（.mpint 时 e/f 按规范 mpint 入哈希，K 一律
 mpint），服务端用主机密钥签 H、客户端验签（含上一补丁的「签名算法必须是协商的那个」检查），按
-RFC 4253 §7.2 派生会话密钥（哈希比密钥短时按 K1‖K2… 续长，上游的 ECDH 不需要这一步）。
+RFC 4253 §7.2 派生会话密钥（续长与内置算法共用续长补丁（key length extension）的 sshDerivedKey）。
 签名和主机密钥都不交给扩展实现，避免每个实现各写一遍校验。.mpint 下 NIOSSH 负责加减 0x00 前缀、
 拒绝负数；K 为零时拒绝（weakSharedSecret）；对端值的范围检查（DH 的 1 < f < p-1）由实现做。
 
@@ -33,23 +33,31 @@ CustomKeyExchangeTests 用测试专用的玩具算法（X25519 做算术，按 m
 的规范编码、负数与零秘密被拒；没登记或只有一端启用时干净地协商失败 / 退回内置算法；另把
 curve25519-sha256 照着接口写一遍，和内置实现互为两端，核对交换哈希输入与六把会话密钥逐一相同。
 
+安全审查后补的两点：
+- 每次密钥交换只读一次注册表：状态机创建时把我方的密钥交换算法列表与主机密钥算法列表（后者来自上一个补丁）
+  各取一份快照，KEXINIT、协商、抢先发包的判断都用它。原先 KEXINIT 与协商分别读注册表，中间正好有登记时，
+  客户端会协商出一个自己根本没报的算法。
+- .mpint 的对端值额外拒绝空值、0 与 1，两种编码都拒绝空值，共享秘密 K 为 0 或 1 都拒绝（weakSharedSecret）。
+  这是给忘了做范围检查的实现兜底；上界 p-1 NIOSSH 不知道 p，仍由实现检查。
+测试：注册表在 KEXINIT 之后才登记的密钥交换算法与主机密钥算法都不会被协商；空值、0、1、K = 1 被拒。
+
 接口本身可以提给上游；DH 等实现不进 NIOSSH。
 ---
- .../Key Exchange/CustomKeyExchange.swift      | 362 ++++++++++++++++
- .../SSHKeyExchangeStateMachine.swift          |  25 +-
+ .../Key Exchange/CustomKeyExchange.swift      | 365 ++++++++++++
+ .../SSHKeyExchangeStateMachine.swift          |  37 +-
  Sources/NIOSSH/SSHClientConfiguration.swift   |   6 +
  Sources/NIOSSH/SSHServerConfiguration.swift   |   6 +
- .../NIOSSHTests/CustomKeyExchangeTests.swift  | 410 ++++++++++++++++++
- 5 files changed, 805 insertions(+), 4 deletions(-)
+ .../NIOSSHTests/CustomKeyExchangeTests.swift  | 526 ++++++++++++++++++
+ 5 files changed, 934 insertions(+), 6 deletions(-)
  create mode 100644 Sources/NIOSSH/Key Exchange/CustomKeyExchange.swift
  create mode 100644 Tests/NIOSSHTests/CustomKeyExchangeTests.swift
 
 diff --git a/Sources/NIOSSH/Key Exchange/CustomKeyExchange.swift b/Sources/NIOSSH/Key Exchange/CustomKeyExchange.swift
 new file mode 100644
-index 0000000..5ed1e36
+index 0000000..497d521
 --- /dev/null
 +++ b/Sources/NIOSSH/Key Exchange/CustomKeyExchange.swift	
-@@ -0,0 +1,362 @@
+@@ -0,0 +1,365 @@
 +//===----------------------------------------------------------------------===//
 +//
 +// This file is part of uAppKit's patches to the SwiftNIO SSH project.
@@ -115,7 +123,8 @@ index 0000000..5ed1e36
 +    /// `publicValue`), as an unsigned big-endian magnitude. NIOSSH encodes it as an mpint.
 +    ///
 +    /// Called once per exchange. Validate the peer's value here (for Diffie-Hellman: `1 < f < p - 1`) and throw if
-+    /// it is unacceptable; that aborts the key exchange. A shared secret of zero is rejected by NIOSSH.
++    /// it is unacceptable; that aborts the key exchange. As a backstop NIOSSH rejects an empty peer value, with
++    /// `.mpint` encoding also 0 and 1, and a shared secret of 0 or 1; it cannot check the upper bound.
 +    mutating func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8]
 +}
 +
@@ -288,7 +297,10 @@ index 0000000..5ed1e36
 +        expectedKeySizes: ExpectedKeySizes
 +    ) throws -> (KeyExchangeResult, Algorithm.Hasher.Digest) {
 +        let secret = try self.algorithm.sharedSecret(peerPublicValue: peerValue)
-+        guard secret.contains(where: { $0 != 0 }) else {
++        // K = 0 or K = 1 means the exchange produced nothing secret (a peer value of 0, 1 or p - 1 in
++        // finite-field Diffie-Hellman). The implementation should have rejected the peer value; check anyway.
++        let significant = secret.drop(while: { $0 == 0 })
++        guard !significant.isEmpty, Array(significant) != [1] else {
 +            throw NIOSSHError.weakSharedSecret(exchangeAlgorithm: String(Algorithm.keyExchangeAlgorithmNames.first ?? ""))
 +        }
 +        var encodedSecret = allocator.buffer(capacity: secret.count + 5)
@@ -328,21 +340,11 @@ index 0000000..5ed1e36
 +        sessionID: ByteBuffer,
 +        expectedKeySizes: ExpectedKeySizes
 +    ) -> NIOSSHSessionKeys {
++        var base = Algorithm.Hasher()
++        base.update(data: encodedSecret.readableBytesView)
++        exchangeHash.withUnsafeBytes { base.update(bufferPointer: $0) }
 +        func derive(_ letter: Character, _ length: Int) -> [UInt8] {
-+            var base = Algorithm.Hasher()
-+            base.update(data: encodedSecret.readableBytesView)
-+            exchangeHash.withUnsafeBytes { base.update(bufferPointer: $0) }
-+
-+            var first = base
-+            first.update(data: [letter.asciiValue!])
-+            first.update(data: sessionID.readableBytesView)
-+            var key = Array(first.finalize())
-+            while key.count < length {
-+                var next = base
-+                next.update(data: key)
-+                key.append(contentsOf: next.finalize())
-+            }
-+            return Array(key.prefix(length))
++            base.sshDerivedKey(discriminatorByte: letter.asciiValue!, sessionID: sessionID, length: length)
 +        }
 +
 +        let ivClientToServer = derive("A", expectedKeySizes.ivSize)
@@ -390,6 +392,9 @@ index 0000000..5ed1e36
 +    /// Undoes `wireValue` for the peer's value.
 +    private static func peerValue(_ wire: ByteBuffer) throws -> [UInt8] {
 +        let bytes = Array(wire.readableBytesView)
++        guard !bytes.isEmpty else {
++            throw NIOSSHError.invalidSSHMessage(reason: "empty public value in key exchange")
++        }
 +        switch Algorithm.publicValueEncoding {
 +        case .string:
 +            return bytes
@@ -397,7 +402,13 @@ index 0000000..5ed1e36
 +            guard (bytes.first ?? 0) & 0x80 == 0 else {
 +                throw NIOSSHError.invalidSSHMessage(reason: "negative mpint in key exchange")
 +            }
-+            return Array(bytes.drop(while: { $0 == 0 }))
++            let magnitude = Array(bytes.drop(while: { $0 == 0 }))
++            // 0 and 1 are never valid Diffie-Hellman public values (RFC 4253 §8 requires 1 < f < p - 1; NIOSSH
++            // does not know p, so the upper bound stays with the implementation).
++            guard !magnitude.isEmpty, magnitude != [1] else {
++                throw NIOSSHError.invalidSSHMessage(reason: "degenerate public value in key exchange")
++            }
++            return magnitude
 +        }
 +    }
 +
@@ -413,10 +424,32 @@ index 0000000..5ed1e36
 +    }
 +}
 diff --git a/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift b/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift
-index e659ae9..2c00889 100644
+index 0647fc2..7a1b216 100644
 --- a/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift	
 +++ b/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift	
-@@ -129,7 +129,7 @@ struct SSHKeyExchangeStateMachine {
+@@ -93,6 +93,12 @@ struct SSHKeyExchangeStateMachine {
+     private var protectionSchemes: [NIOSSHTransportProtection.Type]
+     private var previousSessionIdentifier: ByteBuffer?
+ 
++    /// The key exchange and host key algorithms of this key exchange, read once from the configuration and the
++    /// algorithm registry when it starts: what we offer in KEXINIT is exactly what we negotiate with, even if an
++    /// algorithm is registered in between.
++    private let configuredKeyExchangeAlgorithms: [Substring]
++    private let supportedHostKeyAlgorithms: [Substring]
++
+     init(
+         allocator: ByteBufferAllocator,
+         loop: EventLoop,
+@@ -108,6 +114,8 @@ struct SSHKeyExchangeStateMachine {
+         self.state = .idle
+         self.protectionSchemes = protectionSchemes
+         self.previousSessionIdentifier = previousSessionIdentifier
++        self.configuredKeyExchangeAlgorithms = Self.configuredKeyExchangeAlgorithms(role: role)
++        self.supportedHostKeyAlgorithms = Self.supportedHostKeyAlgorithms(role: role)
+ 
+         switch self.role {
+         case .client:
+@@ -129,7 +137,7 @@ struct SSHKeyExchangeStateMachine {
  
          return .init(
              cookie: rng.randomCookie(allocator: self.allocator),
@@ -425,7 +458,7 @@ index e659ae9..2c00889 100644
              serverHostKeyAlgorithms: self.supportedHostKeyAlgorithms,
              encryptionAlgorithmsClientToServer: encryptionAlgorithms,
              encryptionAlgorithmsServerToClient: encryptionAlgorithms,
-@@ -458,13 +458,13 @@ struct SSHKeyExchangeStateMachine {
+@@ -458,13 +466,13 @@ struct SSHKeyExchangeStateMachine {
  
          switch self.role {
          case .client:
@@ -441,7 +474,7 @@ index e659ae9..2c00889 100644
              clientHostKeyAlgorithms = peerHostKeyAlgorithms
              serverHostKeyAlgorithms = self.supportedHostKeyAlgorithms
          }
-@@ -553,14 +553,31 @@ struct SSHKeyExchangeStateMachine {
+@@ -553,20 +561,37 @@ struct SSHKeyExchangeStateMachine {
              }
          }
  
@@ -460,8 +493,8 @@ index e659ae9..2c00889 100644
  
 +    /// The key exchange methods from the configuration, in order of preference, keeping only those we can run:
 +    /// built-in ones and registered custom ones.
-+    private var configuredKeyExchangeAlgorithms: [Substring] {
-+        self.role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
++    private static func configuredKeyExchangeAlgorithms(role: SSHConnectionRole) -> [Substring] {
++        role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
 +            Self.supportedKeyExchangeAlgorithms.contains(name) || NIOSSHAlgorithms.keyExchangeType(named: name) != nil
 +        }
 +    }
@@ -474,13 +507,21 @@ index e659ae9..2c00889 100644
                  || kexMessage.serverHostKeyAlgorithms.first != self.supportedHostKeyAlgorithms.first)
      }
  
+     // The host key algorithms supported by this peer, in order of preference.
+-    private var supportedHostKeyAlgorithms: [Substring] {
+-        switch self.role {
++    private static func supportedHostKeyAlgorithms(role: SSHConnectionRole) -> [Substring] {
++        switch role {
+         case .client(let configuration):
+             // Registered custom algorithms follow the built-in ones, unless the configuration picks and orders them.
+             let available =
 diff --git a/Sources/NIOSSH/SSHClientConfiguration.swift b/Sources/NIOSSH/SSHClientConfiguration.swift
-index 4555380..36969bb 100644
+index 45d6efa..3bc6393 100644
 --- a/Sources/NIOSSH/SSHClientConfiguration.swift
 +++ b/Sources/NIOSSH/SSHClientConfiguration.swift
-@@ -26,6 +26,12 @@ public struct SSHClientConfiguration {
-     /// Supported data encryption algorithms
-     public var transportProtectionSchemes: [NIOSSHTransportProtection.Type]
+@@ -33,6 +33,12 @@ public struct SSHClientConfiguration {
+     /// (say SHA-1 `ssh-rsa`) for the one connection that needs it.
+     public var hostKeyAlgorithms: [String]? = nil
  
 +    /// The key exchange methods to offer, in order of preference. Defaults to NIOSSH's built-in methods.
 +    ///
@@ -510,10 +551,10 @@ index 32d632a..582b5bc 100644
      /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).
 diff --git a/Tests/NIOSSHTests/CustomKeyExchangeTests.swift b/Tests/NIOSSHTests/CustomKeyExchangeTests.swift
 new file mode 100644
-index 0000000..563326b
+index 0000000..0301c6f
 --- /dev/null
 +++ b/Tests/NIOSSHTests/CustomKeyExchangeTests.swift
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,526 @@
 +//===----------------------------------------------------------------------===//
 +//
 +// This file is part of uAppKit's patches to the SwiftNIO SSH project.
@@ -853,6 +894,122 @@ index 0000000..563326b
 +        )
 +        var seamServer = CustomKeyExchange<SeamCurve25519KeyExchange>(ourRole: serverRole, previousSessionIdentifier: nil)
 +        try run(client: &builtInClient, server: &seamServer)
++    }
++
++    func testDegeneratePeerValuesAndSecretsAreRejected() throws {
++        let role = SSHConnectionRole.client(
++            .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
++        )
++        let hostKey = NIOSSHPrivateKey(ed25519Key: self.ed25519)
++        let signature = try hostKey.sign(digest: SHA256.hash(data: [UInt8]()))
++        func receive<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>(_: Algorithm.Type, _ value: [UInt8]) throws {
++            var exchange = CustomKeyExchange<Algorithm>(ourRole: role, previousSessionIdentifier: nil)
++            var exchangeBytes = ByteBuffer()
++            _ = try exchange.receiveServerKeyExchangePayload(
++                serverKeyExchangeMessage: .init(
++                    hostKey: hostKey.publicKey,
++                    publicKey: ByteBuffer(bytes: value),
++                    signature: signature
++                ),
++                initialExchangeBytes: &exchangeBytes,
++                allocator: ByteBufferAllocator(),
++                expectedKeySizes: AES256GCMOpenSSHTransportProtection.keySizes
++            )
++        }
++        // mpint peer values: empty, zero (with or without leading zeros) and one.
++        for value: [UInt8] in [[], [0x00], [0x00, 0x00], [0x01], [0x00, 0x01]] {
++            XCTAssertThrowsError(try receive(HighBitKeyExchange.self, value), "\(value)") { error in
++                XCTAssertEqual((error as? NIOSSHError)?.type, .invalidSSHMessage)
++            }
++        }
++        // An empty string peer value.
++        XCTAssertThrowsError(try receive(ZeroSecretKeyExchange.self, [])) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidSSHMessage)
++        }
++        // A valid peer value but K = 1 (LeadingZerosKeyExchange always returns 1).
++        XCTAssertThrowsError(try receive(LeadingZerosKeyExchange.self, [0x02])) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .weakSharedSecret)
++        }
++    }
++
++    // MARK: Registry snapshot
++
++    func testKeyExchangeUsesTheAlgorithmsItOffered() throws {
++        // The client's configuration names a method that is not registered yet when its KEXINIT goes out.
++        NIOSSHAlgorithms._unregisterAllKeyExchangeAlgorithms()
++        var clientConfiguration = SSHClientConfiguration(
++            userAuthDelegate: InfinitePasswordDelegate(),
++            serverAuthDelegate: AcceptAllHostKeysDelegate()
++        )
++        clientConfiguration.keyExchangeAlgorithms = [Self.toyMPInt, "curve25519-sha256"]
++        var client = SSHKeyExchangeStateMachine(
++            allocator: ByteBufferAllocator(),
++            loop: EmbeddedEventLoop(),
++            role: .client(clientConfiguration),
++            remoteVersion: Constants.version,
++            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
++            previousSessionIdentifier: nil
++        )
++        let clientMessage = client.createKeyExchangeMessage()
++        client.send(keyExchange: clientMessage)
++        XCTAssertFalse(clientMessage.keyExchangeAlgorithms.contains(Substring(Self.toyMPInt)))
++
++        // It is registered before the server's KEXINIT arrives, and the server prefers it.
++        NIOSSHAlgorithms.register(keyExchangeAlgorithm: ToyMPIntKeyExchange.self)
++        var serverConfiguration = SSHServerConfiguration(
++            hostKeys: [.init(ed25519Key: self.ed25519)],
++            userAuthDelegate: DenyAllServerAuthDelegate()
++        )
++        serverConfiguration.keyExchangeAlgorithms = [Self.toyMPInt, "curve25519-sha256"]
++        let server = SSHKeyExchangeStateMachine(
++            allocator: ByteBufferAllocator(),
++            loop: EmbeddedEventLoop(),
++            role: .server(serverConfiguration),
++            remoteVersion: Constants.version,
++            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
++            previousSessionIdentifier: nil
++        )
++        let serverMessage = server.createKeyExchangeMessage()
++        XCTAssertTrue(serverMessage.keyExchangeAlgorithms.contains(Substring(Self.toyMPInt)))
++
++        // The client negotiates from what it offered: curve25519, not the method it never announced.
++        toyKeyExchangeInstances.withLockedValue { $0 = 0 }
++        XCTAssertNotNil(try client.handle(keyExchange: serverMessage))
++        XCTAssertEqual(toyKeyExchangeInstances.withLockedValue { $0 }, 0)
++    }
++
++    func testHostKeyAlgorithmsAreSnapshottedToo() throws {
++        NIOSSHAlgorithms._unregisterAllPublicKeyAlgorithms()
++        var client = SSHKeyExchangeStateMachine(
++            allocator: ByteBufferAllocator(),
++            loop: EmbeddedEventLoop(),
++            role: .client(
++                .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
++            ),
++            remoteVersion: Constants.version,
++            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
++            previousSessionIdentifier: nil
++        )
++        client.send(keyExchange: client.createKeyExchangeMessage())
++
++        // Registered only after our KEXINIT: a server offering nothing but this algorithm must not be accepted.
++        NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToySignature.self)
++        let server = SSHKeyExchangeStateMachine(
++            allocator: ByteBufferAllocator(),
++            loop: EmbeddedEventLoop(),
++            role: .server(
++                .init(
++                    hostKeys: [NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))],
++                    userAuthDelegate: DenyAllServerAuthDelegate()
++                )
++            ),
++            remoteVersion: Constants.version,
++            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
++            previousSessionIdentifier: nil
++        )
++        XCTAssertThrowsError(try client.handle(keyExchange: server.createKeyExchangeMessage())) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .keyExchangeNegotiationFailure)
++        }
 +    }
 +
 +    // MARK: End to end

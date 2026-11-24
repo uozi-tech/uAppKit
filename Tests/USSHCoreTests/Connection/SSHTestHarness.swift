@@ -107,12 +107,17 @@ final class EchoServer: Sendable {
         try? await channel.close()
     }
 
+    /// 读到 EOF 后等已经写出的回显全部交给 socket 再关：直接 close() 的话，NIO 会丢掉还排在通道里没写进
+    /// socket 的数据（数据量大、对端读得慢时必现）。
     private final class EchoHandler: ChannelInboundHandler {
         typealias InboundIn = ByteBuffer
         typealias OutboundOut = ByteBuffer
+        private var lastWrite: EventLoopFuture<Void>?
 
         func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-            context.write(data, promise: nil)
+            let promise = context.eventLoop.makePromise(of: Void.self)
+            context.write(data, promise: promise)
+            lastWrite = promise.futureResult
         }
 
         func channelReadComplete(context: ChannelHandlerContext) {
@@ -120,9 +125,10 @@ final class EchoServer: Sendable {
         }
 
         func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
-            if case ChannelEvent.inputClosed = event {
-                context.close(promise: nil)
-            }
+            guard case ChannelEvent.inputClosed = event else { return }
+            context.flush()
+            guard let lastWrite else { return context.close(promise: nil) }
+            lastWrite.assumeIsolated().whenComplete { _ in context.close(promise: nil) }
         }
     }
 }

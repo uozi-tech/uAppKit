@@ -33,7 +33,7 @@ public struct SSHRSASignature: Hashable, Sendable {
 
     /// 只读主体（算法名之后的 `string 签名`）。给 NIOSSH 的签名扩展接口用。
     package init(algorithm: SSHRSASignatureAlgorithm, readingBodyFrom buffer: inout ByteBuffer) throws {
-        // 16384 位模数的签名是 2048 字节。
+        // 最大模数（8192 位）的签名是 1024 字节。
         let maximum = SSHRSAPublicKey.maximumModulusBits / 8
         let original = buffer.readerIndex
         let signature: ByteBuffer

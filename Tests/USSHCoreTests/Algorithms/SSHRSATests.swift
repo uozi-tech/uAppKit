@@ -384,4 +384,24 @@ final class SSHRSATests: XCTestCase {
         }
         return key
     }
+
+    /// 上限是 BoringSSL 实际支持的 8192 位：8192 位的钥匙能签能验，16384 位（OpenSSH 允许）干净地拒绝。
+    func testModulusLimitIsWhatBoringSSLSupports() throws {
+        XCTAssertEqual(SSHRSAPublicKey.maximumModulusBits, 8192)
+        let key = try SSHRSAPrivateKey(pemRepresentation: LargeRSAFixtures.modulus8192PEM)
+        XCTAssertEqual(key.publicKey.modulusBitCount, 8192)
+        let signature = try key.signature(for: Array("m".utf8), algorithm: .rsaSHA2_512)
+        XCTAssertEqual(signature.bytes.count, 1024)
+        XCTAssertTrue(key.publicKey.isValidSignature(signature, for: Array("m".utf8), algorithm: .rsaSHA2_512))
+        XCTAssertEqual(try SSHRSASignature(sshBlob: signature.sshBlob), signature)
+
+        let line = LargeRSAFixtures.modulus16384OpenSSHPublicKey.split(separator: " ")
+        let blob = try XCTUnwrap(Data(base64Encoded: String(line[1])))
+        XCTAssertThrowsError(try SSHRSAPublicKey(sshBlob: Array(blob))) { error in
+            XCTAssertEqual(error as? SSHRSAError, .unsupportedModulusSize(bits: 16384))
+        }
+        XCTAssertThrowsError(try SSHRSAPrivateKey(generatingModulusBits: 16384)) { error in
+            XCTAssertEqual(error as? SSHRSAError, .unsupportedModulusSize(bits: 16384))
+        }
+    }
 }

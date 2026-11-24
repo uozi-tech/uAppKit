@@ -48,7 +48,7 @@ public struct SSHRSAPrivateKey: Sendable {
     let backing: _RSA.Signing.PrivateKey
     public let publicKey: SSHRSAPublicKey
 
-    /// 由分量构造。模数要在 1024–16384 位之间（低于 2048 位可用但 `publicKey.isWeak` 为真）。
+    /// 由分量构造。模数要在 1024–8192 位之间（低于 2048 位可用但 `publicKey.isWeak` 为真）。
     public init(components: SSHRSAPrivateKeyComponents) throws {
         let p = BigUInt(sshMagnitude: components.prime1)
         let q = BigUInt(sshMagnitude: components.prime2)
