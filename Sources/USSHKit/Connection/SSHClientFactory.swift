@@ -180,7 +180,7 @@ nonisolated enum SSHClientFactory {
     private static func firstAttemptAlgorithms(_ hop: Hop, options: Options) -> SSHAlgorithms {
         guard options.legacyFallback,
               options.legacyMemory.needsLegacy(host: hop.host, port: hop.port),
-              let fallback = SSHLegacyFallback.algorithms(addingLegacyTo: options.algorithms) else {
+              let fallback = SSHLegacyFallback.retryAlgorithms(for: options.algorithms) else {
             return options.algorithms
         }
         return fallback
@@ -195,7 +195,7 @@ nonisolated enum SSHClientFactory {
     ) async throws -> SSHClient {
         let first = firstAttemptAlgorithms(hop, options: options)
         let fallback = options.legacyFallback && !first.allowsLegacyAlgorithms
-            ? SSHLegacyFallback.algorithms(addingLegacyTo: first) : nil
+            ? SSHLegacyFallback.retryAlgorithms(for: first) : nil
         let watch = SSHApproverWatch()
         var firstOptions = options
         firstOptions.approver = watch.wrap(options.approver)
@@ -203,7 +203,7 @@ nonisolated enum SSHClientFactory {
         do {
             client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first))
         } catch SSHClientError.noCommonAlgorithm(let failure) {
-            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure, with: fallback), !watch.wasCalled else {
+            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure), !watch.wasCalled else {
                 throw SSHClientError.noCommonAlgorithm(failure)
             }
             // 第二次的错误（含又一次没有共同算法）原样交出去。

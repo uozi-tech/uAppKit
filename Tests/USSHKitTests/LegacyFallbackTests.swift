@@ -112,23 +112,8 @@ final class LegacyFallbackTests: XCTestCase {
         XCTAssertEqual(attempts(server), 1)
     }
 
-    /// 补上旧算法也协商不出来：恰好两次，报的是第二次的错（这里第一次卡在密钥交换，第二次卡在 MAC）。
-    func testNoCommonAlgorithmEvenWithLegacyFailsAfterExactlyTwoAttempts() async throws {
-        let server = try await TestSSH.startServer {
-            $0.keyExchangeAlgorithms = [SSHDiffieHellmanAlgorithm.group14SHA1.name]
-            $0.transportProtectionSchemes = [SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA256>.self]
-        }
-        defer { Task { await server.stop() } }
-        // 客户端只有 AES-GCM：第一次密钥交换就对不上；补上旧算法后密钥交换与加密对上了，MAC 只有 SHA-1 的。
-        var aeadOnly = SSHAlgorithms.standard
-        aeadOnly.transportProtectionSchemes = Constants.bundledTransportProtectionSchemes
-        let message = await assertConnectionError({
-            _ = try await TestSSH.connect(server, algorithms: aeadOnly)
-        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
-        XCTAssertEqual(message, SSHErrorText.describe(SSHClientError.noCommonAlgorithm(
-            SSHAlgorithmNegotiationFailure(category: .mac, clientOffer: [], serverOffer: ["hmac-sha2-256"]))))
-        XCTAssertEqual(attempts(server), 2)
-    }
+    // 补上旧算法也协商不出来、恰好两次的例子在 `OpenSSHLegacyFallbackTests`：再试的算法是 `.legacyCompatible` 的
+    // 超集，进程内的测试服务端提供的一切都在里面，造不出第二次还失败的情形。
 
     // 补上的旧算法对不上服务器报价时不再试：网络上的例子是 `AlgorithmPolicyTests` 里明确传 `.builtInOnly` 连
     // RSA（SHA-2）主机密钥的服务器，规则本身见 `testShouldRetryOnlyWhenLegacyMatchesTheOffer`。
@@ -350,32 +335,76 @@ final class LegacyFallbackTests: XCTestCase {
     // MARK: - 规则（不经网络）
 
     func testFallbackSetForStandardMatchesLegacyCompatible() throws {
-        let fallback = try XCTUnwrap(SSHLegacyFallback.algorithms(addingLegacyTo: .standard))
+        let fallback = try XCTUnwrap(SSHLegacyFallback.retryAlgorithms(for: .standard))
         let legacy = SSHAlgorithms.legacyCompatible
         XCTAssertEqual(fallback.keyExchangeAlgorithms, legacy.keyExchangeAlgorithms)
         XCTAssertEqual(fallback.hostKeyAlgorithms, legacy.hostKeyAlgorithms)
         XCTAssertEqual(Set(fallback.transportProtectionSchemes.map { ObjectIdentifier($0) }),
                        Set(legacy.transportProtectionSchemes.map { ObjectIdentifier($0) }))
         XCTAssertTrue(fallback.allowsLegacyAlgorithms)
-        XCTAssertNil(SSHLegacyFallback.algorithms(addingLegacyTo: .legacyCompatible), "已经允许旧算法：没有可退的")
+        XCTAssertNil(SSHLegacyFallback.retryAlgorithms(for: .legacyCompatible), "已经允许旧算法：没有可退的")
         // 现代算法一律在前。
         XCTAssertEqual(Array(fallback.hostKeyAlgorithms.prefix(SSHAlgorithms.standard.hostKeyAlgorithms.count)),
                        SSHAlgorithms.standard.hostKeyAlgorithms)
     }
 
     func testShouldRetryOnlyWhenLegacyMatchesTheOffer() throws {
-        let fallback = try XCTUnwrap(SSHLegacyFallback.algorithms(addingLegacyTo: .standard))
         func failure(_ category: SSHAlgorithmNegotiationFailure.Category?, _ offer: [String]) -> SSHAlgorithmNegotiationFailure {
             SSHAlgorithmNegotiationFailure(category: category, clientOffer: [], serverOffer: offer)
         }
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["ssh-rsa"]), with: fallback))
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.keyExchange, ["diffie-hellman-group14-sha1"]), with: fallback))
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.mac, ["hmac-md5", "hmac-sha1"]), with: fallback))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["ssh-dss"]), with: fallback))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.keyExchange, ["diffie-hellman-group1-sha1"]), with: fallback))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.encryption, ["aes128-cbc", "3des-cbc"]), with: fallback))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.compression, ["zlib@openssh.com"]), with: fallback))
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(nil, []), with: fallback), "不知道卡在哪：盲试一次")
+        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["ssh-rsa"])))
+        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.keyExchange, ["diffie-hellman-group14-sha1"])))
+        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.mac, ["hmac-md5", "hmac-sha1"])))
+        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["ssh-dss"])))
+        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.keyExchange, ["diffie-hellman-group1-sha1"])))
+        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.encryption, ["aes128-cbc", "3des-cbc"])))
+        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.compression, ["zlib@openssh.com"])))
+        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(nil, [])), "不知道卡在哪：盲试一次")
+        // 再试是为了退到旧算法：服务器只是有 `.builtInOnly` 没有的现代算法（rsa-sha2-*、AES-CTR）时不再试。
+        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["rsa-sha2-512", "rsa-sha2-256"])))
+        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.encryption, ["aes128-ctr"])))
+    }
+
+    /// 再试的算法：配置里的现代算法 → `.standard` 补的现代算法 → 旧算法（配置里列在前面的旧算法也挪到最后）。
+    func testRetrySetPutsEveryModernAlgorithmBeforeLegacy() throws {
+        let fromBuiltIn = try XCTUnwrap(SSHLegacyFallback.retryAlgorithms(for: .builtInOnly))
+        XCTAssertEqual(fromBuiltIn.keyExchangeAlgorithms, SSHAlgorithms.legacyCompatible.keyExchangeAlgorithms,
+                       "builtInOnly 的再试也带上 group16-sha512 / group14-sha256，排在 group14-sha1 前面")
+        XCTAssertEqual(fromBuiltIn.hostKeyAlgorithms, SSHAlgorithms.legacyCompatible.hostKeyAlgorithms)
+        let macs = fromBuiltIn.transportProtectionSchemes.compactMap { $0.macName }
+        let firstSHA1 = try XCTUnwrap(macs.firstIndex { $0.hasPrefix("hmac-sha1") })
+        XCTAssertTrue(macs[..<firstSHA1].contains("hmac-sha2-256"))
+        XCTAssertFalse(macs[firstSHA1...].contains { $0.hasPrefix("hmac-sha2") }, "SHA-1 的 MAC 一律在 SHA-2 后面")
+
+        var sneaky = SSHAlgorithms.builtInOnly
+        sneaky.keyExchangeAlgorithms = ["diffie-hellman-group14-sha1", "curve25519-sha256"]
+        sneaky.hostKeyAlgorithms = ["ssh-rsa", "ssh-ed25519"]
+        sneaky.transportProtectionSchemes = [SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self]
+            + Constants.bundledTransportProtectionSchemes
+        let reordered = try XCTUnwrap(SSHLegacyFallback.retryAlgorithms(for: sneaky))
+        XCTAssertEqual(reordered.keyExchangeAlgorithms.first, "curve25519-sha256")
+        XCTAssertEqual(reordered.keyExchangeAlgorithms.last, "diffie-hellman-group14-sha1")
+        XCTAssertEqual(reordered.hostKeyAlgorithms.first, "ssh-ed25519")
+        XCTAssertEqual(reordered.hostKeyAlgorithms.last, "ssh-rsa")
+        XCTAssertEqual(reordered.transportProtectionSchemes.first.map { ObjectIdentifier($0) },
+                       ObjectIdentifier(Constants.bundledTransportProtectionSchemes[0]))
+        XCTAssertNotNil(reordered.transportProtectionSchemes.lastIndex {
+            ObjectIdentifier($0) == ObjectIdentifier(SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self)
+        })
+    }
+
+    /// `.builtInOnly` 对同时有 group14-sha256 与 group14-sha1 的服务器：第一次没有共同的密钥交换（只有 group14-sha1
+    /// 是我们补的旧算法，所以再试），再试协商到 SHA-2 的 group14-sha256，没用上任何旧算法。
+    func testRetryPrefersTheSHA2SiblingWhenTheServerHasIt() async throws {
+        let server = try await TestSSH.startServer {
+            $0.keyExchangeAlgorithms = [SSHDiffieHellmanAlgorithm.group14SHA1.name, SSHDiffieHellmanAlgorithm.group14SHA256.name]
+        }
+        defer { Task { await server.stop() } }
+        let client = try await TestSSH.connect(server, algorithms: .builtInOnly)
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.keyExchange, "diffie-hellman-group14-sha256")
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [])
+        await client.close()
+        XCTAssertEqual(server.events.acceptedConnections, 2)
     }
 }
 

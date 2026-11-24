@@ -49,26 +49,63 @@ public nonisolated struct SSHLegacyAlgorithm: Sendable, Hashable, CustomStringCo
 /// 第一次在密钥交换里就失败了，还没到主机密钥那一步，所以不会问两次信任（另有守卫：第一次问过就不再试）。
 /// 跳板机与目标各自判断。
 nonisolated enum SSHLegacyFallback {
-    /// 在 `algorithms` 后面补上旧算法（已经允许旧算法时返回 nil：没有可退的）。对 `.standard` 补完与
-    /// `.legacyCompatible` 的算法一致。
-    static func algorithms(addingLegacyTo algorithms: SSHAlgorithms) -> SSHAlgorithms? {
-        guard !algorithms.allowsLegacyAlgorithms else { return nil }
-        var result = algorithms
-        let schemes = Set(result.transportProtectionSchemes.map { ObjectIdentifier($0) })
-        result.transportProtectionSchemes += SSHTransportProtections.legacy.filter { !schemes.contains(ObjectIdentifier($0)) }
-        result.keyExchangeAlgorithms += SSHDiffieHellmanAlgorithm.legacy.map(\.name)
-            .filter { !result.keyExchangeAlgorithms.contains($0) }
-        result.hostKeyAlgorithms += SSHRSASignatureAlgorithm.legacy.map(\.name)
-            .filter { !result.hostKeyAlgorithms.contains($0) }
+    /// 再试一次时用的算法：
+    /// 1. 调用方配置的算法里的现代算法，保持原来的顺序；
+    /// 2. `.standard` 里有、配置里没有的现代算法（例如 `.builtInOnly` 再试时也带上 group14-sha256、
+    ///    AES-CTR + hmac-sha2，服务器同时有 SHA-2 与 SHA-1 的选项时协商到 SHA-2 的那个）；
+    /// 3. 最后才是旧算法：配置里本来就列着的（挪到所有现代算法后面——列着不等于启用，以前它们会原地被打开，
+    ///    排在现代算法前面），再补上没列的。
+    ///
+    /// 已经允许旧算法时返回 nil：没有可退的。对 `.standard` 与 `.legacyCompatible` 一致。
+    static func retryAlgorithms(for configured: SSHAlgorithms) -> SSHAlgorithms? {
+        guard !configured.allowsLegacyAlgorithms else { return nil }
+        let standard = SSHAlgorithms.standard
+        func ordered(_ configured: [String], standard: [String], legacy: [String], isLegacy: (String) -> Bool) -> [String] {
+            let modern = configured.filter { !isLegacy($0) }
+            let additions = standard.filter { !isLegacy($0) && !modern.contains($0) }
+            let configuredLegacy = configured.filter(isLegacy)
+            let legacyAdditions = legacy.filter { !configuredLegacy.contains($0) }
+            return modern + additions + configuredLegacy + legacyAdditions
+        }
+        var result = configured
+        result.keyExchangeAlgorithms = ordered(
+            configured.keyExchangeAlgorithms, standard: standard.keyExchangeAlgorithms,
+            legacy: SSHDiffieHellmanAlgorithm.legacy.map(\.name),
+            isLegacy: { SSHDiffieHellmanAlgorithm(name: $0)?.isLegacy == true })
+        result.hostKeyAlgorithms = ordered(
+            configured.hostKeyAlgorithms, standard: standard.hostKeyAlgorithms,
+            legacy: SSHRSASignatureAlgorithm.legacy.map(\.name),
+            isLegacy: { SSHRSASignatureAlgorithm(name: $0)?.isLegacy == true })
+        let legacySchemes = Set(SSHTransportProtections.legacy.map { ObjectIdentifier($0) })
+        func isLegacy(_ scheme: SSHTransportProtections.Scheme) -> Bool { legacySchemes.contains(ObjectIdentifier(scheme)) }
+        func contains(_ list: [SSHTransportProtections.Scheme], _ scheme: SSHTransportProtections.Scheme) -> Bool {
+            list.contains { ObjectIdentifier($0) == ObjectIdentifier(scheme) }
+        }
+        let modern = configured.transportProtectionSchemes.filter { !isLegacy($0) }
+        let additions = standard.transportProtectionSchemes.filter { !isLegacy($0) && !contains(modern, $0) }
+        let configuredLegacy = configured.transportProtectionSchemes.filter(isLegacy)
+        let legacyAdditions = SSHAlgorithmsLegacySchemes.ordered.filter { !contains(configuredLegacy, $0) }
+        result.transportProtectionSchemes = modern + additions + configuredLegacy + legacyAdditions
         result.allowsLegacyAlgorithms = true
         return result
     }
 
-    /// 第一次以 `failure` 失败后要不要用 `fallback` 再试。
-    static func shouldRetry(after failure: SSHAlgorithmNegotiationFailure, with fallback: SSHAlgorithms) -> Bool {
+    /// 第一次以 `failure` 失败后要不要再试：知道卡在哪一类时，只在服务器在这一类里报了 SHA-1 的旧算法（我们补上的
+    /// 那些）时才试——再试是为了退到旧算法，不是为了悄悄放宽调用方选的算法集（所以明确选了 `.builtInOnly` 的连接
+    /// 遇到只有 `rsa-sha2-*` 主机密钥的服务器照样不再试）。加密这一类没有旧算法，不再试。不知道时盲试一次。
+    static func shouldRetry(after failure: SSHAlgorithmNegotiationFailure) -> Bool {
         guard let category = failure.category else { return true }
-        let offered = Set(failure.serverOffer)
-        return !offered.isDisjoint(with: fallback.names(of: category))
+        return !Set(failure.serverOffer).isDisjoint(with: legacyNames(of: category))
+    }
+
+    /// 某类里我们补上的旧算法的名字。
+    static func legacyNames(of category: SSHAlgorithmNegotiationFailure.Category) -> Set<String> {
+        switch category {
+        case .keyExchange: return Set(SSHDiffieHellmanAlgorithm.legacy.map(\.name))
+        case .hostKey: return Set(SSHRSASignatureAlgorithm.legacy.map(\.name))
+        case .mac: return legacyMACNames
+        case .encryption, .compression: return []
+        }
     }
 
     static let legacyMACNames = Set(SSHTransportProtections.legacy.compactMap { $0.macName })
@@ -139,6 +176,14 @@ nonisolated enum SSHLegacyFallback {
         }
         return events
     }
+}
+
+/// `.legacyCompatible` 里旧加密方式的顺序（ETM 在前），补旧算法时照这个顺序接在后面。
+nonisolated enum SSHAlgorithmsLegacySchemes {
+    static let ordered: [SSHTransportProtections.Scheme] = {
+        let legacy = Set(SSHTransportProtections.legacy.map { ObjectIdentifier($0) })
+        return SSHAlgorithms.legacyCompatible.transportProtectionSchemes.filter { legacy.contains(ObjectIdentifier($0)) }
+    }()
 }
 
 extension SSHAlgorithms {

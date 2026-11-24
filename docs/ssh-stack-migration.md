@@ -156,9 +156,13 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     （下一条）。它会触发进程级的旧算法登记，但不影响别的连接（接受与否按连接判断）。
   - USSHCore 自己的 `SSHClient.Configuration.algorithms` 默认仍是 `.builtInOnly`：协议层不替产品做选择，产品默认在 USSHKit。
 - **自动退到旧算法**（`legacyFallback: true`，默认；跳板机与目标各自判断，不按主机设置、不落盘、不同步）：
-  - 只在 `SSHClientError.noCommonAlgorithm` 时同一跳**再连一次**，这次在原来的算法后面补上 SHA-1 的旧算法（对 `.standard` 就是
-    `.legacyCompatible`）。知道卡在哪一类、服务器报了什么时，只在补上的旧算法对得上服务器的报价时才再试（服务器只有 CBC、
-    `hmac-md5` 之类我们根本不支持的就不试）；不知道时盲试一次。第二次也没有共同算法就报第二次的错。
+  - 只在 `SSHClientError.noCommonAlgorithm` 时同一跳**再连一次**。知道卡在哪一类、服务器报了什么时，只在服务器在这一类里报了
+    SHA-1 的旧算法（`ssh-rsa` 主机密钥、`diffie-hellman-group14-sha1`、`hmac-sha1*`）时才再试——再试是为了退到旧算法，不是为了
+    放宽调用方选的算法集，所以明确选了 `.builtInOnly` 的连接遇到只有 `rsa-sha2-*` 的服务器照样不试；加密这一类没有旧算法，不试；
+    服务器只有 CBC、`hmac-md5` 之类我们根本不支持的也不试。不知道卡在哪时盲试一次。第二次也没有共同算法就报第二次的错。
+  - 再试用的算法：配置里的现代算法（原顺序）→ `.standard` 里有、配置里没有的现代算法 → 旧算法（配置里本来就列着的旧算法也挪到
+    这里，不再原地打开、排在现代算法前面）。所以服务器同时有 SHA-2 与 SHA-1 的选项时（比如 group14-sha256 与 group14-sha1），
+    再试协商到的是 SHA-2 的那个。对 `.standard` 再试的算法就是 `.legacyCompatible`。
   - 超时、没有协商结论就断开、主机密钥被拒、认证失败、取消**都不再试**。第一次在密钥交换里就失败了，还没到主机密钥那一步，
     所以**只会问一次信任**（另有守卫：第一次问过就不再试）。
   - **RSA 用户私钥**在服务器没宣告 `server-sig-algs`、`rsa-sha2-512` 与 `rsa-sha2-256` 都被拒时，**同一条连接里**最后试 `ssh-rsa`
