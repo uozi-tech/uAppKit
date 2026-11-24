@@ -328,6 +328,11 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟；构造出来的最坏输入 Debug 下 1.4 秒，修之前 25 秒）。还原不了的只有
   gcd(p − 1, q − 1) > 4096 的钥匙（按 λ 算 d 的钥匙里大约万分之二到万分之五），而且只涉及缺素因子的容器——OpenSSH 与
   PuTTYgen 写的都带素因子。
+- **EC 私钥（SEC1 `EC PRIVATE KEY` / PKCS#8）的曲线**：命名曲线照旧；显式曲线参数（`openssl ecparam -param_enc explicit`）只在
+  p、a、b、基点、阶逐项等于 P-256 / P-384 / P-521 之一时认成那条曲线，别的（secp256k1、brainpool……）报
+  `.unsupportedFormat`——以前按标量长度猜成 NIST 曲线，把别的曲线上的标量当成 P-256 的钥匙用，指纹与 `ssh-keygen` 对不上。
+  文件里带了公钥（SEC1 的 `[1] publicKey`）就必须与私钥推出来的一致，否则 `.malformedKey`（与 OpenSSH 容器同一条规矩）；
+  完全没有曲线信息的只在带着一致的公钥时才接受。
 - **服务器给的文字先消毒再进文案**：SFTP 状态消息、开通道失败的说明、服务器报的算法列表、NIOSSH 错误里夹带的对端文本、
   退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
