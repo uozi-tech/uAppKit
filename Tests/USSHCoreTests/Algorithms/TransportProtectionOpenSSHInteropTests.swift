@@ -13,7 +13,7 @@ import XCTest
 ///
 /// sshd 以当前用户身份跑在 127.0.0.1 的临时端口上，配置、主机密钥、authorized_keys 都在临时目录里。
 /// 起不来（没有 sshd、端口不通、被沙盒拦）就跳过。设 `USSH_SKIP_SSHD_INTEROP=1` 也跳过。
-final class OpenSSHInteropTests: XCTestCase {
+final class TransportProtectionOpenSSHInteropTests: XCTestCase {
     private static let sshdPath = "/usr/sbin/sshd"
     private static let outputBytes = 300_000
 

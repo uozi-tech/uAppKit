@@ -119,7 +119,7 @@ let result = try kex.complete(
 
 `Tests/USSHCoreTests/Algorithms/`：
 
-- **证明线上兼容的**：`OpenSSHInteropTests`（本机真实 sshd，每种加密方式登录、exec、收 300 KB、核对 sshd 自己的协商日志
+- **证明线上兼容的**：`TransportProtectionOpenSSHInteropTests`（本机真实 sshd，每种加密方式登录、exec、收 300 KB、核对 sshd 自己的协商日志
   与至少一次换钥）；`SSHRSATests` 里 ssh-keygen 产出的公钥 blob 逐字节往返、`ssh-keygen -Y sign` 的签名 blob 与我们签出的
   逐字节相同、openssl 三种摘要的签名逐字节相同、与 Security.framework 双向互验。
 - **独立实现对照（算法正确，但没经过真实对端）**：NIST SP 800-38A、RFC 4231 / 2202 已知答案；CommonCrypto 参考实现逐字节
