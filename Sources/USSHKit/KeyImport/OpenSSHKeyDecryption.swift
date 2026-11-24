@@ -33,10 +33,20 @@ nonisolated enum OpenSSHKeyDecryption {
         var blockSize: Int { 16 }
     }
 
-    /// bcrypt 轮数上限。轮数读自密钥文件（不可信），而每一轮都是一次完整的
-    /// EksBlowfish 状态扩展 —— 比 PBKDF2 的单次迭代贵几个数量级，不设上限的话一个
-    /// 伪造的 rounds 就能把导入卡死。`ssh-keygen -a` 默认 16，手动调到 100 已属激进。
-    static let maxRounds: UInt32 = 10_000
+    /// bcrypt 轮数上限：1024。轮数读自密钥文件（不可信），每一轮都是完整的 EksBlowfish 状态扩展，而且每次连接都会
+    /// 重新解一遍私钥。实测（2026-11，Apple M5 Pro，OpenSSH 自己的 `ssh-keygen -p`）一轮约 20 ms：`-a 16`（默认）
+    /// 0.35 秒，`-a 100`（不少加固指南的写法）约 2 秒，`-a 1000` 约 20 秒；手机慢 1.5–2 倍。
+    ///
+    /// 上限取 1024 而不是更低：确实有人用 `-a 256`、`-a 500`、`-a 1000` 生成密钥，这些密钥今天能用（只是每次连接都慢），
+    /// 压得太低等于让它们突然导入不了。以前的 10 000 轮要三分多钟，再往上就只可能是坏文件或恶意文件了。
+    /// 超过上限报 `.unsupportedKDFCost`，用 `ssh-keygen -p -a 100` 重新存一次即可。
+    static let maxRounds: UInt32 = 1024
+
+    /// 超过上限时建议用户重新保存用的轮数。
+    static let suggestedRounds = 100
+
+    /// salt 的长度范围。`ssh-keygen` 写 16 字节；bcrypt_pbkdf 自己允许到 1 MiB，这里卡在 64 字节。
+    static let saltLengthRange = 1...64
 
     /// 解密私钥段。
     ///
@@ -63,8 +73,11 @@ nonisolated enum OpenSSHKeyDecryption {
         var options = SSHWireReader(kdfOptions)
         let salt = try options.readString()            // 注意是 string，不能按 mpint 读
         let rounds = try options.readUInt32()
-        guard !salt.isEmpty, rounds >= 1, rounds <= maxRounds else {
+        guard saltLengthRange.contains(salt.count), rounds >= 1, options.isAtEnd else {
             throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：bcrypt 参数非法", bundle: ModuleBundle.bundle))
+        }
+        guard rounds <= maxRounds else {
+            throw PrivateKeyImportError.unsupportedKDFCost(rounds: Int(rounds), maximum: Int(maxRounds))
         }
         guard !blob.isEmpty, blob.count % cipher.blockSize == 0 else {
             throw PrivateKeyImportError.malformedKey(

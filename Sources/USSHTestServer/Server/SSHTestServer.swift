@@ -197,6 +197,9 @@ final class SSHTestServerState: Sendable {
         let id = ObjectIdentifier(channel)
         let freezer = SSHTestFreezeHandler()
         try channel.pipeline.syncOperations.addHandler(freezer)
+        if configuration.faults.unusualNameLists {
+            try channel.pipeline.syncOperations.addHandler(SSHTestNameListRewriter())
+        }
         let boundFreezer = NIOLoopBound(freezer, eventLoop: channel.eventLoop)
         connections.withLockedValue { $0[id] = Connection(channel: channel, freezer: boundFreezer, handler: nil) }
         record { $0.acceptedConnections += 1 }
@@ -285,6 +288,54 @@ final class SSHTestFreezeHandler: ChannelDuplexHandler {
             return
         }
         context.write(data, promise: promise)
+    }
+}
+
+/// 故障注入用：把服务端版本行之后的第一个包（KEXINIT）里的每个 name-list 改成 `,a,,b,` 的写法。
+final class SSHTestNameListRewriter: ChannelOutboundHandler {
+    typealias OutboundIn = ByteBuffer
+    typealias OutboundOut = ByteBuffer
+
+    private var versionSent = false
+    private var done = false
+
+    func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
+        guard !done else { return context.write(data, promise: promise) }
+        var buffer = unwrapOutboundIn(data)
+        var out = ByteBuffer()
+        if !versionSent {
+            guard let newline = buffer.readableBytesView.firstIndex(of: UInt8(ascii: "\n")) else {
+                return context.write(data, promise: promise)
+            }
+            var line = buffer.readSlice(length: newline - buffer.readerIndex + 1)!
+            out.writeBuffer(&line)
+            versionSent = true
+        }
+        if buffer.readableBytes > 0 {
+            let length = Int(buffer.readInteger(as: UInt32.self)!)
+            let padding = Int(buffer.readInteger(as: UInt8.self)!)
+            var payload = buffer.readSlice(length: length - 1 - padding)!
+            buffer.moveReaderIndex(forwardBy: padding)
+            var rewritten = ByteBuffer()
+            rewritten.writeBytes(payload.readBytes(length: 17)!)            // 类型 + cookie
+            for _ in 0..<10 {
+                let listLength = Int(payload.readInteger(as: UInt32.self)!)
+                let names = payload.readString(length: listLength)!.split(separator: ",")
+                let list = names.isEmpty ? "," : "," + names.joined(separator: ",,") + ","
+                rewritten.writeInteger(UInt32(list.utf8.count))
+                rewritten.writeString(list)
+            }
+            rewritten.writeBuffer(&payload)
+            var newPadding = 8 - (rewritten.readableBytes + 5) % 8
+            if newPadding < 4 { newPadding += 8 }
+            out.writeInteger(UInt32(rewritten.readableBytes + newPadding + 1))
+            out.writeInteger(UInt8(newPadding))
+            out.writeBuffer(&rewritten)
+            out.writeBytes([UInt8](repeating: 0, count: newPadding))
+            out.writeBuffer(&buffer)
+            done = true
+        }
+        context.write(wrapOutboundOut(out), promise: promise)
     }
 }
 

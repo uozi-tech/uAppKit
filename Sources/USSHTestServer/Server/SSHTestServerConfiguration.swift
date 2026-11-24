@@ -196,11 +196,15 @@ public struct SSHTestFaults: Sendable {
     public var rejectFirstAuthenticationAttempts: Int
     /// 接受 TCP 连接后一言不发（不发版本行），用来测握手超时。
     public var withholdServerVersion: Bool
+    /// 把服务端 KEXINIT 里的每个 name-list 写成带空项与结尾逗号的样子（`a,b` → `,a,,b,`）。RFC 4251 不允许，
+    /// 但 NIOSSH 照收（按逗号切、丢掉空项），所以有的实现就这么发。不影响交换哈希：NIOSSH 解析之后重新序列化再算。
+    public var unusualNameLists: Bool
 
     public init(authenticationDelay: Duration? = nil, rejectFirstAuthenticationAttempts: Int = 0,
-                withholdServerVersion: Bool = false) {
+                withholdServerVersion: Bool = false, unusualNameLists: Bool = false) {
         self.authenticationDelay = authenticationDelay
         self.rejectFirstAuthenticationAttempts = rejectFirstAuthenticationAttempts
         self.withholdServerVersion = withholdServerVersion
+        self.unusualNameLists = unusualNameLists
     }
 }

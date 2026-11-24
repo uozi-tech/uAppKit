@@ -29,12 +29,12 @@ public nonisolated struct SSHForwardingChannelFailure: Sendable {
     }
 
     public let kind: Kind
-    /// 原始错误文本，供日志与排查。
+    /// 原始错误文本，供日志与排查。里面可能有服务器的原话，已经过 `SSHPeerText.sanitize`（去控制字符、截断）。
     public let detail: String
 
     public init(kind: Kind, detail: String) {
         self.kind = kind
-        self.detail = detail
+        self.detail = SSHPeerText.sanitize(detail)
     }
 
     public init(classifying error: Error) {
