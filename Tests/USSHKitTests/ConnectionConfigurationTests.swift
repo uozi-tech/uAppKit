@@ -17,10 +17,18 @@ final class ConnectionConfigurationTests: XCTestCase {
             approver: { _ in true }, maximumPacketSize: maximumPacketSize)
     }
 
+    /// 窗口 = 包长 × 64：要 16 MiB 窗口（uTerm 的并行传输）传 256 KiB。
     func testCarriesMaximumPacketSize() throws {
+        let configuration = try configuration(maximumPacketSize: 1 << 18)
+        XCTAssertEqual(configuration.maximumPacketSize, 1 << 18)
+        XCTAssertEqual(configuration.channelWindowSize, 16 << 20)
+    }
+
+    /// 旧 fork 的数字照搬过来（1 MiB）会被夹到上限 512 KiB → 32 MiB 窗口，不是 1 MiB。
+    func testOldPacketSizeIsClampedToTheNewCap() throws {
         let configuration = try configuration(maximumPacketSize: 1 << 20)
-        XCTAssertEqual(configuration.maximumPacketSize, 1 << 20)
-        XCTAssertEqual(configuration.channelWindowSize, 64 << 20)
+        XCTAssertEqual(configuration.effectiveMaximumPacketSize, 1 << 19)
+        XCTAssertEqual(configuration.channelWindowSize, 32 << 20)
     }
 
     /// 越界值不用调用方自己夹：USSHCore 夹进区间（NIOSSH 对越界值是 precondition，进程 abort）。
@@ -35,8 +43,9 @@ final class ConnectionConfigurationTests: XCTestCase {
         let configuration = try configuration()
         XCTAssertEqual(configuration.maximumPacketSize, SSHClient.defaultMaximumPacketSize)
         XCTAssertEqual(configuration.algorithms.transportProtectionSchemes.map { $0.cipherName },
-                       SSHAlgorithms().transportProtectionSchemes.map { $0.cipherName },
+                       SSHAlgorithms.builtInOnly.transportProtectionSchemes.map { $0.cipherName },
                        "默认只用 NIOSSH 自带的算法")
+        XCTAssertEqual(configuration.algorithms.hostKeyAlgorithms, SSHAlgorithms.builtInOnly.hostKeyAlgorithms)
     }
 
     /// TCP 建连与握手各给 connectTimeout；等主机密钥只有 `.ask` 给审批时限。
@@ -57,7 +66,10 @@ final class ConnectionConfigurationTests: XCTestCase {
 
         let rsa = try configuration(credential: .privateKey(pem: KeyImportFixtures.rsaPKCS1, passphrase: nil))
             .authentication
-        XCTAssertEqual(rsa.methods.map(\.kind), [.publicKey, .publicKey], "rsa-sha2-512，再 rsa-sha2-256")
+        XCTAssertEqual(rsa.methods.map(\.kind), [.publicKey])
+        guard case .rsaPrivateKey = rsa.methods.first else {
+            return XCTFail("RSA 私钥应走 USSHCore 的 .rsaPrivateKey（按 server-sig-algs 挑签名算法）")
+        }
 
         let ed25519 = try configuration(credential: .privateKey(pem: KeyImportFixtures.ed25519OpenSSH, passphrase: nil))
             .authentication

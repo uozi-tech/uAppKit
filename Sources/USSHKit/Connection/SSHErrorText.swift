@@ -61,7 +61,38 @@ nonisolated enum SSHErrorText {
             return String(localized: "服务器关闭了连接", bundle: ModuleBundle.bundle)
         case .transportError(let error):
             return String(localized: "连接中断：\(describe(error))", bundle: ModuleBundle.bundle)
+        case .keepAliveTimeout(let unanswered):
+            return String(localized: "服务器连续 \(unanswered) 次没有回应保活请求，连接已断开", bundle: ModuleBundle.bundle)
         }
+    }
+
+    /// CHANNEL_OPEN_FAILURE 按原因码说（RFC 4254 §5.1）：服务器不许开这类通道、服务器连不上目标，用户要分得清。
+    static func describe(_ failure: SSHChannelOpenFailure) -> String {
+        switch failure.reason {
+        case .administrativelyProhibited:
+            return String(localized: "服务器禁止打开这类通道（例如关闭了端口转发）", bundle: ModuleBundle.bundle)
+        case .connectFailed:
+            return String(localized: "服务器连不上目标（连接被拒绝或地址不可达）", bundle: ModuleBundle.bundle)
+        case .unknownChannelType:
+            return String(localized: "服务器不支持这类通道", bundle: ModuleBundle.bundle)
+        case .resourceShortage:
+            return String(localized: "服务器资源不足，暂时打不开新通道（例如超过了 MaxSessions）", bundle: ModuleBundle.bundle)
+        case .other:
+            let code = String(failure.reasonCode)
+            let detail = failure.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            if detail.isEmpty {
+                return String(localized: "服务器拒绝打开通道（原因码 \(code)）", bundle: ModuleBundle.bundle)
+            }
+            return String(localized: "服务器拒绝打开通道（原因码 \(code)）：\(detail)", bundle: ModuleBundle.bundle)
+        }
+    }
+
+    /// 握手失败的细节：协商不出共同的算法单独说（多半是对端只剩旧算法，要在 app 里放宽算法集）。
+    static func describeHandshake(_ error: any Error) -> String {
+        if let sshError = error as? NIOSSHError, sshError.type == .keyExchangeNegotiationFailure {
+            return String(localized: "与服务器没有共同支持的算法（服务器可能只支持旧算法）", bundle: ModuleBundle.bundle)
+        }
+        return describe(error)
     }
 
     /// 认证失败的原因：按实际发出过的方式说；什么都没发出过、或发出过的方式服务器根本不收，
@@ -125,8 +156,10 @@ extension SSHClientError: LocalizedError {
             return SSHErrorText.describe(error)
         case .authenticationFailed(let failure):
             return SSHErrorText.describe(failure)
+        case .authenticationDelegateFailed(let error):
+            return String(localized: "认证过程出错：\(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
         case .handshakeFailed(let error):
-            return String(localized: "SSH 握手失败：\(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
+            return String(localized: "SSH 握手失败：\(SSHErrorText.describeHandshake(error))", bundle: ModuleBundle.bundle)
         case .connectionClosed(let reason):
             return SSHErrorText.describe(reason)
         }
@@ -136,8 +169,10 @@ extension SSHClientError: LocalizedError {
 extension SSHChannelError: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case .openRejected(let error):
-            return String(localized: "服务器拒绝打开通道：\(String(describing: error))", bundle: ModuleBundle.bundle)
+        case .openRejected(let failure):
+            return SSHErrorText.describe(failure)
+        case .channelFailed(let error):
+            return String(localized: "通道出错：\(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
         case .requestRejected(let kind):
             return String(localized: "服务器拒绝了通道请求（\(Self.name(of: kind))）", bundle: ModuleBundle.bundle)
         case .globalRequestRejected(.tcpipForward(let host, let port)):
@@ -186,6 +221,10 @@ extension SFTPError: LocalizedError {
             return String(localized: "文件句柄已关闭", bundle: ModuleBundle.bundle)
         case .limitExceeded(let maximumBytes):
             return String(localized: "读取的内容超过上限（\(maximumBytes) 字节）", bundle: ModuleBundle.bundle)
+        case .shortRead(let expected, let actual):
+            return String(localized: "文件在读取过程中变短了（应有 \(expected) 字节，只读到 \(actual) 字节）", bundle: ModuleBundle.bundle)
+        case .offsetOutOfRange:
+            return String(localized: "读写的位置超出了范围", bundle: ModuleBundle.bundle)
         }
     }
 
@@ -244,7 +283,9 @@ extension SSHRSAError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .unsupportedModulusSize(let bits):
-            return String(localized: "RSA 密钥长度 \(String(bits)) 位不受支持（支持 1024–16384 位）", bundle: ModuleBundle.bundle)
+            let minimum = String(SSHRSAPublicKey.minimumModulusBits)
+            let maximum = String(SSHRSAPublicKey.maximumModulusBits)
+            return String(localized: "RSA 密钥长度 \(String(bits)) 位不受支持（支持 \(minimum)–\(maximum) 位）", bundle: ModuleBundle.bundle)
         case .invalidPublicKey, .unexpectedKeyType:
             return String(localized: "RSA 公钥分量不合法", bundle: ModuleBundle.bundle)
         case .invalidPrivateKey:

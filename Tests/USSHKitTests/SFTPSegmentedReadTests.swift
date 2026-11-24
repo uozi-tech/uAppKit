@@ -2,92 +2,96 @@ import XCTest
 import NIOCore
 @testable import USSHKit
 
-/// `SSHFileTransferSession.pipelinedRead`：同一条 SFTP 通道上保持多个读请求在路上，
-/// 结果按偏移顺序写出。每个读请求在真实网络上就是一个往返 —— 以前一次只发一个，
-/// 16 MB 要 ~560 个往返（150ms 线路上 90s）。
-final class SFTPPipelinedReadTests: XCTestCase {
+/// `SSHFileTransferSession.segmentedRead`：stat 过的那部分按段读，每段必须读满（生产里是
+/// `SFTPFile.readAll(expectedLength:)`，段内的窗口化并发与短读补发由 USSHCore 负责、在它自己的测试里），
+/// 之后接着读到 EOF。截短的文件绝不能被当成下载完成。
+final class SFTPSegmentedReadTests: XCTestCase {
 
-    /// 假的远端文件：记录同时在路上的读请求数，可限制每次最多返回多少字节。
-    private actor FakeRemote {
+    /// 假的远端文件：`readExactly` 照 `readAll(expectedLength:)` 的规矩，不够就抛 `shortRead`。
+    private final class FakeRemote: @unchecked Sendable {
         var data: [UInt8]
-        let maxPerRead: Int?
-        let latency: Duration
-        private(set) var inFlight = 0
-        private(set) var maxInFlight = 0
-        private(set) var reads = 0
+        private(set) var exactReads: [(UInt64, Int)] = []
+        private(set) var nextReads = 0
 
-        init(size: Int, maxPerRead: Int? = nil, latency: Duration = .milliseconds(2)) {
+        init(size: Int) {
             data = (0..<size).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 >> 8) }
-            self.maxPerRead = maxPerRead
-            self.latency = latency
         }
 
-        func read(_ offset: UInt64, _ length: UInt32) async throws -> ByteBuffer {
-            reads += 1
-            inFlight += 1
-            maxInFlight = max(maxInFlight, inFlight)
-            try await Task.sleep(for: latency)
-            inFlight -= 1
+        func readExactly(_ offset: UInt64, _ length: Int) throws -> ByteBuffer {
+            exactReads.append((offset, length))
             let start = Int(min(offset, UInt64(data.count)))
-            var end = min(data.count, start + Int(length))
-            if let maxPerRead { end = min(end, start + maxPerRead) }
+            let end = min(data.count, start + length)
+            guard end - start == length else { throw SFTPError.shortRead(expected: length, actual: end - start) }
             return ByteBuffer(bytes: data[start..<end])
         }
 
-        func resize(to size: Int) {
-            data = Array((0..<size).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 >> 8) })
+        func readNext(_ offset: UInt64) -> ByteBuffer? {
+            nextReads += 1
+            let start = Int(min(offset, UInt64(data.count)))
+            guard start < data.count else { return nil }
+            return ByteBuffer(bytes: data[start..<min(data.count, start + 1000)])
         }
     }
 
-    private func download(_ remote: FakeRemote, expectedSize: Int64, chunk: Int = 1024, window: Int = 8,
+    private func download(_ remote: FakeRemote, expectedSize: Int64, segment: Int = 4096,
                           maximumBytes: Int64? = nil) async throws -> [UInt8] {
         var out: [UInt8] = []
-        _ = try await SSHFileTransferSession.pipelinedRead(
-            expectedSize: expectedSize, chunkSize: chunk, window: window, maximumBytes: maximumBytes,
-            read: { try await remote.read($0, $1) },
+        _ = try await SSHFileTransferSession.segmentedRead(
+            expectedSize: expectedSize, segmentBytes: segment, maximumBytes: maximumBytes,
+            readExactly: { try remote.readExactly($0, $1) },
+            readNext: { remote.readNext($0) },
             write: { out.append(contentsOf: $0.readableBytesView) }
         )
         return out
     }
 
-    func testKeepsTheWindowInFlightAndWritesInOrder() async throws {
-        let remote = FakeRemote(size: 100 * 1024 + 17)
-        let out = try await download(remote, expectedSize: 100 * 1024 + 17)
-        let expected = await remote.data
-        XCTAssertEqual(out, expected)
-        let maxInFlight = await remote.maxInFlight
-        XCTAssertEqual(maxInFlight, 8, "读请求没有并行在路上：又退回了一次一个往返")
-        let reads = await remote.reads
-        XCTAssertEqual(reads, 101 + 1, "101 个块 + 末尾一次 EOF 确认")
-    }
-
-    func testShortReadsAreCompletedBeforeLaterChunksAreWritten() async throws {
-        let remote = FakeRemote(size: 20 * 1024, maxPerRead: 300)
-        let out = try await download(remote, expectedSize: 20 * 1024)
-        let expected = await remote.data
-        XCTAssertEqual(out, expected, "服务端短读时内容错位")
+    func testReadsTheStatedSizeInSegmentsThenConfirmsEOF() async throws {
+        let remote = FakeRemote(size: 10 * 1024 + 17)
+        let out = try await download(remote, expectedSize: 10 * 1024 + 17)
+        XCTAssertEqual(out, remote.data)
+        XCTAssertEqual(remote.exactReads.map(\.1), [4096, 4096, 2065])
+        XCTAssertEqual(remote.nextReads, 1, "末尾一次 EOF 确认")
     }
 
     func testFileThatGrewIsStillCopiedWhole() async throws {
         let remote = FakeRemote(size: 10 * 1024 + 500)
         let out = try await download(remote, expectedSize: 4 * 1024)   // stat 时只有 4 KB
-        let expected = await remote.data
-        XCTAssertEqual(out, expected)
+        XCTAssertEqual(out, remote.data)
     }
 
-    func testFileThatShrankStopsAtItsEnd() async throws {
+    /// stat 时更大、读的时候变短了：报 `shortRead`，不能当成下载完成（迁移前会按成功返回）。
+    func testFileThatShrankIsAnError() async throws {
         let remote = FakeRemote(size: 3 * 1024 + 10)
-        let out = try await download(remote, expectedSize: 9 * 1024)   // stat 时更大
-        let expected = await remote.data
-        XCTAssertEqual(out, expected)
+        do {
+            _ = try await download(remote, expectedSize: 9 * 1024)
+            XCTFail("截短的文件不能算下载成功")
+        } catch SFTPError.shortRead(let expected, let actual) {
+            XCTAssertEqual(expected, 4096)
+            XCTAssertEqual(actual, 3 * 1024 + 10)
+        }
+    }
+
+    /// 读段的实现即便交回不足的数据（不该发生），也不会被当成完整的一段写出去。
+    func testShortSegmentFromReaderIsRejected() async throws {
+        do {
+            _ = try await SSHFileTransferSession.segmentedRead(
+                expectedSize: 100, segmentBytes: 64, maximumBytes: nil,
+                readExactly: { _, _ in ByteBuffer(bytes: [1, 2, 3]) },
+                readNext: { _ in nil },
+                write: { _ in XCTFail("不足的段不能写出") })
+            XCTFail("应当失败")
+        } catch SFTPError.shortRead(let expected, let actual) {
+            XCTAssertEqual(expected, 64)
+            XCTAssertEqual(actual, 3)
+        }
     }
 
     func testEmptyFileTakesOneRead() async throws {
         let remote = FakeRemote(size: 0)
         let out = try await download(remote, expectedSize: 0)
         XCTAssertTrue(out.isEmpty)
-        let reads = await remote.reads
-        XCTAssertEqual(reads, 1)
+        XCTAssertTrue(remote.exactReads.isEmpty)
+        XCTAssertEqual(remote.nextReads, 1)
     }
 
     func testSizeCapStillApplies() async throws {
@@ -99,11 +103,10 @@ final class SFTPPipelinedReadTests: XCTestCase {
         }
     }
 
-    /// 读请求窗口要宽，SFTP 通道的流控窗口还得装得下整窗在途字节 —— 否则流控
-    /// 窗口才是瓶颈（128 KiB 默认值下，并行读也只快了 2.5 倍）。
+    /// 在途的 READ 要装得进 SFTP 通道的流控窗口（否则窗口才是瓶颈）：16 × OpenSSH 允许的最大 READ（255 KiB）。
     func testProductionWindowsCoverTheReadPipeline() {
         XCTAssertGreaterThanOrEqual(SSHFileTransferSession.downloadWindow, 16)
-        let inFlight = SSHFileTransferSession.downloadWindow * 32 * 1024
+        let inFlight = SSHFileTransferSession.downloadWindow * 255 * 1024
         XCTAssertGreaterThanOrEqual(SSHFileTransferSession.defaultChannelWindowBytes, inFlight)
         // 会话按「窗口 / 64」要包长（NIOSSH 0.15 的窗口 = 包长 × 64），要落在 USSHCore 不用夹的区间里，
         // 实际通告的窗口才是想要的那么大。

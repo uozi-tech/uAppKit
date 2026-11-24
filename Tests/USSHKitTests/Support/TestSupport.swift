@@ -83,30 +83,21 @@ enum TestSSH {
     static let username = "tester"
     static let password = "hunter2"
 
-    /// RSA 用户私钥要服务端（进程内的 `SSHTestServer`）认得 `ssh-rsa` / `rsa-sha2-*` 才能验签，
-    /// 登记是进程级的，登记一次。
-    // SSH-STACK-TODO(core): Track E 合进来以后改成登记 USSHCore 的 RSA 类型（或由测试服务端自己登记），
-    // 垫片类型随 CoreShims.swift 一起删掉。
-    static let registerRSA: Void = {
-        NIOSSHAlgorithms.register(publicKey: ShimRSAPublicKey.self, signature: ShimRSASignature<ShimRSASHA512>.self)
-        NIOSSHAlgorithms.register(publicKey: ShimRSAPublicKey.self, signature: ShimRSASignature<ShimRSASHA256>.self)
-    }()
-
     /// 口令登录的服务端，exec 回 `echo`（`echo hello` → "hello\n"）。
     static func startServer(
         authentication: SSHTestAuthentication = SSHTestAuthentication(passwords: [username: password]),
         allowsDirectTCPIP: Bool = true,
-        subsystems: [String: SSHTestSubsystemHandler] = [:],
-        faults: SSHTestFaults = SSHTestFaults()
+        faults: SSHTestFaults = SSHTestFaults(),
+        customize: (inout SSHTestServer.Configuration) -> Void = { _ in }
     ) async throws -> SSHTestServer {
-        _ = registerRSA
-        return try await SSHTestServer.start(SSHTestServer.Configuration(
+        var configuration = SSHTestServer.Configuration(
             authentication: authentication,
             exec: .routes(["echo hello": .scripted(stdout: "hello\n")]),
-            subsystems: subsystems,
             allowsDirectTCPIP: allowsDirectTCPIP,
             faults: faults
-        ))
+        )
+        customize(&configuration)
+        return try await SSHTestServer.start(configuration)
     }
 
     /// 服务端主机公钥在库里的样子。
@@ -127,7 +118,9 @@ enum TestSSH {
         connectTimeout: Duration = .seconds(10),
         approvalTimeout: Duration = .seconds(180),
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in true },
-        jumpHost: SSHJumpHost? = nil
+        jumpHost: SSHJumpHost? = nil,
+        algorithms: SSHAlgorithms = .builtInOnly,
+        keepAliveInterval: Duration? = nil
     ) async throws -> ConnectedClient {
         try await USSHKitIntegration.connect(
             endpoint: endpoint(server, jumpHost: jumpHost),
@@ -136,13 +129,16 @@ enum TestSSH {
             hostKeyPolicy: policy,
             connectTimeout: connectTimeout,
             approvalTimeout: approvalTimeout,
-            approver: approver
+            approver: approver,
+            algorithms: algorithms,
+            keepAliveInterval: keepAliveInterval
         )
     }
 
     /// 私钥对应的 OpenSSH 公钥（交给测试服务端的 `authorizedKeys`）。
     static func publicKey(ofPrivateKey pem: String, passphrase: String? = nil) throws -> NIOSSHPublicKey {
-        _ = registerRSA
+        // 解析 `ssh-rsa …` 公钥行要 NIOSSH 认得 RSA（建连接、起测试服务端时 USSHCore 会自动登记，这里早一步）。
+        SSHAlgorithms.registerStandardAlgorithms()
         let parsed = try SSHPrivateKeyParser.parse(pem: pem, passphrase: passphrase)
         let material = try KeyImportInspector.inspect(rawText: pem, parsed: parsed, comment: "test")
         return try NIOSSHPublicKey(openSSHPublicKey: material.publicKey)

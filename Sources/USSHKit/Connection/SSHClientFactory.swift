@@ -75,6 +75,7 @@ nonisolated enum SSHClientFactory {
         var approver: @Sendable (SSHHostKeyChallenge) async -> Bool
         var maximumPacketSize: Int
         var algorithms: SSHAlgorithms
+        var keepAliveInterval: Duration?
     }
 
     static func connect(
@@ -86,7 +87,8 @@ nonisolated enum SSHClientFactory {
         approvalTimeout: Duration,
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
         maximumPacketSize: Int = SSHClient.defaultMaximumPacketSize,
-        algorithms: SSHAlgorithms = CoreShims.defaultAlgorithms
+        algorithms: SSHAlgorithms = .builtInOnly,
+        keepAliveInterval: Duration? = nil
     ) async throws -> ConnectedClient {
         let options = Options(
             hostKeyStore: hostKeyStore,
@@ -95,7 +97,8 @@ nonisolated enum SSHClientFactory {
             approvalTimeout: approvalTimeout,
             approver: approver,
             maximumPacketSize: maximumPacketSize,
-            algorithms: algorithms
+            algorithms: algorithms,
+            keepAliveInterval: keepAliveInterval
         )
         let target = Hop(host: endpoint.host, port: endpoint.port, username: endpoint.username,
                          credential: credential)
@@ -111,7 +114,7 @@ nonisolated enum SSHClientFactory {
     /// 都装在外层那条 direct-tcpip 子通道里，外层窗口不放大，内层放大了也白搭。
     ///
     /// 时限：TCP 建连与「握手 + 认证」各给 `connectTimeout`；等主机密钥回调的那段不计入握手（USSHCore
-    /// 暂停计时），单独给 `HostKeyTrust.validationTimeout`。
+    /// 暂停计时），单独给 `HostKeyTrust.validationTimeout`。保活默认关（`keepAliveInterval == nil`，今天的行为）。
     static func makeConfiguration(_ hop: Hop, options: Options) throws -> SSHClient.Configuration {
         let trust = HostKeyTrust(
             host: hop.host,
@@ -120,7 +123,7 @@ nonisolated enum SSHClientFactory {
             policy: options.hostKeyPolicy,
             approver: options.approver
         )
-        return SSHClient.Configuration(
+        var configuration = SSHClient.Configuration(
             authentication: try makeAuthentication(username: hop.username, credential: hop.credential),
             hostKeyValidation: trust.validation,
             connectTimeout: options.connectTimeout,
@@ -133,6 +136,9 @@ nonisolated enum SSHClientFactory {
             maximumPacketSize: options.maximumPacketSize,
             algorithms: options.algorithms
         )
+        // 两跳各自保活：外层断了内层随之断，但外层还活着、内层的服务器卡死时只有内层的保活看得见。
+        configuration.keepAliveInterval = options.keepAliveInterval
+        return configuration
     }
 
     private static func connectDirect(_ hop: Hop, options: Options) async throws -> SSHClient {
@@ -209,7 +215,7 @@ nonisolated enum SSHClientFactory {
                 return .hostKeyRejected(SSHErrorText.describe(underlying))
             case .hostKeyValidationTimeout:
                 return .hostKeyRejected(SSHErrorText.describe(error))
-            case .authenticationFailed:
+            case .authenticationFailed, .authenticationDelegateFailed:
                 return .authenticationFailed(SSHErrorText.describe(error))
             case .connectTimeout, .connectFailed, .handshakeTimeout, .handshakeFailed, .connectionClosed:
                 return .connectFailed(SSHErrorText.describe(error))

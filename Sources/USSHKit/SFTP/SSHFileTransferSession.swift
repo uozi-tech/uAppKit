@@ -39,12 +39,6 @@ public actor SSHFileTransferSession {
     private let connected: ConnectedClient
     private let sftp: SFTPClient
 
-    /// Chunk size for streamed transfers. Every SFTP server accepts this much per
-    /// READ / WRITE (`SFTPClient` falls back to 32 KiB when the server does not
-    /// announce `limits@openssh.com`); larger servers' limits are not used so the
-    /// read pipeline below keeps the same in-flight bytes as before.
-    private static let chunkSize = 32 * 1024
-
     private init(connected: ConnectedClient, sftp: SFTPClient) {
         self.connected = connected
         self.sftp = sftp
@@ -57,7 +51,8 @@ public actor SSHFileTransferSession {
     ///
     /// NIOSSH 0.15 sizes every child channel's window as 64 × the maximum
     /// packet size, so the session asks for `channelWindowBytes / 64` as its
-    /// packet size (USSHCore clamps it to `SSHClient.maximumPacketSizeRange`).
+    /// packet size. USSHCore clamps that to `SSHClient.maximumPacketSizeRange`
+    /// (32 KiB…512 KiB), so the window this can actually get is 2 MiB…32 MiB.
     public static let defaultChannelWindowBytes = 1 << 22
 
     /// The maximum packet size that gives an inbound window of `windowBytes`.
@@ -91,7 +86,7 @@ public actor SSHFileTransferSession {
             maximumPacketSize: maximumPacketSize(forWindow: channelWindowBytes)
         )
         do {
-            let sftp = try await CoreShims.openSFTP(on: connected.target)
+            let sftp = try await connected.target.openSFTP()
             return SSHFileTransferSession(connected: connected, sftp: sftp)
         } catch {
             await connected.close()
@@ -108,14 +103,25 @@ public actor SSHFileTransferSession {
         )
     }
 
-    /// Read requests kept in flight during `download`, all on this session's one
+    /// READ requests kept in flight during `download`, all on this session's one
     /// SFTP channel (no extra channels are opened). With a single outstanding
-    /// read, every 32 KB chunk cost a full round trip: a 16 MB file took ~560
-    /// RTTs — 90 s over a 150 ms link. OpenSSH's `sftp` keeps 64 in flight;
-    /// 64 × 32 KB = 2 MB, inside `defaultChannelWindowBytes`.
-    static let downloadWindow = 64
+    /// read every chunk costs a full round trip: a 16 MB file took ~560 RTTs —
+    /// 90 s over a 150 ms link. 16 × the largest READ OpenSSH allows (255 KiB)
+    /// still fits inside `defaultChannelWindowBytes`, so the server never has to
+    /// wait for a window adjust.
+    static let downloadWindow = 16
+
+    /// How much of the stat'ed size one `readAll(expectedLength:)` covers (and
+    /// so how much is held in memory before it is written out).
+    static let downloadSegmentBytes = 8 << 20
 
     /// Stream the remote file to `localURL`, overwriting any existing local file.
+    ///
+    /// The stat'ed size is read with `SFTPFile.readAll(expectedLength:)`, so a
+    /// file that is shorter than it claimed (truncated meanwhile, or a server
+    /// reporting EOF early) fails with `SFTPError.shortRead` instead of being
+    /// reported as a complete download. Bytes past the stat'ed size (the file
+    /// grew) are still copied until EOF.
     ///
     /// - Parameter maximumBytes: When non-nil, the download fails fast (both from
     ///   the pre-flight `stat` and while reading) once the observed size exceeds
@@ -141,16 +147,16 @@ public actor SSHFileTransferSession {
         defer { try? handle.close() }
 
         let file = try await sftp.openFile(remotePath, flags: .read)
+        let chunk = sftp.maximumReadLength
         do {
-            _ = try await Self.pipelinedRead(
+            _ = try await Self.segmentedRead(
                 expectedSize: info.size,
-                chunkSize: Self.chunkSize,
-                window: Self.downloadWindow,
+                segmentBytes: Self.downloadSegmentBytes,
                 maximumBytes: maximumBytes,
-                read: { offset, length in
-                    // nil = EOF，按空块交给流水线（它把空块当 EOF）。
-                    try await file.read(from: offset, length: Int(length)) ?? ByteBuffer()
+                readExactly: { offset, length in
+                    try await file.readAll(from: offset, expectedLength: length, window: Self.downloadWindow)
                 },
+                readNext: { offset in try await file.read(from: offset, length: chunk) },
                 write: { buffer in try handle.write(contentsOf: Data(buffer.readableBytesView)) }
             )
             try await file.close()
@@ -161,20 +167,18 @@ public actor SSHFileTransferSession {
         return info
     }
 
-    /// Windowed, in-order read of a file whose size was `stat`ed as `expectedSize`.
-    ///
-    /// Up to `window` chunk reads are outstanding at once; results are written
-    /// strictly in offset order. A short read (servers may return less than
-    /// asked) is completed with serial follow-up reads before anything after it
-    /// is written. Once the stat'ed size is consumed, reading continues serially
-    /// until EOF, so a file that grew meanwhile is still copied whole — the same
-    /// contract as the old one-read-at-a-time loop. Returns the bytes written.
-    static func pipelinedRead(
+    /// Read a file whose size was `stat`ed as `expectedSize`: the stat'ed bytes in
+    /// segments of `segmentBytes`, each of which must arrive whole (`readExactly`
+    /// throws if the file ends early — the session passes `readAll(expectedLength:)`),
+    /// then whatever follows until EOF (`readNext` returns nil), so a file that grew
+    /// meanwhile is still copied whole. Segments are written strictly in order.
+    /// Returns the bytes written.
+    static func segmentedRead(
         expectedSize: Int64,
-        chunkSize: Int,
-        window: Int,
+        segmentBytes: Int,
         maximumBytes: Int64?,
-        read: @escaping @Sendable (UInt64, UInt32) async throws -> ByteBuffer,
+        readExactly: (UInt64, Int) async throws -> ByteBuffer,
+        readNext: (UInt64) async throws -> ByteBuffer?,
         write: (ByteBuffer) throws -> Void
     ) async throws -> Int64 {
         var received: Int64 = 0
@@ -187,53 +191,24 @@ public actor SSHFileTransferSession {
             received += count
         }
 
-        let planned = expectedSize > 0 ? Int((expectedSize + Int64(chunkSize) - 1) / Int64(chunkSize)) : 0
-        var reachedEOF = false
-        if planned > 0 {
-            try await withThrowingTaskGroup(of: (Int, ByteBuffer).self) { group in
-                var nextToIssue = 0
-                var nextToWrite = 0
-                var ready: [Int: ByteBuffer] = [:]
-                func issue() {
-                    let index = nextToIssue
-                    nextToIssue += 1
-                    let offset = UInt64(index) * UInt64(chunkSize)
-                    group.addTask { (index, try await read(offset, UInt32(chunkSize))) }
-                }
-                while nextToIssue < min(window, planned) { issue() }
-                while nextToWrite < planned, let (index, buffer) = try await group.next() {
-                    ready[index] = buffer
-                    while let buffer = ready.removeValue(forKey: nextToWrite) {
-                        if buffer.readableBytes == 0 {
-                            // File shrank below the stat'ed size: done.
-                            reachedEOF = true
-                            group.cancelAll()
-                            return
-                        }
-                        try accept(buffer)
-                        var tail = UInt64(nextToWrite) * UInt64(chunkSize) + UInt64(buffer.readableBytes)
-                        let chunkEnd = UInt64(nextToWrite + 1) * UInt64(chunkSize)
-                        while tail < chunkEnd {
-                            let rest = try await read(tail, UInt32(chunkEnd - tail))
-                            if rest.readableBytes == 0 {
-                                reachedEOF = true
-                                group.cancelAll()
-                                return
-                            }
-                            try accept(rest)
-                            tail += UInt64(rest.readableBytes)
-                        }
-                        nextToWrite += 1
-                        if nextToIssue < planned { issue() }
-                    }
-                }
-            }
-        }
-        var offset = UInt64(received)
-        while !reachedEOF {
+        var offset: UInt64 = 0
+        let total = UInt64(max(0, expectedSize))
+        while offset < total {
             try Task.checkCancellation()
-            let buffer = try await read(offset, UInt32(chunkSize))
-            if buffer.readableBytes == 0 { break }
+            let length = Int(min(UInt64(segmentBytes), total - offset))
+            let segment = try await readExactly(offset, length)
+            guard segment.readableBytes == length else {
+                // readAll(expectedLength:) never hands back a different length; guard
+                // anyway so a short segment can never be written as if complete.
+                throw SFTPError.shortRead(expected: length, actual: segment.readableBytes)
+            }
+            try accept(segment)
+            offset += UInt64(length)
+        }
+        while true {
+            try Task.checkCancellation()
+            guard let buffer = try await readNext(offset) else { break }
+            guard buffer.readableBytes > 0 else { break }
             try accept(buffer)
             offset += UInt64(buffer.readableBytes)
         }
@@ -277,7 +252,8 @@ public actor SSHFileTransferSession {
             remotePath,
             flags: [.write, .create, .truncate]
         )
-        let chunkSize = min(Self.chunkSize, sftp.maximumWriteLength)
+        // 每个 WRITE 按服务端允许的上限切（`limits@openssh.com`，没宣告时 SFTPClient 按 32 KiB）。
+        let chunkSize = sftp.maximumWriteLength
         do {
             var offset: UInt64 = 0
             while true {

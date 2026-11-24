@@ -29,6 +29,10 @@ final class ErrorTextTests: XCTestCase {
             (.connectionClosed(.transportError(ChannelError.eof)),
              localized("连接中断：\(SSHErrorText.describe(ChannelError.eof))")),
             (.handshakeFailed(ChannelError.eof), localized("SSH 握手失败：\(SSHErrorText.describe(ChannelError.eof))")),
+            (.authenticationDelegateFailed(ChannelError.eof),
+             localized("认证过程出错：\(SSHErrorText.describe(ChannelError.eof))")),
+            (.connectionClosed(.keepAliveTimeout(unansweredProbes: 3)),
+             localized("服务器连续 \(3) 次没有回应保活请求，连接已断开")),
         ]
         for (error, expected) in cases {
             XCTAssertEqual(error.errorDescription, expected, "\(error)")
@@ -40,6 +44,8 @@ final class ErrorTextTests: XCTestCase {
         func map(_ error: any Error) throws -> SSHConnectionError { try SSHClientFactory.connectionError(for: error) }
         guard case .authenticationFailed = try map(SSHClientError.authenticationFailed(
             .init(remainingMethods: [], attemptedMethods: [.password]))) else { return XCTFail() }
+        guard case .authenticationFailed = try map(SSHClientError.authenticationDelegateFailed(ChannelError.eof))
+        else { return XCTFail("委托认证出错也是认证失败") }
         guard case .hostKeyRejected = try map(SSHClientError.hostKeyValidationTimeout(.seconds(1))) else { return XCTFail() }
         guard case .hostKeyRejected("x") = try map(SSHClientError.hostKeyRejected(SSHConnectionError.hostKeyRejected("x")))
         else { return XCTFail("信任判定自己的拒绝原样交出") }
@@ -53,6 +59,8 @@ final class ErrorTextTests: XCTestCase {
 
     func testChannelErrorKeys() {
         XCTAssertEqual(SSHChannelError.channelClosed.errorDescription, localized("通道已关闭"))
+        XCTAssertEqual(SSHChannelError.channelFailed(ChannelError.eof).errorDescription,
+                       localized("通道出错：\(SSHErrorText.describe(ChannelError.eof))"))
         XCTAssertEqual(SSHChannelError.requestRejected(.subsystem("sftp")).errorDescription,
                        localized("服务器拒绝了通道请求（\("subsystem sftp")）"))
         XCTAssertEqual(SSHChannelError.globalRequestRejected(.tcpipForward(host: "0.0.0.0", port: 8080)).errorDescription,
@@ -73,6 +81,9 @@ final class ErrorTextTests: XCTestCase {
         XCTAssertEqual(SFTPError.status(code: SFTPStatusCode(99), message: "odd", languageTag: "").errorDescription,
                        localized("SFTP 错误（代码 \(String(99))）：\("odd")"))
         XCTAssertEqual(SFTPError.connectionClosed.errorDescription, localized("SFTP 通道已断开"))
+        XCTAssertEqual(SFTPError.shortRead(expected: 100, actual: 40).errorDescription,
+                       localized("文件在读取过程中变短了（应有 \(100) 字节，只读到 \(40) 字节）"))
+        XCTAssertEqual(SFTPError.offsetOutOfRange.errorDescription, localized("读写的位置超出了范围"))
         XCTAssertEqual(SFTPError.requestTooLarge(length: 70_000, limit: 32_768).errorDescription,
                        localized("SFTP 请求过大（\(70_000) 字节，上限 \(32_768) 字节）"))
     }
@@ -86,7 +97,7 @@ final class ErrorTextTests: XCTestCase {
         XCTAssertEqual(SSHCommandError.outputTooLarge(limit: 64_000).errorDescription,
                        localized("命令输出超过上限（\(64_000) 字节）"))
         XCTAssertEqual(SSHRSAError.unsupportedModulusSize(bits: 512).errorDescription,
-                       localized("RSA 密钥长度 \(String(512)) 位不受支持（支持 1024–16384 位）"))
+                       localized("RSA 密钥长度 \(String(512)) 位不受支持（支持 \(String(1024))–\(String(8192)) 位）"))
     }
 
     /// 英文资源确实带上了新文案（找不到时界面只剩中文原文）。

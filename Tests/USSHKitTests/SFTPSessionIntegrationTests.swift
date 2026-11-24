@@ -20,16 +20,14 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         try? FileManager.default.removeItem(at: localDirectory)
     }
 
-    private func startServer(extensions: [String: String] = SFTPServer.defaultExtensions) async throws -> SSHTestServer {
+    private func startServer(extensions: [String: String] = SFTPServer.defaultExtensions,
+                             faults: SFTPFaultInjector = SFTPFaultInjector()) async throws -> SSHTestServer {
         let fileSystem = self.fileSystem!
-        let configuration = SFTPServer.Configuration(extensions: extensions)
-        return try await TestSSH.startServer(subsystems: [
-            "sftp": { channel in
-                channel.eventLoop.makeCompletedFuture {
-                    _ = try SFTPServer.install(on: channel, fileSystem: fileSystem, configuration: configuration)
-                }
-            },
-        ])
+        return try await TestSSH.startServer { configuration in
+            configuration.serveSFTP(fileSystem: fileSystem,
+                                    configuration: SFTPServer.Configuration(extensions: extensions),
+                                    faults: faults)
+        }
     }
 
     private func open(_ server: SSHTestServer) async throws -> SSHFileTransferSession {
@@ -140,6 +138,46 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         } catch SSHFileTransferError.localFileUnavailable(let path) {
             XCTAssertEqual(path, missing.path)
         }
+        await session.close()
+    }
+
+    /// 服务端每次 READ 只给 1000 字节：短读由 `readAll(expectedLength:)` 在同一段里补齐，内容逐字节一致。
+    /// （乱序回答由 USSHCore 自己的 readAll 测试覆盖：注入器的乱序要请求数凑满一批，文件尾凑不满会扣住回答。）
+    func testDownloadSurvivesShortReads() async throws {
+        let faults = SFTPFaultInjector()
+        faults.limitReadLength(to: 1000)
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        let content = pattern(200 * 1024 + 3)
+        try content.write(to: URL(fileURLWithPath: fileSystem.hostPath(for: "/short.bin")))
+        let session = try await open(server)
+
+        let local = localDirectory.appendingPathComponent("short.bin")
+        try await session.download("/short.bin", to: local)
+        XCTAssertEqual(try Data(contentsOf: local), content)
+        await session.close()
+    }
+
+    /// 上传按服务端宣告的单次 WRITE 上限切块（这里 8 KiB，比迁移前写死的 32 KiB 小：写死的话第一块就 requestTooLarge）。
+    func testUploadChunksFollowTheServerWriteLimit() async throws {
+        let limits = SFTPServerLimits(maximumPacketLength: 32 * 1024, maximumReadLength: 8 * 1024,
+                                      maximumWriteLength: 8 * 1024, maximumOpenHandles: 0)
+        let fileSystem = self.fileSystem!
+        let server = try await TestSSH.startServer { configuration in
+            configuration.serveSFTP(fileSystem: fileSystem, configuration: SFTPServer.Configuration(limits: limits))
+        }
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+
+        let content = pattern(100 * 1024 + 1)
+        let local = localDirectory.appendingPathComponent("limited.bin")
+        try content.write(to: local)
+        try await session.uploadAtomically(local, to: "/limited.bin")
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: fileSystem.hostPath(for: "/limited.bin"))), content)
+
+        let back = localDirectory.appendingPathComponent("limited-back.bin")
+        try await session.download("/limited.bin", to: back)
+        XCTAssertEqual(try Data(contentsOf: back), content)
         await session.close()
     }
 }

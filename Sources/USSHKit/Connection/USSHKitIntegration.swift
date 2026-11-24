@@ -13,10 +13,14 @@ public enum USSHKitIntegration {
     ///   - approvalTimeout: `.ask` 策略下等 `approver` 回答的上限。等待期间握手不计时；到点算拒绝
     ///     （`SSHConnectionError.hostKeyRejected`），`approver` 所在的任务被取消。
     ///   - maximumPacketSize: 我方愿意接收的单个通道数据包的最大字节数。NIOSSH 0.15 把每条子通道的接收窗口
-    ///     定为它的 64 倍（默认 128 KiB → 8 MiB），所以它同时决定 SFTP 下载等大流量的在途字节数。越界值由
-    ///     USSHCore 夹进 `SSHClient.maximumPacketSizeRange`，不会 abort。跳板机两跳都设。
-    ///   - algorithms: 加密 / 密钥交换 / 主机密钥算法。默认是今天的行为：只用 NIOSSH 自带的算法
-    ///     （RSA 用户私钥照旧以 rsa-sha2-512 / -256 认证，与这一项无关）。要连只认旧算法的设备时由 app 决定放宽。
+    ///     定为它的 64 倍（默认 128 KiB → 8 MiB），所以它同时决定 SFTP 下载等大流量的在途字节数。要某个窗口就传
+    ///     「窗口 / 64」。USSHCore 把它夹进 `SSHClient.maximumPacketSizeRange`（32 KiB…512 KiB，即窗口
+    ///     2 MiB…32 MiB），不会 abort。跳板机两跳都设。
+    ///   - algorithms: 加密 / 密钥交换 / 主机密钥算法。默认 `.builtInOnly`（今天的行为：只用 NIOSSH 自带的算法，
+    ///     RSA 用户私钥照样能认证，不接受 RSA 主机密钥）。`.standard` 加上 USSHCore 的现代算法（RSA 主机密钥、
+    ///     DH group14 / 16、AES-CTR）；`.legacyCompatible` 再加 SHA-1 的旧算法，只给用户明确要连老设备时用。
+    ///   - keepAliveInterval: 认证成功后每隔这么久发一个 `keepalive@openssh.com`；连续 3 个没回应就断开，
+    ///     断开原因是 `SSHDisconnectReason.keepAliveTimeout`。`nil`（默认）不发，和今天一样。跳板机两跳都设。
     /// - Throws: `SSHConnectionError`；任务被取消时抛 `CancellationError`（连接已关闭）。
     public static func connect(
         endpoint: SSHEndpoint,
@@ -27,7 +31,8 @@ public enum USSHKitIntegration {
         approvalTimeout: Duration = .seconds(180),
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
         maximumPacketSize: Int = SSHClient.defaultMaximumPacketSize,
-        algorithms: SSHAlgorithms = CoreShims.defaultAlgorithms
+        algorithms: SSHAlgorithms = .builtInOnly,
+        keepAliveInterval: Duration? = nil
     ) async throws -> ConnectedClient {
         try await SSHClientFactory.connect(
             endpoint: endpoint,
@@ -38,7 +43,8 @@ public enum USSHKitIntegration {
             approvalTimeout: approvalTimeout,
             approver: approver,
             maximumPacketSize: maximumPacketSize,
-            algorithms: algorithms
+            algorithms: algorithms,
+            keepAliveInterval: keepAliveInterval
         )
     }
 
@@ -79,7 +85,8 @@ public enum USSHKitIntegration {
         approvalTimeout: Duration = .seconds(180),
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
         maximumPacketSize: Int = SSHClient.defaultMaximumPacketSize,
-        algorithms: SSHAlgorithms = CoreShims.defaultAlgorithms
+        algorithms: SSHAlgorithms = .builtInOnly,
+        keepAliveInterval: Duration? = nil
     ) throws -> SSHClient.Configuration {
         try SSHClientFactory.makeConfiguration(
             .init(host: host, port: port, username: username, credential: credential),
@@ -90,7 +97,8 @@ public enum USSHKitIntegration {
                 approvalTimeout: approvalTimeout,
                 approver: approver,
                 maximumPacketSize: maximumPacketSize,
-                algorithms: algorithms
+                algorithms: algorithms,
+                keepAliveInterval: keepAliveInterval
             )
         )
     }

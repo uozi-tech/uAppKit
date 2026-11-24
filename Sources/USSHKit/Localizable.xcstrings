@@ -1134,30 +1134,30 @@
         }
       }
     },
-    "RSA 密钥长度 %@ 位不受支持（支持 1024–16384 位）" : {
+    "RSA 密钥长度 %@ 位不受支持（支持 %@–%@ 位）" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "An RSA key length of %@ bits isn't supported (1024–16384 bits are supported)"
+            "value" : "An RSA key length of %1$@ bits isn't supported (%2$@–%3$@ bits are supported)"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ ビットの RSA 鍵には対応していません（1024〜16384 ビットに対応）"
+            "value" : "%1$@ ビットの RSA 鍵には対応していません（%2$@〜%3$@ ビットに対応）"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@비트 RSA 키는 지원되지 않음(1024–16384비트 지원)"
+            "value" : "%1$@비트 RSA 키는 지원되지 않음(%2$@–%3$@비트 지원)"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "不支援長度為 %@ 位元的 RSA 金鑰（支援 1024–16384 位元）"
+            "value" : "不支援長度為 %1$@ 位元的 RSA 金鑰（支援 %2$@–%3$@ 位元）"
           }
         }
       }
@@ -1918,6 +1918,34 @@
         }
       }
     },
+    "与服务器没有共同支持的算法（服务器可能只支持旧算法）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No algorithm is supported by both sides (the server may only support legacy algorithms)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバと共通して対応しているアルゴリズムがありません（サーバが旧式のアルゴリズムにしか対応していない可能性があります）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버와 공통으로 지원하는 알고리즘이 없음(서버가 구형 알고리즘만 지원할 수 있음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "與伺服器沒有共同支援的演算法（伺服器可能只支援舊演算法）"
+          }
+        }
+      }
+    },
     "主机密钥已变化：原 %@，现 %@" : {
       "localizations" : {
         "en" : {
@@ -2422,6 +2450,34 @@
         }
       }
     },
+    "文件在读取过程中变短了（应有 %lld 字节，只读到 %lld 字节）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file got shorter while it was being read (expected %1$lld bytes, only %2$lld were read)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み取り中にファイルが短くなりました（%1$lld バイトのはずが、%2$lld バイトしか読めませんでした）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽는 도중 파일이 짧아짐(%1$lld바이트여야 하나 %2$lld바이트만 읽음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案在讀取過程中變短了（應有 %1$lld 位元組，只讀到 %2$lld 位元組）"
+          }
+        }
+      }
+    },
     "文件或路径不存在" : {
       "localizations" : {
         "en" : {
@@ -2702,6 +2758,34 @@
         }
       }
     },
+    "服务器不支持这类通道" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server doesn't support this kind of channel"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバはこの種類のチャネルに対応していません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 이 종류의 채널을 지원하지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器不支援這類通道"
+          }
+        }
+      }
+    },
     "服务器关闭了连接" : {
       "localizations" : {
         "en" : {
@@ -2870,30 +2954,58 @@
         }
       }
     },
-    "服务器拒绝打开通道：%@" : {
+    "服务器拒绝打开通道（原因码 %@）" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The server refused to open the channel: %@"
+            "value" : "The server refused to open the channel (reason code %@)"
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "サーバがチャネルを開くことを拒否しました：%@"
+            "value" : "サーバがチャネルを開くことを拒否しました（理由コード %@）"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "서버가 채널 열기를 거부함: %@"
+            "value" : "서버가 채널 열기를 거부함(이유 코드 %@)"
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "伺服器拒絕開啟通道：%@"
+            "value" : "伺服器拒絕開啟通道（原因碼 %@）"
+          }
+        }
+      }
+    },
+    "服务器拒绝打开通道（原因码 %@）：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server refused to open the channel (reason code %1$@): %2$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバがチャネルを開くことを拒否しました（理由コード %1$@）：%2$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 채널 열기를 거부함(이유 코드 %1$@): %2$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器拒絕開啟通道（原因碼 %1$@）：%2$@"
           }
         }
       }
@@ -3006,6 +3118,118 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器磁碟空間不足"
+          }
+        }
+      }
+    },
+    "服务器禁止打开这类通道（例如关闭了端口转发）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server doesn't allow this kind of channel (for example, port forwarding is turned off)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバはこの種類のチャネルを許可していません（ポート転送が無効になっているなど）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 이 종류의 채널을 허용하지 않음(예: 포트 포워딩이 꺼져 있음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器禁止開啟這類通道（例如關閉了連接埠轉送）"
+          }
+        }
+      }
+    },
+    "服务器资源不足，暂时打不开新通道（例如超过了 MaxSessions）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server is short of resources and can't open another channel right now (for example, MaxSessions was exceeded)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバのリソースが不足しているため、今は新しいチャネルを開けません（MaxSessions を超えたなど）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 리소스가 부족해 지금은 새 채널을 열 수 없음(예: MaxSessions 초과)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器資源不足，暫時打不開新通道（例如超過了 MaxSessions）"
+          }
+        }
+      }
+    },
+    "服务器连不上目标（连接被拒绝或地址不可达）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server couldn't reach the target (connection refused or address unreachable)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバが接続先に接続できません（接続拒否、またはアドレスに到達できません）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 대상에 연결할 수 없음(연결 거부 또는 주소에 도달할 수 없음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器連不上目標（連線被拒絕或位址無法連線）"
+          }
+        }
+      }
+    },
+    "服务器连续 %lld 次没有回应保活请求，连接已断开" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server didn't answer %lld keepalive requests in a row, so the connection was closed"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバがキープアライブ要求に %lld 回続けて応答しなかったため、接続を切断しました"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 킵얼라이브 요청에 %lld번 연속 응답하지 않아 연결을 끊음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器連續 %lld 次沒有回應保持連線請求，連線已中斷"
           }
         }
       }
@@ -3684,6 +3908,34 @@
         }
       }
     },
+    "认证过程出错：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An error occurred during authentication: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "認証中にエラーが発生しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "인증 중 오류 발생: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "認證過程出錯：%@"
+          }
+        }
+      }
+    },
     "该私钥受口令保护，导入前需要先解密。" : {
       "localizations" : {
         "en" : {
@@ -3908,6 +4160,34 @@
         }
       }
     },
+    "读写的位置超出了范围" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The read or write position is out of range"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "読み書きの位置が範囲外です"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "읽기/쓰기 위치가 범위를 벗어남"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀寫的位置超出了範圍"
+          }
+        }
+      }
+    },
     "读取的内容超过上限（%lld 字节）" : {
       "localizations" : {
         "en" : {
@@ -4016,6 +4296,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跳板機無法連線目標 %@（連線被拒絕或位址無法連線）"
+          }
+        }
+      }
+    },
+    "跳板机暂时打不开到 %@ 的通道（资源不足，可能是同时开着的通道太多）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The jump host can't open a channel to %@ right now (it's short of resources; too many channels may be open)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバが今は %@ へのチャネルを開けません（リソース不足。同時に開いているチャネルが多すぎる可能性があります）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트가 지금은 %@(으)로 가는 채널을 열 수 없음(리소스 부족, 동시에 열린 채널이 너무 많을 수 있음)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳板機暫時打不開到 %@ 的通道（資源不足，可能是同時開著的通道太多）"
           }
         }
       }
@@ -4184,6 +4492,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "連線已由本端關閉"
+          }
+        }
+      }
+    },
+    "通道出错：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The channel failed: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "チャネルでエラーが発生しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채널 오류: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通道出錯：%@"
           }
         }
       }
