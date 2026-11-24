@@ -302,6 +302,41 @@ final class SFTPOpenSSHInteropTests: XCTestCase {
         try await file.close()
     }
 
+    /// OpenSSH 把释放的句柄编号马上分给下一个 OPEN。CLOSE 之后还发到旧句柄上的 WRITE 会写进新文件、并且回成功。
+    /// 客户端必须等在途的请求结束才发 CLOSE，之后再也不往这个句柄上发请求。
+    func testStaleRequestsNeverReachAReusedHandle() async throws {
+        let payload = SFTPTestData.bytes(count: 4 * 1024 * 1024)
+        var sawReuse = false
+        for trial in 0..<12 {
+            let a = try await client.openFile(path("a\(trial)"), flags: [.write, .create, .truncate])
+            let writer = Task { try await a.write(contentsOf: payload, window: 16) }
+            let readers = (0..<4).map { _ in
+                Task { () -> Int in
+                    var count = 0
+                    while true {
+                        do { _ = try await a.stat() } catch SFTPError.handleClosed { return count }
+                        count += 1
+                    }
+                }
+            }
+            try await Task.sleep(for: .milliseconds(trial % 4))
+            try await a.close()
+            let b = try await client.openFile(path("b\(trial)"), flags: [.write, .create, .truncate])
+            if b.handle == a.handle { sawReuse = true }
+            do {
+                try await writer.value
+            } catch let error as SFTPError {
+                XCTAssertEqual(error, .handleClosed)
+            }
+            for reader in readers { _ = try await reader.value }
+            await XCTAssertSFTPError(.handleClosed) { _ = try await a.read(from: 0, length: 10) }
+            try await b.close()
+            let size = try FileManager.default.attributesOfItem(atPath: path("b\(trial)"))[.size] as? Int
+            XCTAssertEqual(size, 0, "a request on the closed handle landed in the file that reused it (trial \(trial))")
+        }
+        XCTAssertTrue(sawReuse, "sftp-server reuses handle slots, which is what makes this dangerous")
+    }
+
     func testServerExitFailsPendingRequests() async throws {
         process?.terminate()
         let exited = await exit.wait(timeout: .seconds(10))

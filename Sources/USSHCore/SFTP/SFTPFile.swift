@@ -1,29 +1,60 @@
 import NIOConcurrencyHelpers
 import NIOCore
 
-/// 一个打开着的远程文件。值语义的 `Sendable` 句柄：拷贝之间共享同一个「已关闭」状态，
+/// 一个打开着的远程文件。值语义的 `Sendable` 句柄：拷贝之间共享同一份状态，
 /// 可以在多个任务里并发 `read` / `write`（同一条通道上的请求本来就是多路复用的）。
 ///
 /// `read(from:length:)` 与 `write(_:at:)` 各对应**一个** SFTP 请求，是上层自己做窗口化并行传输的原语；
 /// `readAll` / `write(contentsOf:)` 是在它们之上带窗口的便捷循环。
+///
+/// **关闭的次序**：OpenSSH 的 sftp-server 会把释放掉的句柄编号马上分给下一个 OPEN，所以 CLOSE 之后
+/// 再发到旧句柄上的 READ / WRITE 会落进新开的那个文件，而且回成功。为此每个请求从发出到拿到回答
+/// （或被撤掉）都记在这个句柄的在途计数里；`close()` 先把句柄标成「正在关」（之后任何拷贝再发请求都抛
+/// `handleClosed`，不会发出去），等在途的都结束，才发 CLOSE。
 public struct SFTPFile: Sendable {
     public let client: SFTPClient
     /// 打开时给的路径（只用于诊断）。
     public let path: SFTPPath
     let handle: ByteBuffer
-    private let closed: NIOLockedValueBox<Bool>
+    private let state: SFTPFileState
 
     init(client: SFTPClient, path: SFTPPath, handle: ByteBuffer) {
         self.client = client
         self.path = path
         self.handle = handle
-        self.closed = NIOLockedValueBox(false)
+        self.state = SFTPFileState()
     }
 
-    public var isClosed: Bool { closed.withLockedValue { $0 } }
+    /// 已经开始关（或关完了）。
+    public var isClosed: Bool { state.isClosing }
 
     private func checkOpen() throws {
         if isClosed { throw SFTPError.handleClosed }
+    }
+
+    // MARK: - 在途计数
+
+    /// 记一笔在途再发出去；已经在关时抛 `handleClosed`，什么都不发。每个返回值必须恰好
+    /// `waitTracked` 或 `abandonTracked` 一次。
+    private func submitTracked(_ build: (UInt32) -> SFTPRequest) throws -> SFTPInFlightRequest {
+        try state.begin()
+        return client.core.submit(build)
+    }
+
+    private func waitTracked(_ request: SFTPInFlightRequest) async throws -> SFTPResponse {
+        defer { state.end() }
+        return try await client.core.wait(request)
+    }
+
+    private func abandonTracked(_ request: SFTPInFlightRequest) {
+        client.core.abandon(request)
+        state.end()
+    }
+
+    /// 一个请求：发出、等回答，全程记在在途计数里。
+    private func perform(_ build: (UInt32) -> SFTPRequest) async throws -> SFTPResponse {
+        try Task.checkCancellation()
+        return try await waitTracked(try submitTracked(build))
     }
 
     // MARK: - 单个请求
@@ -34,7 +65,7 @@ public struct SFTPFile: Sendable {
     public func read(from offset: UInt64, length: Int) async throws -> ByteBuffer? {
         try checkOpen()
         let wanted = UInt32(clamping: max(0, min(length, client.maximumReadLength)))
-        let response = try await client.core.perform {
+        let response = try await perform {
             .read(id: $0, handle: handle, offset: offset, length: wanted)
         }
         return try SFTPResponseReader.readData(response, requested: Int(wanted))
@@ -46,7 +77,7 @@ public struct SFTPFile: Sendable {
     public func write(_ data: ByteBuffer, at offset: UInt64) async throws {
         try checkOpen()
         try checkWriteLength(data.readableBytes)
-        try SFTPResponseReader.ok(try await client.core.perform {
+        try SFTPResponseReader.ok(try await perform {
             .write(id: $0, handle: handle, offset: offset, data: data)
         })
     }
@@ -65,13 +96,13 @@ public struct SFTPFile: Sendable {
     /// FSTAT。
     public func stat() async throws -> SFTPFileAttributes {
         try checkOpen()
-        return try SFTPResponseReader.attributes(try await client.core.perform { .fstat(id: $0, handle: handle) })
+        return try SFTPResponseReader.attributes(try await perform { .fstat(id: $0, handle: handle) })
     }
 
     /// FSETSTAT。只有非 nil 的字段会被改（例如只给 `size` = 截断 / 扩展到这个长度）。
     public func setAttributes(_ attributes: SFTPFileAttributes) async throws {
         try checkOpen()
-        try SFTPResponseReader.ok(try await client.core.perform {
+        try SFTPResponseReader.ok(try await perform {
             .fsetstat(id: $0, handle: handle, attributes: attributes)
         })
     }
@@ -82,7 +113,7 @@ public struct SFTPFile: Sendable {
         guard client.supportsExtension(SFTPExtensionName.fsync) else {
             throw SFTPError.extensionUnsupported(SFTPExtensionName.fsync)
         }
-        try SFTPResponseReader.ok(try await client.core.perform { .extended(id: $0, request: .fsync(handle: handle)) })
+        try SFTPResponseReader.ok(try await perform { .extended(id: $0, request: .fsync(handle: handle)) })
     }
 
     /// `fstatvfs@openssh.com`：这个文件所在文件系统的容量。
@@ -91,27 +122,37 @@ public struct SFTPFile: Sendable {
         guard client.supportsExtension(SFTPExtensionName.fstatVFS) else {
             throw SFTPError.extensionUnsupported(SFTPExtensionName.fstatVFS)
         }
-        let response = try await client.core.perform { .extended(id: $0, request: .fstatVFS(handle: handle)) }
+        let response = try await perform { .extended(id: $0, request: .fstatVFS(handle: handle)) }
         return try SFTPResponseReader.extendedReply(response, as: SFTPFileSystemStats.decode)
     }
 
-    /// CLOSE。只有第一次调用会发请求，之后（包括并发的另一份拷贝）直接返回。
-    /// 之后这个句柄上的读写抛 `handleClosed`。
+    /// CLOSE。先标成「正在关」（之后这个句柄上的请求抛 `handleClosed`，不发出去），
+    /// 等已经发出的请求都结束，再发 CLOSE。只有第一次调用会发，之后（包括别的拷贝）直接返回。
+    ///
+    /// 等待期间任务被取消：抛 `CancellationError`，CLOSE 改在后台等在途结束后发出（不等回答）。
     public func close() async throws {
-        guard markClosed() else { return }
+        guard state.beginClosing() else { return }
+        let finished = await state.waitUntilIdle()
+        guard finished else {
+            sendCloseWhenIdle()
+            throw CancellationError()
+        }
         try SFTPResponseReader.ok(try await client.core.wait(client.core.submit { .close(id: $0, handle: handle) }))
     }
 
-    /// 发 CLOSE 不等回答（出错路径上用）。
+    /// 关掉、不等回答（出错路径上用）：同样等在途的请求结束后才发 CLOSE。
     func closeDetached() {
-        guard markClosed() else { return }
-        client.core.sendDetached { .close(id: $0, handle: handle) }
+        guard state.beginClosing() else { return }
+        sendCloseWhenIdle()
     }
 
-    private func markClosed() -> Bool {
-        closed.withLockedValue { closed in
-            defer { closed = true }
-            return !closed
+    private func sendCloseWhenIdle() {
+        let state = self.state
+        let core = client.core
+        let handle = self.handle
+        Task {
+            _ = await state.waitUntilIdle(cancellable: false)
+            core.sendDetached { .close(id: $0, handle: handle) }
         }
     }
 
@@ -124,15 +165,14 @@ public struct SFTPFile: Sendable {
     public func readAll(from offset: UInt64 = 0, maximumBytes: Int? = nil, window: Int = 16) async throws -> ByteBuffer {
         try checkOpen()
         let chunk = client.maximumReadLength
-        let core = client.core
         let handle = self.handle
         var result = ByteBuffer()
         var nextOffset = offset
         var queue = CircularBuffer<(offset: UInt64, request: SFTPInFlightRequest)>(initialCapacity: max(1, window))
 
-        func issue() {
+        func issue() throws {
             let at = nextOffset
-            let request = core.submit { .read(id: $0, handle: handle, offset: at, length: UInt32(chunk)) }
+            let request = try submitTracked { .read(id: $0, handle: handle, offset: at, length: UInt32(chunk)) }
             queue.append((at, request))
             nextOffset &+= UInt64(chunk)
         }
@@ -146,9 +186,9 @@ public struct SFTPFile: Sendable {
 
         do {
             try Task.checkCancellation()
-            while queue.count < max(1, window) { issue() }
+            while queue.count < max(1, window) { try issue() }
             reading: while let head = queue.popFirst() {
-                guard let data = try SFTPResponseReader.readData(try await core.wait(head.request), requested: chunk) else {
+                guard let data = try SFTPResponseReader.readData(try await waitTracked(head.request), requested: chunk) else {
                     break reading
                 }
                 try accept(data)
@@ -157,7 +197,7 @@ public struct SFTPFile: Sendable {
                 while got < chunk {
                     let at = head.offset + UInt64(got)
                     let rest = chunk - got
-                    let response = try await core.perform {
+                    let response = try await perform {
                         .read(id: $0, handle: handle, offset: at, length: UInt32(rest))
                     }
                     guard let more = try SFTPResponseReader.readData(response, requested: rest) else {
@@ -168,13 +208,13 @@ public struct SFTPFile: Sendable {
                     try accept(more)
                     got += more.readableBytes
                 }
-                issue()
+                try issue()
             }
         } catch {
-            while let pending = queue.popFirst() { core.abandon(pending.request) }
+            while let pending = queue.popFirst() { abandonTracked(pending.request) }
             throw error
         }
-        while let pending = queue.popFirst() { core.abandon(pending.request) }
+        while let pending = queue.popFirst() { abandonTracked(pending.request) }
         return result
     }
 
@@ -186,7 +226,6 @@ public struct SFTPFile: Sendable {
         guard total > 0 else { return }
         let chunk = client.maximumWriteLength
         try checkWriteLength(min(chunk, total))
-        let core = client.core
         let handle = self.handle
         var queue = CircularBuffer<SFTPInFlightRequest>(initialCapacity: max(1, window))
         var cursor = 0
@@ -197,15 +236,87 @@ public struct SFTPFile: Sendable {
                     let length = min(chunk, total - cursor)
                     let slice = data.getSlice(at: data.readerIndex + cursor, length: length)!
                     let at = offset + UInt64(cursor)
-                    queue.append(core.submit { .write(id: $0, handle: handle, offset: at, data: slice) })
+                    queue.append(try submitTracked { .write(id: $0, handle: handle, offset: at, data: slice) })
                     cursor += length
                 }
                 let head = queue.removeFirst()
-                try SFTPResponseReader.ok(try await core.wait(head))
+                try SFTPResponseReader.ok(try await waitTracked(head))
             }
         } catch {
-            while let pending = queue.popFirst() { core.abandon(pending) }
+            while let pending = queue.popFirst() { abandonTracked(pending) }
             throw error
+        }
+    }
+}
+
+/// 一个句柄的在途计数与「正在关」标志（同一把锁下）。`SFTPFile` 的每份拷贝共享同一个。
+final class SFTPFileState: Sendable {
+    private struct State {
+        var inFlight = 0
+        var closing = false
+        var nextWaiter = 0
+        var waiters: [Int: CheckedContinuation<Bool, Never>] = [:]
+        /// 取消先于等待登记到达的那些等待者（登记时直接返回 false）。
+        var cancelledWaiters: Set<Int> = []
+    }
+
+    private let state = NIOLockedValueBox(State())
+
+    var isClosing: Bool { state.withLockedValue { $0.closing } }
+
+    /// 记一笔在途；已经在关时抛 `handleClosed`。
+    func begin() throws {
+        try state.withLockedValue { state in
+            guard !state.closing else { throw SFTPError.handleClosed }
+            state.inFlight += 1
+        }
+    }
+
+    func end() {
+        let waiters = state.withLockedValue { state -> [CheckedContinuation<Bool, Never>] in
+            state.inFlight -= 1
+            guard state.inFlight == 0, state.closing else { return [] }
+            defer { state.waiters = [:] }
+            return Array(state.waiters.values)
+        }
+        for waiter in waiters { waiter.resume(returning: true) }
+    }
+
+    /// 标成「正在关」；只有第一次调用返回 true。
+    func beginClosing() -> Bool {
+        state.withLockedValue { state in
+            defer { state.closing = true }
+            return !state.closing
+        }
+    }
+
+    /// 等在途计数归零（只在 `beginClosing` 之后调用）。返回 false = 等的时候任务被取消了。
+    func waitUntilIdle(cancellable: Bool = true) async -> Bool {
+        let token = state.withLockedValue { state -> Int in
+            defer { state.nextWaiter += 1 }
+            return state.nextWaiter
+        }
+        let wait = {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                let immediate = self.state.withLockedValue { state -> Bool? in
+                    if state.cancelledWaiters.remove(token) != nil { return false }
+                    if state.inFlight == 0 { return true }
+                    state.waiters[token] = continuation
+                    return nil
+                }
+                if let immediate { continuation.resume(returning: immediate) }
+            }
+        }
+        guard cancellable else { return await wait() }
+        return await withTaskCancellationHandler {
+            await wait()
+        } onCancel: {
+            let waiter = self.state.withLockedValue { state -> CheckedContinuation<Bool, Never>? in
+                if let waiter = state.waiters.removeValue(forKey: token) { return waiter }
+                state.cancelledWaiters.insert(token)
+                return nil
+            }
+            waiter?.resume(returning: false)
         }
     }
 }
