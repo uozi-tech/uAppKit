@@ -26,7 +26,7 @@
 | 0009 | 公开发送任意全局请求（keepalive） | 公开 API |
 | 0010 | 公开 CHANNEL_OPEN_FAILURE 原因码 | 公开 API |
 | 0011 | 认证委托用完了立即报错 | 修 bug（行为变化） |
-| 0012 | 重新密钥交换期间 channel 写入排队 | 修 bug |
+| 0012 | 重新密钥交换期间 channel 写入与全局请求排队 | 修 bug |
 | 0013 | 按需与按流量自动重新密钥交换 | 新功能（默认开启） |
 | 0014 | USERAUTH_FAILURE 的 partial success 交给认证委托 | 公开 API |
 | 0015 | 修改声明 | 许可证 |
@@ -218,16 +218,33 @@ RSA 用户密钥有三个算法，客户端事先不知道服务端接受哪个�
 
 **去掉的时机 / 上游**：可以提给 Apple。注意是行为变化：以前挂住的连接现在报错（客户端层不用再自己检测用完）。
 
-## 0012 重新密钥交换期间 child channel 的写入排队
+## 0012 重新密钥交换期间 channel 写入与全局请求排队
 
 RFC 4253 §7.1：发出 KEXINIT 之后、发出 NEWKEYS 之前只能发密钥交换消息。状态机守着这一条，但 `NIOSSHHandler`
 把 child channel 的写入直接交给它：重新交换进行中（不论谁发起），任何 channel 数据、窗口调整、EOF、CLOSE 都以
 `protocolViolation("Sent unexpected message type")` 失败，数据丢失。OpenSSH 服务端按 RekeyLimit 重新交换时，
 正在传输的 channel 就会在那一刻出错；上游的重新交换测试只在交换完成后才开 channel，没测到。
 
-`SSHConnectionStateMachine.canSendChannelMessages`（`.active` / `.rekeyingSentNewKeysState`）；`writeFromChildChannel`
-不能发时按顺序排进 `queuedChildMessages`，处理完每条入站消息、密钥交换的异步结果写出后与 `channelReadComplete`
-时再发；handler 被移除时以 `ChannelError.eof` 失败。测试 `RekeyTests`（前 3 个）。
+连接级的消息同样如此：对端的全局请求（keepalive@openssh.com，want reply）在交换中途到达时 handler 当场回
+REQUEST_FAILURE，TCP 转发请求的异步回复在交换中途完成也当场写，都是同一个错误、整条连接断开（OpenSSH 的
+keepalive 与 RekeyLimit 同开就会撞上）；我方的全局请求在交换期间排进 `pendingGlobalRequests`，却只在 `.active`
+且只在 `channelReadComplete` 时发，交换以异步写出的 NEWKEYS（主机密钥验证完成）结束、链路再无入站数据时就一直
+卡着。
+
+`SSHConnectionStateMachine.canSendChannelMessages`（`.active` / `.rekeyingSentNewKeysState`）；`writeOrQueue`
+不能发、或已有排队时按顺序排进 `queuedMessages`，child channel 的写入与对全局请求的回复（同步、异步）都走它，
+排队不改变它们写出的先后；`sendGlobalRequestsIfPossible` 改看 `canSendChannelMessages`，每发一个再看一次（发的
+过程中可能到达 0013 的流量上限、开始下一轮）。处理完每条入站消息、密钥交换的异步结果写出后与
+`channelReadComplete` 时调 `sendQueuedMessagesIfPossible`：先发排队的消息，再发我方的全局请求；handler 被移除时
+都以 `ChannelError.eof` 失败。CHANNEL_OPEN 本来就不卡：`createPendingChannelsIfPossible` 看的是 `hasActivated`，
+交换中照样建 channel，CHANNEL_OPEN 走 child channel 的排队。严格 KEX 的序号：排队的是 `SSHMessage`，发出时才
+序列化，序号按换钥后的归零算。上游原有、这里没改的一处：TCP 转发请求的回复要等委托完成，期间到达的下一个
+（未知类型的）请求会先得到回复，与 RFC 4254 §4「按请求顺序回复」不符；只在对端连发多个全局请求、我方委托又是
+异步时出现。
+
+测试 `RekeyTests`（前 9 个）：交换中的 channel 写入（3 个）；对端的 keepalive 在我方 KEXINIT 之后、在对端 NEWKEYS
+之后我方 NEWKEYS 之前到达都在交换完成后得到回复；异步回复在交换中途完成；我方 keepalive 与新开的 channel 在交换
+以异步 NEWKEYS 结束、链路空闲时照样发出；排队的数据夹着全局请求，顺序不变。
 
 **去掉的时机 / 上游**：通用 bug，可以提给 Apple。0013 的自动重新交换依赖它。
 
@@ -243,8 +260,9 @@ NIOSSH 从不主动重新交换（`_rekey` 只给测试）；对端也不发起�
   的序号归零同处。只有状态机处于 `.active` 时才会发起，交换进行中不会再发起；双方同时发起时两份 KEXINIT 合成一次
   交换（状态机原本支持）。
 
-测试 `RekeyTests`（后 8 个）：按需与重复请求、包数上限触发多次交换且两个方向数据完整、字节上限、双方同时到达上限、
-双方同时请求只做一次交换、关闭后从不自动交换、每次交换后计数清零、默认值。
+测试 `RekeyTests`（后 9 个）：按需与重复请求、包数上限触发多次交换且两个方向数据完整、字节上限、双方同时到达上限、
+双方同时请求只做一次交换、关闭后从不自动交换、每次交换后计数清零、默认值、一批排队的全局请求发到一半到达上限时
+其余的等下一轮交换完成再发。
 
 **去掉的时机 / 上游**：可以提给 Apple。行为变化：默认开启，超过 1 GiB 的连接会自动重新交换。
 
@@ -271,7 +289,7 @@ uAppKit，不用再加。新补丁插在它前面；改到别的上游文件，�
 
 ## 验证
 
-- `swift test --filter NIOSSHTests`：上游的 347 个用例加补丁的 83 个（共 430），全过才算补丁打对。
+- `swift test --filter NIOSSHTests`：上游的 347 个用例加补丁的 90 个（共 437），全过才算补丁打对。
 - 0001 / 0002 的线上崩溃只在 `-L` / `-D` / 长连接**远端先断**时出现。改这几个补丁之后，发版前要在真机上做
   断网 smoke，编译和测试通过不等于修好。
 - 0005 / 0006 只用测试专用的玩具算法验证了接口本身；0007 / 0008 只在 NIOSSH 两端之间验证过。RSA、DH 接上之后，
