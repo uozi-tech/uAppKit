@@ -27,6 +27,8 @@ public struct ConnectedClient: Sendable {
     public var isConnected: Bool            // 两跳都还连着
     public var legacyAlgorithmsInUse: [SSHLegacyAlgorithm]         // 目标那一跳用上的 SHA-1 旧算法（第 5 节）
     public var bastionLegacyAlgorithmsInUse: [SSHLegacyAlgorithm]  // 跳板机那一跳的
+    public var legacyAlgorithmStatusKnown: Bool          // 目标那一跳的协商结果读得出来（false = 不知道，不是「没用」）
+    public var bastionLegacyAlgorithmStatusKnown: Bool   // 跳板机那一跳的（没有跳板机时 true）
     public func close() async               // 先目标、再跳板机；幂等
     public func exec(_ command: String) async throws -> String   // stdout+stderr，≤ 64 000 字节
     public func openDirectTCPIP(host: String, port: Int) async throws -> NIOAsyncChannel<ByteBuffer, ByteBuffer>
@@ -168,6 +170,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   - 用上了哪些：`ConnectedClient.legacyAlgorithmsInUse` / `bastionLegacyAlgorithmsInUse`（协商到的密钥交换 / 主机密钥 / 在用的 MAC
     是旧算法时各一项，RSA 用户私钥以 `ssh-rsa` 认证成功时一项），并经 `logger` 记一条 `.warning`（metadata 里有 host、port、
     `algorithms`，如 `hostkey=ssh-rsa`）。app 可以据此在连接信息里提示「这台主机只支持旧算法」。
+    `legacyAlgorithmStatusKnown == false` 表示 USSHCore 没读懂服务器的 KEXINIT（嗅探器的解析与 NIOSSH 一样宽松、也跳过它之前的
+    IGNORE / DEBUG，剩下的只有超过 256 KiB 之类 NIOSSH 多半也连不上的情形）：这时空的 `legacyAlgorithmsInUse` 只说明 RSA 用户认证
+    没用 `ssh-rsa`，传输层**不知道**；日志里另有一条「无法确定」的警告，进程内的记录不动。
   - **为什么不削弱能连现代服务器的安全性**：协商取的是客户端最偏好、服务器也支持的那个，补上的旧算法一律排在全部现代算法之后；
     双方报的算法列表算进交换哈希、由主机密钥签名，中间人删掉服务器报的现代算法签名就对不上，所以对主机密钥已被信任的服务器，攻击者
     没法把连接逼到旧算法上。于是退级只会发生在真的什么更好的都不支持的服务器上。SHA-1 原理上仍然更弱，所以结果要报出来、记日志。

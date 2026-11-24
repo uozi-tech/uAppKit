@@ -73,9 +73,9 @@ nonisolated enum SSHLegacyFallback {
 
     static let legacyMACNames = Set(SSHTransportProtections.legacy.compactMap { $0.macName })
 
-    /// 传输层（密钥交换 / 主机密钥 / MAC）实际在用的旧算法。
-    static func transportLegacyAlgorithms(of client: SSHClient) -> [SSHLegacyAlgorithm] {
-        guard let negotiated = client.negotiatedAlgorithms else { return [] }
+    /// 传输层（密钥交换 / 主机密钥 / MAC）实际在用的旧算法。读不出协商结果时为空（另看 `negotiated == nil`）。
+    static func transportLegacyAlgorithms(_ negotiated: SSHNegotiatedAlgorithms?) -> [SSHLegacyAlgorithm] {
+        guard let negotiated else { return [] }
         var result: [SSHLegacyAlgorithm] = []
         if SSHDiffieHellmanAlgorithm(name: negotiated.keyExchange)?.isLegacy == true {
             result.append(.init(role: .keyExchange, name: negotiated.keyExchange))
@@ -90,19 +90,54 @@ nonisolated enum SSHLegacyFallback {
     }
 
     /// 协商时用到了旧算法的名字（进程内记录看这个）：比「在用的」多一种情形——加密是 AES-GCM、MAC 并不使用，
-    /// 但服务器只报了 `hmac-sha1`，NIOSSH 要名字对上，没有旧算法就协商不出来。
-    static func negotiationNeededLegacy(_ client: SSHClient) -> Bool {
-        guard let negotiated = client.negotiatedAlgorithms else { return false }
-        return !transportLegacyAlgorithms(of: client).isEmpty || legacyMACNames.contains(negotiated.mac)
+    /// 但服务器只报了 `hmac-sha1`，NIOSSH 要名字对上，没有旧算法就协商不出来。读不出协商结果时为 nil（不知道）。
+    static func negotiationNeededLegacy(_ negotiated: SSHNegotiatedAlgorithms?) -> Bool? {
+        guard let negotiated else { return nil }
+        return !transportLegacyAlgorithms(negotiated).isEmpty || legacyMACNames.contains(negotiated.mac)
     }
 
     /// 这条连接用上的全部旧算法（含 RSA 用户认证的 `ssh-rsa`）。
-    static func legacyAlgorithms(of client: SSHClient) -> [SSHLegacyAlgorithm] {
-        var result = transportLegacyAlgorithms(of: client)
-        if let algorithm = client.rsaUserAuthenticationAlgorithm, algorithm.isLegacy {
-            result.append(.init(role: .userAuthentication, name: algorithm.name))
+    static func legacyAlgorithms(_ negotiated: SSHNegotiatedAlgorithms?,
+                                 rsaUserAuthentication: SSHRSASignatureAlgorithm?) -> [SSHLegacyAlgorithm] {
+        var result = transportLegacyAlgorithms(negotiated)
+        if let rsaUserAuthentication, rsaUserAuthentication.isLegacy {
+            result.append(.init(role: .userAuthentication, name: rsaUserAuthentication.name))
         }
         return result
+    }
+
+    static func legacyAlgorithms(of client: SSHClient) -> [SSHLegacyAlgorithm] {
+        legacyAlgorithms(client.negotiatedAlgorithms, rsaUserAuthentication: client.rsaUserAuthenticationAlgorithm)
+    }
+
+    /// 一跳连上之后要记的事：进程内记录（知道时才动：用上旧算法就记、没用上就忘；不知道时不动），以及
+    /// 要记的警告（用上了旧算法一条；`legacyFallback` 开着却不知道一条）。
+    static func outcome(negotiated: SSHNegotiatedAlgorithms?, rsaUserAuthentication: SSHRSASignatureAlgorithm?,
+                        host: String, port: Int, legacyFallback: Bool,
+                        memory: SSHLegacyEndpointMemory) -> [SSHLogEvent] {
+        var events: [SSHLogEvent] = []
+        if legacyFallback {
+            if let needsLegacy = negotiationNeededLegacy(negotiated) {
+                memory.record(host: host, port: port, needsLegacy: needsLegacy)
+            } else {
+                events.append(SSHLogEvent(
+                    level: .warning,
+                    message: "无法确定这条 SSH 连接有没有用上旧算法（没读懂服务器的 KEXINIT）",
+                    metadata: ["host": host, "port": String(port)]))
+            }
+        }
+        let legacy = legacyAlgorithms(negotiated, rsaUserAuthentication: rsaUserAuthentication)
+        if !legacy.isEmpty {
+            events.append(SSHLogEvent(
+                level: .warning,
+                message: "SSH 连接用上了 SHA-1 时代的旧算法（服务器不支持更好的）",
+                metadata: [
+                    "host": host,
+                    "port": String(port),
+                    "algorithms": legacy.map(\.description).joined(separator: ","),
+                ]))
+        }
+        return events
     }
 }
 

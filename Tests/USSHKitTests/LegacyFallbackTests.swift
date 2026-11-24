@@ -386,3 +386,57 @@ final class NIOLockedCounter: @unchecked Sendable {
     var value: Int { lock.withLock { count } }
     func increment() { lock.withLock { count += 1 } }
 }
+
+/// 读不懂协商结果时是「不知道」，不是「没用旧算法」；服务器的 name-list 写法不规范时照样读得懂。
+final class LegacyStatusTests: XCTestCase {
+    private static let rsaHostKey = try! SSHRSAPrivateKey(pemRepresentation: KeyImportFixtures.rsaPKCS1)
+
+    /// 只给 SHA-1 主机签名、KEXINIT 的 name-list 带空项与结尾逗号的服务器：照样退级、照样报出用了 `ssh-rsa`。
+    /// （以前嗅探器按严格的 RFC 4251 解析，读到空项就放弃：连接照样成了，旧算法却没被报出来、也不记警告。）
+    func testUnusualNameListsStillReportLegacyUse() async throws {
+        let server = try await TestSSH.startServer(faults: SSHTestFaults(unusualNameLists: true)) {
+            $0.useRSAHostKey(Self.rsaHostKey, algorithms: [.sshRSA])
+        }
+        defer { Task { await server.stop() } }
+        let log = LegacyFallbackTests.LogProbe()
+        let client = try await TestSSH.connect(server, logger: log)
+        XCTAssertTrue(client.legacyAlgorithmStatusKnown)
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [SSHLegacyAlgorithm(role: .hostKey, name: "ssh-rsa")])
+        XCTAssertEqual(log.warnings.map { $0.metadata["algorithms"] }, ["hostkey=ssh-rsa"])
+        await client.close()
+    }
+
+    func testModernServerWithUnusualNameListsIsKnownAndClean() async throws {
+        let server = try await TestSSH.startServer(faults: SSHTestFaults(unusualNameLists: true))
+        defer { Task { await server.stop() } }
+        let client = try await TestSSH.connect(server)
+        XCTAssertTrue(client.legacyAlgorithmStatusKnown)
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.keyExchange, "curve25519-sha256")
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [])
+        await client.close()
+    }
+
+    /// 不知道：不动进程内记录（记着需要旧算法的仍然记着），记一条「无法确定」的警告；知道时照常记 / 忘。
+    func testUnknownOutcomeKeepsTheMemoryAndWarns() {
+        let memory = SSHLegacyEndpointMemory()
+        memory.record(host: "old", port: 22, needsLegacy: true)
+        let unknown = SSHLegacyFallback.outcome(negotiated: nil, rsaUserAuthentication: nil, host: "old", port: 22,
+                                                legacyFallback: true, memory: memory)
+        XCTAssertTrue(memory.needsLegacy(host: "old", port: 22), "不知道时不能当成「没用旧算法」把记录清掉")
+        XCTAssertEqual(unknown.count, 1)
+        XCTAssertEqual(unknown.first?.level, .warning)
+
+        let modern = SSHNegotiatedAlgorithms(keyExchange: "curve25519-sha256", hostKey: "ssh-ed25519",
+                                             encryption: "aes256-gcm@openssh.com", mac: "hmac-sha2-256",
+                                             encryptionIsAEAD: true, compression: "none")
+        XCTAssertTrue(SSHLegacyFallback.outcome(negotiated: modern, rsaUserAuthentication: nil, host: "old", port: 22,
+                                                legacyFallback: true, memory: memory).isEmpty)
+        XCTAssertFalse(memory.needsLegacy(host: "old", port: 22))
+
+        // 不知道传输层，但 RSA 用户认证用了 ssh-rsa：照样报出来。
+        let events = SSHLegacyFallback.outcome(negotiated: nil, rsaUserAuthentication: .sshRSA, host: "h", port: 1,
+                                               legacyFallback: true, memory: memory)
+        XCTAssertEqual(events.compactMap { $0.metadata["algorithms"] }, ["userauth=ssh-rsa"])
+        XCTAssertEqual(events.count, 2)
+    }
+}

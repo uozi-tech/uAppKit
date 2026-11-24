@@ -32,6 +32,14 @@ public nonisolated struct ConnectedClient: Sendable {
         bastion.map(SSHLegacyFallback.legacyAlgorithms(of:)) ?? []
     }
 
+    /// 目标那一跳的传输层算法读得出来（`legacyAlgorithmsInUse` 里的密钥交换 / 主机密钥 / MAC 可信）。
+    /// 为 false 时 USSHCore 没读懂服务器的 KEXINIT：空的 `legacyAlgorithmsInUse` 只说明 RSA 用户认证没用 `ssh-rsa`，
+    /// 传输层用没用旧算法**不知道**（日志里另有一条警告）。
+    public var legacyAlgorithmStatusKnown: Bool { target.negotiatedAlgorithms != nil }
+
+    /// 跳板机那一跳的同上（没有跳板机时为 true）。
+    public var bastionLegacyAlgorithmStatusKnown: Bool { bastion.map { $0.negotiatedAlgorithms != nil } ?? true }
+
     /// 两条连接（有跳板机时）都还连着。
     public var isConnected: Bool {
         target.isConnected && (bastion?.isConnected ?? true)
@@ -205,22 +213,12 @@ nonisolated enum SSHClientFactory {
         return client
     }
 
-    /// 连上之后：记下这一跳要不要旧算法（用上了才记，没用上就忘掉），用上了旧算法时记一条警告。
+    /// 连上之后：记下这一跳要不要旧算法、记警告（见 `SSHLegacyFallback.outcome`）。
     private static func note(_ client: SSHClient, hop: Hop, options: Options) {
-        if options.legacyFallback {
-            options.legacyMemory.record(host: hop.host, port: hop.port,
-                                        needsLegacy: SSHLegacyFallback.negotiationNeededLegacy(client))
-        }
-        let legacy = SSHLegacyFallback.legacyAlgorithms(of: client)
-        guard !legacy.isEmpty else { return }
-        options.logger.log(SSHLogEvent(
-            level: .warning,
-            message: "SSH 连接用上了 SHA-1 时代的旧算法（服务器不支持更好的）",
-            metadata: [
-                "host": hop.host,
-                "port": String(hop.port),
-                "algorithms": legacy.map(\.description).joined(separator: ","),
-            ]))
+        let events = SSHLegacyFallback.outcome(
+            negotiated: client.negotiatedAlgorithms, rsaUserAuthentication: client.rsaUserAuthenticationAlgorithm,
+            host: hop.host, port: hop.port, legacyFallback: options.legacyFallback, memory: options.legacyMemory)
+        for event in events { options.logger.log(event) }
     }
 
     private static func connectDirect(_ hop: Hop, options: Options) async throws -> SSHClient {
