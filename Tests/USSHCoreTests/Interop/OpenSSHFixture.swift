@@ -38,7 +38,7 @@ final class OpenSSHFixture: Sendable {
     static let sshd = "/usr/sbin/sshd"
     static let sshKeygen = "/usr/bin/ssh-keygen"
 
-    static func start() async throws -> OpenSSHFixture {
+    static func start(extraConfig: String = "") async throws -> OpenSSHFixture {
         let fileManager = FileManager.default
         guard fileManager.isExecutableFile(atPath: sshd), fileManager.isExecutableFile(atPath: sshKeygen) else {
             throw XCTSkip("没有 \(sshd) 或 \(sshKeygen)")
@@ -81,6 +81,7 @@ final class OpenSSHFixture: Sendable {
             MaxStartups 64
             LogLevel INFO
             Subsystem sftp /usr/libexec/sftp-server
+            \(extraConfig)
 
             """
             try config.write(toFile: configPath, atomically: true, encoding: .utf8)

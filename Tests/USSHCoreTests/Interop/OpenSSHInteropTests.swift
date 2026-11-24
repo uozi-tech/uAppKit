@@ -253,6 +253,45 @@ final class OpenSSHInteropTests: XCTestCase {
         XCTAssertFalse(reason.isLocalClose)
     }
 
+    // MARK: - 保活与开通道失败的原因码
+
+    func testPingAndKeepAliveAgainstSSHD() async throws {
+        var configuration = fixture.configuration()
+        configuration.keepAliveInterval = .milliseconds(150)
+        configuration.keepAliveMaximumUnanswered = 2
+        let client = try await SSHClient.connect(host: "127.0.0.1", port: fixture.port, configuration: configuration)
+        defer { Task { await client.close() } }
+        for _ in 0..<3 { try await client.ping(timeout: .seconds(5)) }
+        // 好几个保活周期之后连接仍在（sshd 对 keepalive@openssh.com 回 FAILURE，也算回应）。
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertTrue(client.isConnected)
+        let output = try await client.executeCommand("echo alive")
+        XCTAssertEqual(String(buffer: output), "alive\n")
+    }
+
+    func testForwardingProhibitedReasonCode() async throws {
+        let restricted = try await OpenSSHFixture.start(extraConfig: "PermitOpen 127.0.0.1:9")
+        defer { restricted.stop() }
+        let echo = try await EchoServer.start()
+        defer { Task { await echo.stop() } }
+        let client = try await restricted.connect()
+        defer { Task { await client.close() } }
+        await XCTAssertThrowsAsync(try await client.openDirectTCPIPAsyncChannel(
+            targetHost: "127.0.0.1", targetPort: echo.port,
+            originatorAddress: try SocketAddress(ipAddress: "127.0.0.1", port: 0))) { error in
+            guard case SSHChannelError.openRejected(let failure) = error else { return XCTFail("unexpected \(error)") }
+            XCTAssertEqual(failure.reason, .administrativelyProhibited, "\(failure)")
+        }
+        // 允许的目标但没人监听：连接失败。
+        await XCTAssertThrowsAsync(try await client.openDirectTCPIPAsyncChannel(
+            targetHost: "127.0.0.1", targetPort: 9,
+            originatorAddress: try SocketAddress(ipAddress: "127.0.0.1", port: 0))) { error in
+            guard case SSHChannelError.openRejected(let failure) = error else { return XCTFail("unexpected \(error)") }
+            XCTAssertEqual(failure.reason, .connectFailed, "\(failure)")
+        }
+        XCTAssertTrue(client.isConnected)
+    }
+
     // MARK: - 断开
 
     func testDisconnectNotificationWhenSSHDIsKilled() async throws {

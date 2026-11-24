@@ -30,6 +30,10 @@ extension SSHClient {
         /// NIOSSH 0.15 把每条子通道的接收窗口定为它的 64 倍（与 OpenSSH 相同），所以它同时决定窗口：
         /// 默认 128 KiB → 窗口 8 MiB。取值会被夹进 `SSHClient.maximumPacketSizeRange`——NIOSSH 对越界值
         /// 用 precondition 卡住，越界是进程 abort 而不是抛错。跳板机的两跳各自按自己的配置设。
+        ///
+        /// 内存：一个读得慢（但还在读）的消费者，一条通道最多压住约 **2 个窗口**——NIOSSH 在把数据交给
+        /// pipeline 时就补发窗口，而一次 `read()` 会把它缓冲的整窗数据一起交上来；输出序列里压着一窗，
+        /// NIOSSH 里又能再收一窗。默认 8 MiB 窗口即每条通道约 16 MiB。
         public var maximumPacketSize: Int
 
         /// 额外的算法。默认只有 NIOSSH 自带的那些。
@@ -41,6 +45,15 @@ extension SSHClient {
 
         /// 连接层的日志。只记协议事件，不记口令、私钥这类材料。
         public var logger: Logger
+
+        /// 保活间隔：认证成功后每隔这么久发一个 `keepalive@openssh.com`（want-reply）。`nil` 不发。
+        /// 对端回 SUCCESS 或 FAILURE 都算活着（OpenSSH 回 FAILURE）。
+        public var keepAliveInterval: Duration? = nil
+
+        /// 连续这么多个保活没有回应就关闭连接，断开原因是 `SSHDisconnectReason.keepAliveTimeout`
+        /// （与 OpenSSH 的 `ServerAliveCountMax` 同义，默认也是 3）。判死所需时间约为
+        /// `keepAliveInterval × (keepAliveMaximumUnanswered + 1)`。
+        public var keepAliveMaximumUnanswered: Int = 3
 
         public init(
             authentication: SSHAuthentication,
@@ -79,9 +92,13 @@ extension SSHClient {
     /// NIOSSH 0.15 的默认包长（`1 << 17`）。
     public static let defaultMaximumPacketSize = 1 << 17
 
-    /// 我们允许的包长区间。下限是 RFC 4253 §6.1 要求必须支持的 32768；上限取 16 MiB——
-    /// NIOSSH 本身放得更宽，但窗口是包长的 64 倍、按 `UInt32` 存，再大就饱和了，没有意义。
-    public static let maximumPacketSizeRange: ClosedRange<Int> = 32_768...(1 << 24)
+    /// 我们允许的包长区间。下限是 RFC 4253 §6.1 要求必须支持的 32768。
+    ///
+    /// 上限 512 KiB → 窗口 32 MiB → 慢消费者每条通道最多约 64 MiB。理由：窗口只要盖住带宽 × 往返时延，
+    /// 32 MiB 足够 1 Gbit/s × 250 ms（≈ 30 MB）；再大不会更快，只会让 iOS 上同时开着的几条通道一起把
+    /// 内存顶到被系统杀掉（16 MiB 包长 = 1 GiB 窗口，最坏 2 GiB）。uTerm 今天给 SFTP 调的 1 MiB 窗口
+    /// （旧 fork 里窗口 = 包长），在这里用默认的 128 KiB 包长就已经是它的 8 倍。
+    public static let maximumPacketSizeRange: ClosedRange<Int> = 32_768...(1 << 19)
 }
 
 /// 登录用户名 + 按顺序尝试的认证方式。

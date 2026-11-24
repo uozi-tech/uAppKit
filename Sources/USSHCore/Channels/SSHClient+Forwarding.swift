@@ -13,11 +13,13 @@ extension SSHClient {
     ///
     /// 半关闭两个方向都生效：对端发 EOF 时 pipeline 收到 `ChannelEvent.inputClosed`、还能继续写；
     /// 本端 `close(mode: .output)` 发 EOF、还能继续读。
+    ///
+    /// `initializer` 是必填的：通道一激活目标就可能发数据，返回之后再加的 handler 收不到那些字节。
     public func openDirectTCPIP(
         targetHost: String,
         targetPort: Int,
         originatorAddress: SocketAddress,
-        initializer: @escaping @Sendable (any Channel) -> EventLoopFuture<Void> = { $0.eventLoop.makeSucceededVoidFuture() }
+        initializer: @escaping @Sendable (any Channel) -> EventLoopFuture<Void>
     ) async throws -> any Channel {
         try await openDirectTCPIP(targetHost: targetHost, targetPort: targetPort,
                                   originatorAddress: originatorAddress, allowsHalfClosure: true,
@@ -78,7 +80,11 @@ extension SSHClient {
     /// （并打开对端半关闭），再在它的 EventLoop 上、激活之前调 `initializer`——和 `openDirectTCPIP` 一样，
     /// 在这里装 handler 或包成 `NIOAsyncChannel`。`initializer` 返回失败的 future 会拒绝这条连接。
     ///
-    /// - Throws: 服务器拒绝时抛 `SSHChannelError.globalRequestRejected`。
+    /// 同一个地址可以重复请求：每次请求在本端有自己的登记，被服务器拒绝的那次只撤掉它自己，
+    /// 不影响已经生效的监听。入站连接优先交给已确认、地址与端口都对得上的那一个。
+    ///
+    /// - Throws: 服务器拒绝时抛 `SSHChannelError.globalRequestRejected`；连接断了抛 `.connectionClosed`；
+    ///   任务取消抛 `CancellationError`（请求已经发出，晚到的成功会被立刻撤销）。
     public func startRemotePortForward(
         host: String,
         port: Int,
@@ -86,8 +92,8 @@ extension SSHClient {
     ) async throws -> SSHRemotePortForward {
         let sshHandler = self.sshHandler
         let lifecycle = self.lifecycle
-        // 先登记再发请求：服务器回应之前就可能有连接进来（port 为 0 时先按「这个地址的任意端口」登记）。
-        remoteForwards.register(host: host, port: port, requestedPort: port, initializer: initializer)
+        // 先登记再发请求：服务器回应之前就可能有连接进来。
+        let token = remoteForwards.register(host: host, requestedPort: port, initializer: initializer)
         let response: EventLoopFuture<GlobalRequest.TCPForwardingResponse?> = eventLoop.flatSubmit {
             if let reason = lifecycle.disconnectReason {
                 return self.eventLoop.makeFailedFuture(SSHChannelError.connectionClosed(reason))
@@ -98,20 +104,38 @@ extension SSHClient {
         }
         let boundPort: Int
         do {
-            let result = try await response.get()
+            let result = try await response.getCancellable { [weak self] result in
+                // 取消之后服务器才答应：替调用方撤销，不留一个没人管的监听。
+                guard let self else { return }
+                let bound = (port == 0 ? result?.boundPort : nil) ?? port
+                self.sendCancelForward(host: host, port: bound)
+            }
             boundPort = (port == 0 ? result?.boundPort : nil) ?? port
-        } catch let error as SSHChannelError {
-            remoteForwards.unregister(host: host, port: port)
-            throw error
         } catch {
-            remoteForwards.unregister(host: host, port: port)
-            if let reason = lifecycle.disconnectReason { throw SSHChannelError.connectionClosed(reason) }
-            throw SSHChannelError.globalRequestRejected(.tcpipForward(host: host, port: port))
+            remoteForwards.unregister(token)
+            switch error {
+            case is CancellationError:
+                throw CancellationError()
+            case let error as SSHChannelError:
+                throw error
+            case let error as NIOSSHError where error.type == .globalRequestRefused:
+                throw SSHChannelError.globalRequestRejected(.tcpipForward(host: host, port: port))
+            default:
+                throw SSHChannelError.connectionClosed(await connectionClosedReason(error))
+            }
         }
-        if boundPort != port {
-            remoteForwards.rebind(host: host, from: port, to: boundPort)
+        remoteForwards.confirm(token, boundPort: boundPort)
+        return SSHRemotePortForward(client: self, token: token, host: host, requestedPort: port, boundPort: boundPort)
+    }
+
+    /// 发 cancel-tcpip-forward，不等回应。
+    func sendCancelForward(host: String, port: Int) {
+        let sshHandler = self.sshHandler
+        let lifecycle = self.lifecycle
+        eventLoop.execute {
+            guard lifecycle.disconnectReason == nil else { return }
+            sshHandler.value.sendTCPForwardingRequest(.cancel(host: host, port: port), promise: nil)
         }
-        return SSHRemotePortForward(client: self, host: host, requestedPort: port, boundPort: boundPort)
     }
 
     /// `startRemotePortForward` 的作用域写法：每个入站连接包成 `NIOAsyncChannel`（激活前、在它的 EventLoop 上），
@@ -232,67 +256,104 @@ public final class SSHRemotePortForward: Sendable {
     /// 服务器实际监听的端口。
     public let boundPort: Int
     private let client: SSHClient
+    private let token: SSHRemoteForwardRegistry.Token
     private let cancelled = NIOLockedValueBox(false)
 
-    init(client: SSHClient, host: String, requestedPort: Int, boundPort: Int) {
+    init(client: SSHClient, token: SSHRemoteForwardRegistry.Token, host: String, requestedPort: Int, boundPort: Int) {
         self.client = client
+        self.token = token
         self.host = host
         self.requestedPort = requestedPort
         self.boundPort = boundPort
     }
 
-    /// 撤销监听。幂等；连接已断时直接返回。之后到达的 forwarded-tcpip 通道一律拒绝。
-    public func cancel() async {
+    /// 撤销监听。幂等；连接已断时直接返回。之后到达的、属于这个监听的 forwarded-tcpip 通道一律拒绝。
+    ///
+    /// 等服务器回应最多 `timeout`；链路卡死或任务被取消时不再等（请求照样已经发出）。
+    public func cancel(timeout: Duration = .seconds(5)) async {
         let first = cancelled.withLockedValue { cancelled -> Bool in
             defer { cancelled = true }
             return !cancelled
         }
         guard first else { return }
-        client.remoteForwards.unregister(host: host, port: boundPort)
+        client.remoteForwards.unregister(token)
         guard client.isConnected else { return }
         let sshHandler = client.sshHandler
         let host = self.host
         let port = boundPort
         let eventLoop = client.eventLoop
-        _ = try? await eventLoop.flatSubmit {
+        let reply = eventLoop.flatSubmit {
             let promise = eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
             sshHandler.value.sendTCPForwardingRequest(.cancel(host: host, port: port), promise: promise)
             return promise.futureResult
-        }.get()
+        }
+        _ = try? await withTimeout(timeout, onTimeout: SSHChannelError.timeout(timeout)) {
+            try await reply.getCancellable { _ in }
+        }
     }
 }
 
 /// 入站 forwarded-tcpip 通道的分发表。NIOSSH 的入站通道回调只能在建 `NIOSSHHandler` 时给一个，
 /// 所以先建这张表，回调查表找对应的监听。
+///
+/// 每次 `startRemotePortForward` 一条登记，用 token 区分（不按地址当键）：重复请求同一个地址、
+/// 两个 port 为 0 的请求同时在途，都不会互相覆盖或误删。
 final class SSHRemoteForwardRegistry: Sendable {
     typealias Initializer = @Sendable (any Channel, SSHChannelType.ForwardedTCPIP) -> EventLoopFuture<Void>
 
-    private struct Key: Hashable {
-        var host: String
-        var port: Int
+    struct Token: Hashable, Sendable {
+        fileprivate let id: UInt64
     }
 
     private struct Entry {
+        var host: String
         var requestedPort: Int
+        /// 服务器确认之后的实际端口；确认之前是 nil。
+        var boundPort: Int?
         var initializer: Initializer
     }
 
-    private let entries = NIOLockedValueBox<[Key: Entry]>([:])
-
-    func register(host: String, port: Int, requestedPort: Int, initializer: @escaping Initializer) {
-        entries.withLockedValue { $0[Key(host: host, port: port)] = Entry(requestedPort: requestedPort, initializer: initializer) }
+    private struct State {
+        var nextID: UInt64 = 0
+        /// 按登记先后排（id 递增）。
+        var entries: [UInt64: Entry] = [:]
     }
 
-    func unregister(host: String, port: Int) {
-        _ = entries.withLockedValue { $0.removeValue(forKey: Key(host: host, port: port)) }
+    private let state = NIOLockedValueBox(State())
+
+    func register(host: String, requestedPort: Int, initializer: @escaping Initializer) -> Token {
+        state.withLockedValue { state in
+            let id = state.nextID
+            state.nextID += 1
+            state.entries[id] = Entry(host: host, requestedPort: requestedPort, boundPort: nil, initializer: initializer)
+            return Token(id: id)
+        }
     }
 
-    /// 服务器回了实际端口：把「任意端口」的登记改到实际端口上。
-    func rebind(host: String, from oldPort: Int, to newPort: Int) {
-        entries.withLockedValue { entries in
-            if let entry = entries.removeValue(forKey: Key(host: host, port: oldPort)) {
-                entries[Key(host: host, port: newPort)] = entry
+    func confirm(_ token: Token, boundPort: Int) {
+        state.withLockedValue { $0.entries[token.id]?.boundPort = boundPort }
+    }
+
+    func unregister(_ token: Token) {
+        _ = state.withLockedValue { $0.entries.removeValue(forKey: token.id) }
+    }
+
+    /// 给一条入站连接找监听。优先级：已确认且地址端口都对上 → 已确认且端口对上（有的服务器回报的地址
+    /// 与请求时写的不完全一样："" / "0.0.0.0" / "localhost"）→ 还没确认、请求端口对上（含 0）的地址相同者。
+    /// 同一优先级里取最早登记的。
+    private func lookup(_ info: SSHChannelType.ForwardedTCPIP) -> Initializer? {
+        state.withLockedValue { state in
+            let ordered = state.entries.sorted { $0.key < $1.key }.map(\.value)
+            if let exact = ordered.first(where: { $0.boundPort == info.listeningPort && $0.host == info.listeningHost }) {
+                return exact.initializer
             }
+            if let byPort = ordered.first(where: { $0.boundPort == info.listeningPort }) {
+                return byPort.initializer
+            }
+            return ordered.first(where: {
+                $0.boundPort == nil && $0.host == info.listeningHost
+                    && ($0.requestedPort == info.listeningPort || $0.requestedPort == 0)
+            })?.initializer
         }
     }
 
@@ -302,14 +363,7 @@ final class SSHRemoteForwardRegistry: Sendable {
         guard case .forwardedTCPIP(let info) = type else {
             return channel.eventLoop.makeFailedFuture(SSHChannelError.channelClosed)
         }
-        let entry = entries.withLockedValue { entries -> Entry? in
-            if let exact = entries[Key(host: info.listeningHost, port: info.listeningPort)] { return exact }
-            // 有的服务器回报的监听地址和请求时写的不完全一样（"" / "0.0.0.0" / "localhost"），按端口兜底；
-            // 再不行就是 port 为 0、回应还没到的那一条。
-            if let byPort = entries.first(where: { $0.key.port == info.listeningPort })?.value { return byPort }
-            return entries.first { $0.key.port == 0 && $0.key.host == info.listeningHost }?.value
-        }
-        guard let entry else {
+        guard let initializer = lookup(info) else {
             return channel.eventLoop.makeFailedFuture(SSHChannelError.channelClosed)
         }
         return channel.setOption(ChannelOptions.allowRemoteHalfClosure, value: true).flatMap {
@@ -318,7 +372,7 @@ final class SSHRemoteForwardRegistry: Sendable {
             } catch {
                 return channel.eventLoop.makeFailedFuture(error)
             }
-            return entry.initializer(channel, info)
+            return initializer(channel, info)
         }
     }
 }

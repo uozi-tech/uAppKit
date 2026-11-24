@@ -135,9 +135,11 @@ final class SSHForwardingChannelTests: XCTestCase {
         let client = try await Harness.connect(server)
         defer { Task { await client.close() } }
         await XCTAssertThrowsAsync(try await client.openDirectTCPIP(
-            targetHost: "127.0.0.1", targetPort: port, originatorAddress: originator)) { error in
-            guard case SSHChannelError.openRejected(let underlying) = error else { return XCTFail("unexpected \(error)") }
-            XCTAssertEqual(underlying.type, .channelSetupRejected)
+            targetHost: "127.0.0.1", targetPort: port, originatorAddress: originator,
+            initializer: { $0.eventLoop.makeSucceededVoidFuture() })) { error in
+            guard case SSHChannelError.openRejected(let failure) = error else { return XCTFail("unexpected \(error)") }
+            XCTAssertEqual(failure.reason, .connectFailed)
+            XCTAssertEqual(failure.reasonCode, 2)
         }
         XCTAssertTrue(client.isConnected)
     }

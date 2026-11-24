@@ -1,3 +1,4 @@
+import NIOConcurrencyHelpers
 import NIOCore
 import NIOSSH
 
@@ -72,6 +73,13 @@ public struct SSHChannelOutput: AsyncSequence, Sendable {
     public typealias Element = SSHChannelOutputChunk
 
     let producer: SSHSessionOutputHandler.Producer
+    /// 有没有人拿走过迭代器（或被 `exitStatus()` 认领去丢弃）。
+    let claim: NIOLockedValueBox<Bool>
+
+    init(producer: SSHSessionOutputHandler.Producer) {
+        self.producer = producer
+        self.claim = NIOLockedValueBox(false)
+    }
 
     public struct AsyncIterator: AsyncIteratorProtocol {
         var base: SSHSessionOutputHandler.Producer.AsyncIterator
@@ -82,7 +90,17 @@ public struct SSHChannelOutput: AsyncSequence, Sendable {
     }
 
     public func makeAsyncIterator() -> AsyncIterator {
-        AsyncIterator(base: producer.makeAsyncIterator())
+        claim.withLockedValue { $0 = true }
+        return AsyncIterator(base: producer.makeAsyncIterator())
+    }
+
+    /// 还没人读的话认领下来（返回 true），之后的输出交给 `exitStatus()` 丢弃。
+    func claimForDiscard() -> Bool {
+        claim.withLockedValue { claimed in
+            if claimed { return false }
+            claimed = true
+            return true
+        }
     }
 }
 
@@ -96,23 +114,24 @@ public final class SSHSessionHandle: Sendable {
     public let output: SSHChannelOutput
 
     let requests: NIOLoopBound<SSHChannelRequestHandler>
-    let lifecycle: SSHConnectionLifecycle
+    let outputHandler: NIOLoopBound<SSHSessionOutputHandler>
+    let client: SSHClient
 
     init(channel: any Channel, output: SSHChannelOutput, requests: NIOLoopBound<SSHChannelRequestHandler>,
-         lifecycle: SSHConnectionLifecycle) {
+         outputHandler: NIOLoopBound<SSHSessionOutputHandler>, client: SSHClient) {
         self.channel = channel
         self.output = output
         self.requests = requests
-        self.lifecycle = lifecycle
+        self.outputHandler = outputHandler
+        self.client = client
     }
 
-    /// 写到远端的标准输入。返回时数据已交给连接（对端窗口满时会等）。
+    /// 写到远端的标准输入。返回时数据已交给连接（对端窗口满时会等）。任务被取消时立刻抛
+    /// `CancellationError`（数据可能已经排进去了）。
     public func write(_ buffer: ByteBuffer) async throws {
-        do {
-            try await channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)))
-        } catch {
-            throw mapWriteError(error)
-        }
+        let promise = channel.eventLoop.makePromise(of: Void.self)
+        channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)), promise: promise)
+        try await awaitWrite(promise.futureResult)
     }
 
     /// 写字节。
@@ -120,17 +139,11 @@ public final class SSHSessionHandle: Sendable {
         try await write(channel.allocator.buffer(bytes: bytes))
     }
 
-    /// 发 EOF（关掉远端的标准输入）。之后不能再写。
-    ///
-    /// 已知问题：NIOSSH 0.15.2 的 `ChildChannelStateMachine.sendChannelEOF` 把「对端已经发过 EOF 之后
-    /// 本端再发 EOF」判成乱序，当协议错误拆掉通道（还没发出去的数据随之丢弃）。对端先 EOF、本端后 EOF
-    /// 的情形要等 NIOSSH 那条线的补丁。
+    /// 发 EOF（关掉远端的标准输入）。之后不能再写。对端先发过 EOF 也没关系（RFC 4254 §5.3）。
     public func sendEOF() async throws {
-        do {
-            try await channel.close(mode: .output)
-        } catch {
-            throw mapWriteError(error)
-        }
+        let promise = channel.eventLoop.makePromise(of: Void.self)
+        channel.close(mode: .output, promise: promise)
+        try await awaitWrite(promise.futureResult)
     }
 
     /// 改终端尺寸（window-change，RFC 4254 §6.7，不要回应）。
@@ -147,7 +160,15 @@ public final class SSHSessionHandle: Sendable {
     }
 
     /// 等通道关闭，返回远端进程的结束方式。任务被取消时不再等，按当时已知的返回（多半是 `.unknown`）。
+    ///
+    /// 还没有人读 `output` 时，这里把它认领下来并**丢弃之后的输出**——否则输出超过一个窗口的命令会因为
+    /// 没人读而永远停在那里，退出状态也就永远等不到。要输出就先开始读（`for try await` / `makeAsyncIterator`），
+    /// 再在另一个任务里或读完之后调这里。
     public func exitStatus() async -> SSHExitStatus {
+        if output.claimForDiscard() {
+            let outputHandler = self.outputHandler
+            channel.eventLoop.execute { outputHandler.value.discardOutput() }
+        }
         await waitForClose(timeout: nil)
         let requests = self.requests
         return (try? await channel.eventLoop.submit { requests.value.exitStatus ?? .unknown }.get()) ?? .unknown
@@ -164,7 +185,7 @@ public final class SSHSessionHandle: Sendable {
     public var isActive: Bool { channel.isActive }
 
     private func waitForClose(timeout: Duration?) async {
-        // 出错拆除的子通道 closeFuture 是失败的，成败都算关了。`get()` 不响应取消，用可取消的版本。
+        // closeFuture 成败都算关了。`get()` 不响应取消，用可取消的版本。
         let closed = channel.closeFuture
         guard let timeout else {
             _ = try? await closed.getCancellable(lateValue: { _ in })
@@ -180,31 +201,41 @@ public final class SSHSessionHandle: Sendable {
 
     func sendRequest(_ event: any Sendable, kind: SSHChannelRequestKind, wantReply: Bool) async throws {
         let requests = self.requests
+        let future = channel.eventLoop.flatSubmit {
+            requests.value.send(event, kind: kind, wantReply: wantReply)
+        }
+        try await awaitWrite(future)
+    }
+
+    private func awaitWrite(_ future: EventLoopFuture<Void>) async throws {
         do {
-            try await channel.eventLoop.flatSubmit {
-                requests.value.send(event, kind: kind, wantReply: wantReply)
-            }.get()
+            try await future.getCancellable { _ in }
+        } catch is CancellationError {
+            throw CancellationError()
         } catch let error as SSHChannelError {
             throw error
         } catch {
-            throw mapWriteError(error)
+            throw await mapWriteError(error)
         }
     }
 
-    private func mapWriteError(_ error: any Error) -> any Error {
-        if let reason = lifecycle.disconnectReason { return SSHChannelError.connectionClosed(reason) }
+    private func mapWriteError(_ error: any Error) async -> any Error {
+        if let error = error as? NIOSSHError, error.type == .tcpShutdown {
+            return SSHChannelError.connectionClosed(await client.connectionClosedReason(error))
+        }
         if let error = error as? ChannelError {
             switch error {
             case .ioOnClosedChannel, .alreadyClosed, .eof, .outputClosed:
+                if client.lifecycle.disconnectReason != nil || !client.transport.isActive
+                    || client.lifecycle.localCloseRequested {
+                    return SSHChannelError.connectionClosed(await client.connectionClosedReason(error))
+                }
                 return SSHChannelError.channelClosed
             default:
                 break
             }
         }
-        if let error = error as? NIOSSHError, error.type == .tcpShutdown {
-            return SSHChannelError.connectionClosed(.transportError(error))
-        }
-        return error
+        return SSHChannelError.channelFailed(error)
     }
 }
 
