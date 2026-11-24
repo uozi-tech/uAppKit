@@ -39,36 +39,32 @@ enum OpenSSHTestContainers {
     /// 把明文 RSA 容器私钥段里的 p、q 换成空串（只剩 n / e / d）。迁移前这种容器靠 Citadel 的 SHA-1
     /// 老路导入；现在由 `RSAKeyMaterial.recoverPrimes` 还原素因子。
     static func rsaWithoutPrimes(_ text: String) -> String {
-        let der = try! PEMDocument.parse(text).der
-        let magic = Array("openssh-key-v1\u{0}".utf8)
-        var reader = SSHWireReader(Array(der.dropFirst(magic.count)))
-        let cipher = try! reader.readString()
-        let kdf = try! reader.readString()
-        let kdfOptions = try! reader.readString()
-        let count = try! reader.readUInt32()
-        let publicKey = try! reader.readString()
-        var privateSection = SSHWireReader(try! reader.readString())
-        let check = try! privateSection.readUInt32()
-        _ = try! privateSection.readUInt32()
-        let keyType = try! privateSection.readString()
-        let n = try! privateSection.readMPInt()
-        let e = try! privateSection.readMPInt()
-        let d = try! privateSection.readMPInt()
-        let iqmp = try! privateSection.readMPInt()
-        _ = try! privateSection.readMPInt()
-        _ = try! privateSection.readMPInt()
-        let comment = try! privateSection.readString()
+        let c = try! OpenSSHRSADecoder.decodeComponents(openSSHText: text)
+        return rsa(n: c.modulus, e: c.publicExponent, d: c.privateExponent, iqmp: [1], p: [], q: [])
+    }
 
+    /// 用给定的分量拼一个明文 RSA 容器。公钥段默认由 (e, n) 生成，`publicBlob` 给了就用它（拼「公钥段与私钥段
+    /// 不是同一把钥匙」的文件）。
+    static func rsa(n: [UInt8], e: [UInt8], d: [UInt8], iqmp: [UInt8], p: [UInt8], q: [UInt8],
+                    publicBlob: [UInt8]? = nil, comment: String = "test") -> String {
         var section = SSHWireWriter()
-        section.writeUInt32(check)
-        section.writeUInt32(check)
-        section.writeString(keyType)
+        section.writeString("ssh-rsa")
         section.writeMPInt(n)
         section.writeMPInt(e)
         section.writeMPInt(d)
         section.writeMPInt(iqmp)
-        section.writeString([UInt8]())
-        section.writeString([UInt8]())
+        section.writeMPInt(p)
+        section.writeMPInt(q)
+        return container(publicBlob: publicBlob ?? SSHPublicMaterial.rsaBlob(e: e, n: n),
+                         keyFields: section.bytes, comment: comment)
+    }
+
+    /// 明文容器：公钥段 `publicBlob`，私钥段 = checkint ×2 ‖ `keyFields`（含类型名）‖ 注释 ‖ 填充。
+    static func container(publicBlob: [UInt8], keyFields: [UInt8], comment: String = "test") -> String {
+        var section = SSHWireWriter()
+        section.writeUInt32(0x1234_5678)
+        section.writeUInt32(0x1234_5678)
+        section.writeRawBytes(keyFields)
         section.writeString(comment)
         var padded = section.bytes
         var pad: UInt8 = 1
@@ -76,16 +72,19 @@ enum OpenSSHTestContainers {
             padded.append(pad)
             pad += 1
         }
-
         var out = SSHWireWriter()
-        out.writeRawBytes(magic)
-        out.writeString(cipher)
-        out.writeString(kdf)
-        out.writeString(kdfOptions)
-        out.writeUInt32(count)
-        out.writeString(publicKey)
+        out.writeRawBytes(Array("openssh-key-v1\u{0}".utf8))
+        out.writeString("none")
+        out.writeString("none")
+        out.writeString([UInt8]())
+        out.writeUInt32(1)
+        out.writeString(publicBlob)
         out.writeString(padded)
-        let base64 = Array(Data(out.bytes).base64EncodedString())
+        return armor(out.bytes)
+    }
+
+    static func armor(_ bytes: [UInt8]) -> String {
+        let base64 = Array(Data(bytes).base64EncodedString())
         let lines = stride(from: 0, to: base64.count, by: 70).map { String(base64[$0..<min($0 + 70, base64.count)]) }
         return (["-----BEGIN OPENSSH PRIVATE KEY-----"] + lines + ["-----END OPENSSH PRIVATE KEY-----"])
             .joined(separator: "\n") + "\n"

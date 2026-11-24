@@ -10,7 +10,7 @@ nonisolated enum OpenSSHEd25519Decoder {
         switch try OpenSSHContainer.openPrivateSection(text: openSSHText, passphrase: passphrase) {
         case .encrypted:
             throw PrivateKeyImportError.encryptedKeyNeedsPassphrase
-        case .plaintext(let keyType, var body):
+        case .plaintext(let keyType, var body, let publicBlob):
             guard keyType == "ssh-ed25519" else {
                 throw PrivateKeyImportError.unsupportedFormat(label: "OpenSSH \(keyType)")
             }
@@ -29,6 +29,7 @@ nonisolated enum OpenSSHEd25519Decoder {
             guard Array(key.publicKey.rawRepresentation) == publicKey else {
                 throw PrivateKeyImportError.malformedKey(reason: String(localized: "Ed25519 私钥构造失败", bundle: ModuleBundle.bundle))
             }
+            try OpenSSHContainer.requireMatchingPublicKey(publicBlob, keyType: "ssh-ed25519", fields: [publicKey])
             return .ed25519(key)
         }
     }

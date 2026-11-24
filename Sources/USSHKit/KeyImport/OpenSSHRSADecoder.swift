@@ -17,7 +17,7 @@ nonisolated enum OpenSSHRSADecoder {
             text: openSSHText, passphrase: passphrase) {
         case .encrypted:
             throw PrivateKeyImportError.encryptedKeyNeedsPassphrase
-        case .plaintext(let keyType, var body):
+        case .plaintext(let keyType, var body, let publicBlob):
             guard keyType == "ssh-rsa" else {
                 throw PrivateKeyImportError.unsupportedFormat(label: "OpenSSH \(keyType)")
             }
@@ -32,8 +32,10 @@ nonisolated enum OpenSSHRSADecoder {
             guard !n.isEmpty, !e.isEmpty, !d.isEmpty else {
                 throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: ModuleBundle.bundle))
             }
+            // 公钥 blob 是 (e, n)，与私钥段的 (n, e) 顺序相反。
+            try OpenSSHContainer.requireMatchingPublicKey(publicBlob, keyType: "ssh-rsa", fields: [e, n], integerFields: [0, 1])
             if p.isEmpty || q.isEmpty {
-                guard let recovered = RSAKeyMaterial.recoverPrimes(
+                guard let recovered = try RSAKeyMaterial.recoverPrimes(
                     modulus: n, publicExponent: e, privateExponent: d) else {
                     throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: ModuleBundle.bundle))
                 }

@@ -58,7 +58,7 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         let reported = try await session.download("/data.bin", to: downloaded)
         XCTAssertEqual(reported, info)
         XCTAssertEqual(try Data(contentsOf: downloaded), content)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: fileSystem.hostPath(for: "/data.bin.utable-upload.tmp")))
+        XCTAssertEqual(remoteTemporaryFiles(), [], "临时文件改名进位后不留")
         await session.close()
     }
 
@@ -178,6 +178,187 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         let back = localDirectory.appendingPathComponent("limited-back.bin")
         try await session.download("/limited.bin", to: back)
         XCTAssertEqual(try Data(contentsOf: back), content)
+        await session.close()
+    }
+
+    /// 服务端宣告「不限」（`limits@openssh.com` 报到 2^64，收帧上限也开大）：上传照样按 256 KiB 一块从本地读、
+    /// 一块一个 WRITE，不会一次把整个文件读进内存。1 MiB + 1 字节正好 5 个 WRITE。
+    func testUploadChunksAreCappedWhenTheServerAdvertisesHugeLimits() async throws {
+        let huge = SFTPServerLimits(maximumPacketLength: .max, maximumReadLength: .max,
+                                    maximumWriteLength: .max, maximumOpenHandles: 0)
+        let fileSystem = self.fileSystem!
+        let faults = SFTPFaultInjector()
+        let server = try await TestSSH.startServer { configuration in
+            configuration.serveSFTP(fileSystem: fileSystem,
+                                    configuration: SFTPServer.Configuration(limits: huge, maximumPacketLength: 64 << 20),
+                                    faults: faults)
+        }
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+
+        let content = pattern((1 << 20) + 1)
+        let local = localDirectory.appendingPathComponent("huge-limits.bin")
+        try content.write(to: local)
+        try await session.uploadAtomically(local, to: "/huge-limits.bin")
+        XCTAssertEqual(faults.requestCount(of: .write), 5)
+        XCTAssertEqual(SSHFileTransferSession.uploadChunkBytes, SFTPClient.maximumTransferLength)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: fileSystem.hostPath(for: "/huge-limits.bin"))), content)
+
+        let back = localDirectory.appendingPathComponent("huge-limits-back.bin")
+        try await session.download("/huge-limits.bin", to: back)
+        XCTAssertEqual(try Data(contentsOf: back), content)
+        // READ 也一样封顶：每个最多 256 KiB。
+        XCTAssertGreaterThanOrEqual(faults.requestCount(of: .read), 4)
+        await session.close()
+    }
+
+    // MARK: - 失败时不丢数据
+
+    private func remoteTemporaryFiles() -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: fileSystem.hostPath(for: "/"))) ?? []
+        return names.filter { $0.contains(".utable-upload-") }.sorted()
+    }
+
+    private func localTemporaryFiles() -> [String] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: localDirectory.path)) ?? []
+        return names.filter { $0.contains(".usshkit-download-") }
+    }
+
+    private func remote(_ path: String) -> Data? {
+        try? Data(contentsOf: URL(fileURLWithPath: fileSystem.hostPath(for: path)))
+    }
+
+    private func withoutPosixRename() -> [String: String] {
+        var extensions = SFTPServer.defaultExtensions
+        extensions[SFTPExtensionName.posixRename] = nil
+        return extensions
+    }
+
+    func testTemporaryNamesAreRandom() {
+        let a = SSHFileTransferSession.temporaryPath(for: "/srv/x")
+        let b = SSHFileTransferSession.temporaryPath(for: "/srv/x")
+        XCTAssertNotEqual(a, b)
+        XCTAssertNotNil(a.range(of: #"^/srv/x\.utable-upload-[0-9a-f]{16}\.tmp$"#, options: .regularExpression), a)
+    }
+
+    /// 没有 posix-rename、第一次改名因为权限之类（不是「目标已存在」）失败：不删目标，临时文件清掉，原样报错。
+    func testRenameFailureOtherThanTargetExistsKeepsTheDestination() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(extensions: withoutPosixRename(), faults: faults)
+        defer { Task { await server.stop() } }
+        try Data("old".utf8).write(to: URL(fileURLWithPath: fileSystem.hostPath(for: "/keep.txt")))
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("new.txt")
+        try Data("new".utf8).write(to: local)
+        faults.fail(.rename, with: .permissionDenied)
+        do {
+            try await session.uploadAtomically(local, to: "/keep.txt")
+            XCTFail("应当失败")
+        } catch let error as SFTPError {
+            XCTAssertEqual(error.statusCode, .permissionDenied)
+        }
+        XCTAssertEqual(remote("/keep.txt"), Data("old".utf8))
+        XCTAssertEqual(remoteTemporaryFiles(), [])
+        await session.close()
+    }
+
+    /// 没有 posix-rename、旧文件已经删掉、最后的改名失败：临时文件留着，错误里说出它在哪。
+    func testFinalRenameFailureKeepsTheTemporaryFileAndSaysWhere() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(extensions: withoutPosixRename(), faults: faults)
+        defer { Task { await server.stop() } }
+        try Data("old".utf8).write(to: URL(fileURLWithPath: fileSystem.hostPath(for: "/replace.txt")))
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("new.txt")
+        try Data("precious".utf8).write(to: local)
+        faults.fail(.rename, occurrence: 2, with: .failure)     // 第一次是真的「已存在」，第二次注入失败
+        do {
+            try await session.uploadAtomically(local, to: "/replace.txt")
+            XCTFail("应当失败")
+        } catch SSHFileTransferError.uploadNotMovedIntoPlace(let temporaryPath, let destination, _) {
+            XCTAssertEqual(destination, "/replace.txt")
+            XCTAssertEqual(remote(temporaryPath), Data("precious".utf8), "新内容只在临时文件里，不能删")
+        }
+        XCTAssertNil(remote("/replace.txt"))
+        XCTAssertEqual(remoteTemporaryFiles().count, 1)
+        await session.close()
+    }
+
+    func testFailedUploadRemovesTheTemporaryFileAndKeepsTheDestination() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        try Data("old".utf8).write(to: URL(fileURLWithPath: fileSystem.hostPath(for: "/intact.bin")))
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("big.bin")
+        try pattern(700 * 1024).write(to: local)
+        faults.fail(.write, occurrence: 2, with: .noSpaceOnFilesystem)
+        do {
+            try await session.uploadAtomically(local, to: "/intact.bin")
+            XCTFail("应当失败")
+        } catch let error as SFTPError {
+            XCTAssertEqual(error.statusCode, .noSpaceOnFilesystem)
+        }
+        XCTAssertEqual(remote("/intact.bin"), Data("old".utf8))
+        XCTAssertEqual(remoteTemporaryFiles(), [])
+        await session.close()
+    }
+
+    /// 上传途中被取消：临时文件照样清掉（收尾不受取消影响）。
+    func testCancelledUploadRemovesTheTemporaryFile() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("slow.bin")
+        try pattern(600 * 1024).write(to: local)
+        faults.delayResponses(of: .write, by: .milliseconds(500))
+        let upload = Task { try await session.uploadAtomically(local, to: "/slow.bin") }
+        while faults.requestCount(of: .write) == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        upload.cancel()
+        do {
+            try await upload.value
+            XCTFail("应当被取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertEqual(remoteTemporaryFiles(), [])
+        XCTAssertNil(remote("/slow.bin"))
+        await session.close()
+    }
+
+    /// 下载：远程文件打不开、读到一半失败、被取消，本地原来的文件都原封不动，不留临时文件；成功时原子替换。
+    func testDownloadNeverLosesTheExistingLocalFile() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        try pattern(900 * 1024).write(to: URL(fileURLWithPath: fileSystem.hostPath(for: "/remote.bin")))
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("local.bin")
+        let original = Data("keep me".utf8)
+        try original.write(to: local)
+
+        faults.fail(.open, with: .permissionDenied)
+        do { try await session.download("/remote.bin", to: local); XCTFail("打开应失败") } catch {}
+        XCTAssertEqual(try Data(contentsOf: local), original)
+
+        faults.fail(.read, occurrence: 3, with: .failure)
+        do { try await session.download("/remote.bin", to: local); XCTFail("读应失败") } catch {}
+        XCTAssertEqual(try Data(contentsOf: local), original)
+
+        faults.delayResponses(of: .read, by: .milliseconds(300))
+        let download = Task { try await session.download("/remote.bin", to: local) }
+        let reads = faults.requestCount(of: .read)
+        while faults.requestCount(of: .read) == reads { try await Task.sleep(for: .milliseconds(5)) }
+        download.cancel()
+        do { _ = try await download.value; XCTFail("应被取消") } catch {}
+        XCTAssertEqual(try Data(contentsOf: local), original)
+        XCTAssertEqual(localTemporaryFiles(), [])
+
+        faults.reset()
+        try await session.download("/remote.bin", to: local)
+        XCTAssertEqual(try Data(contentsOf: local), pattern(900 * 1024))
+        XCTAssertEqual(localTemporaryFiles(), [])
         await session.close()
     }
 }

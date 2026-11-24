@@ -246,7 +246,11 @@ extension UserAuthenticationStateMachine {
             // Ok, the server didn't like that much. Let's try another one.
             self.state = .awaitingNextRequest(attempts: attempts)
             precondition(responseCount == 1, "We don't support parallel authentication attempts yet!")
-            return self.requestNextAuthRequest(methods: .init(message), delegate: delegate)
+            return self.requestNextAuthRequest(
+                methods: .init(message),
+                partialSuccess: message.partialSuccess,
+                delegate: delegate
+            )
         case (.client, .authenticationSucceeded):
             // We should ignore all further auth messages in this state.
             return nil
@@ -483,12 +487,14 @@ extension UserAuthenticationStateMachine {
 extension UserAuthenticationStateMachine {
     fileprivate func requestNextAuthRequest(
         methods: NIOSSHAvailableUserAuthenticationMethods,
+        partialSuccess: Bool = false,
         delegate: NIOSSHClientUserAuthenticationDelegate
     ) -> EventLoopFuture<SSHMessage.UserAuthRequestMessage?> {
         let promise = self.loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
         delegate.nextAuthenticationType(
             availableMethods: methods,
             serverSignatureAlgorithms: self.serverSignatureAlgorithms,
+            partialSuccess: partialSuccess,
             nextChallengePromise: promise
         )
 

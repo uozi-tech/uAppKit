@@ -90,7 +90,7 @@ final class KeyImportMatrixTests: XCTestCase {
 
     func testPrimeRecoveryMatchesTheRealFactors() throws {
         let components = try OpenSSHRSADecoder.decodeComponents(openSSHText: KeyImportFixtures.rsaOpenSSH)
-        let primes = try XCTUnwrap(RSAKeyMaterial.recoverPrimes(
+        let primes = try XCTUnwrap(try RSAKeyMaterial.recoverPrimes(
             modulus: components.modulus, publicExponent: components.publicExponent,
             privateExponent: components.privateExponent))
         XCTAssertEqual(Set([primes.p, primes.q]), Set([components.prime1, components.prime2]))
@@ -100,7 +100,7 @@ final class KeyImportMatrixTests: XCTestCase {
         let components = try OpenSSHRSADecoder.decodeComponents(openSSHText: KeyImportFixtures.rsaOpenSSH)
         var wrongD = components.privateExponent
         wrongD[wrongD.count - 1] ^= 0x02
-        XCTAssertNil(RSAKeyMaterial.recoverPrimes(
+        XCTAssertNil(try RSAKeyMaterial.recoverPrimes(
             modulus: components.modulus, publicExponent: components.publicExponent, privateExponent: wrongD))
     }
 

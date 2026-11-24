@@ -12,8 +12,10 @@ nonisolated enum OpenSSHContainer {
     /// 私钥段的打开结果。
     enum PrivateSection {
         /// 已就绪（未加密，或已用口令解开）。`keyType` 是私钥段里声明的算法
-        /// （`ssh-rsa` / `ecdsa-sha2-nistp256` …），`body` 停在该算法的分量之前。
-        case plaintext(keyType: String, body: SSHWireReader)
+        /// （`ssh-rsa` / `ecdsa-sha2-nistp256` …），`body` 停在该算法的分量之前。`publicBlob` 是明文公钥段：
+        /// 解码器必须核对它与私钥段推出来的公钥是同一把（`requireMatchingPublicKey`），否则文件可以「显示一个指纹、
+        /// 用另一把钥匙认证」。
+        case plaintext(keyType: String, body: SSHWireReader, publicBlob: [UInt8])
         /// 已加密（ciphername != "none"）且调用方没给口令。
         case encrypted(cipherName: String)
     }
@@ -38,7 +40,7 @@ nonisolated enum OpenSSHContainer {
         guard keyCount == 1 else {
             throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：密钥数量非 1", bundle: ModuleBundle.bundle))
         }
-        _ = try reader.readString()                    // 公钥段（跳过）
+        let publicBlob = try reader.readString()       // 公钥段：解码器拿它和私钥段核对
         let blob = try reader.readString()             // 私钥段：cipher=none 时即明文
 
         let encrypted = (cipherName != "none")
@@ -62,7 +64,32 @@ nonisolated enum OpenSSHContainer {
             throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：checkint 不一致", bundle: ModuleBundle.bundle))
         }
         let keyType = String(decoding: try priv.readString(), as: UTF8.self)
-        return .plaintext(keyType: keyType, body: priv)
+        return .plaintext(keyType: keyType, body: priv, publicBlob: publicBlob)
+    }
+
+    /// 公钥段与私钥段推出的公钥必须是同一把（OpenSSH 读到不一致的文件也拒绝）。比的是解析后的值：类型名相同、
+    /// 每个字段相同（整数去掉前导零再比），公钥段里不能有多余的字节。
+    static func requireMatchingPublicKey(_ publicBlob: [UInt8], keyType: String, fields: [[UInt8]], integerFields: Set<Int> = []) throws {
+        var reader = SSHWireReader(publicBlob)
+        guard let type = try? reader.readString(), String(decoding: type, as: UTF8.self) == keyType else {
+            throw mismatch()
+        }
+        for (index, expected) in fields.enumerated() {
+            if integerFields.contains(index) {
+                guard let value = try? reader.readMPInt(), trimmed(value) == trimmed(expected) else { throw mismatch() }
+            } else {
+                guard let value = try? reader.readString(), value == expected else { throw mismatch() }
+            }
+        }
+        guard reader.isAtEnd else { throw mismatch() }
+    }
+
+    private static func trimmed(_ bytes: [UInt8]) -> ArraySlice<UInt8> {
+        bytes.drop(while: { $0 == 0 })
+    }
+
+    private static func mismatch() -> PrivateKeyImportError {
+        .malformedKey(reason: String(localized: "OpenSSH：公钥段与私钥段不是同一把钥匙", bundle: ModuleBundle.bundle))
     }
 
     /// 容器声明的密钥类型（`ssh-rsa` / `ssh-ed25519` / `ecdsa-sha2-nistp256` …），取自明文的公钥段，

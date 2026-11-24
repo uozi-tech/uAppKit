@@ -10,7 +10,8 @@
 
 顺序：先是能单独提给上游的修复（0001–0004），然后两个扩展接口（0005 / 0006），再是两项协议扩展
 （0007 / 0008，它们用到 0006 加的 `keyExchangeAlgorithms` 配置），然后客户端层要的三处小改动（0009–0011），
-再是重新密钥交换的修复与自动触发（0012 / 0013），修改声明（0014）**始终排在最后**。
+再是重新密钥交换的修复与自动触发（0012 / 0013）、把 partial success 交给认证委托（0014），
+修改声明（0015）**始终排在最后**。
 
 | 补丁 | 内容 | 类别 |
 |---|---|---|
@@ -27,7 +28,8 @@
 | 0011 | 认证委托用完了立即报错 | 修 bug（行为变化） |
 | 0012 | 重新密钥交换期间 channel 写入排队 | 修 bug |
 | 0013 | 按需与按流量自动重新密钥交换 | 新功能（默认开启） |
-| 0014 | 修改声明 | 许可证 |
+| 0014 | USERAUTH_FAILURE 的 partial success 交给认证委托 | 公开 API |
+| 0015 | 修改声明 | 许可证 |
 
 ## 0001 对端先关（`.closedRemotely`）时也不回 window-adjust
 
@@ -246,15 +248,30 @@ NIOSSH 从不主动重新交换（`_rekey` 只给测试）；对端也不发起�
 
 **去掉的时机 / 上游**：可以提给 Apple。行为变化：默认开启，超过 1 GiB 的连接会自动重新交换。
 
-## 0014 修改声明（始终最后）
+## 0014 把 USERAUTH_FAILURE 的 partial success 交给客户端认证委托
 
-Apache-2.0 第 4(b) 条：0001–0013 改过的 23 个上游源文件和 1 个上游测试文件
+`receiveUserAuthFailure` 只把剩下的认证方式交给委托，丢掉了 `partial success`（RFC 4252 §5.1）。客户端分不清
+「这一步通过、还要下一步」和「被拒」：多步认证写不了；RSA 的 `rsa-sha2-512` 其实已被接受时，客户端层会换
+`rsa-sha2-256` 再递同一把钥匙，白耗一次认证尝试，也记不下是哪个算法通过的（USSHCoreTests 里有一个
+`XCTExpectFailure` 用例记着这两点，客户端层改用新方法后去掉）。
+
+与 0008 同样做法：`NIOSSHClientUserAuthenticationDelegate` 新增带默认实现的
+`nextAuthenticationType(availableMethods:serverSignatureAlgorithms:partialSuccess:nextChallengePromise:)`，NIOSSH 改调它，
+默认实现转调三参数版本。第一次调用与普通拒绝之后为 false。测试 `PartialSuccessTests`：先 partial success 再接受时委托
+依次看到 false / true、普通拒绝都是 false、两参数与三参数老委托照常认证、partial success 之后没有可提供的仍以
+`noFurtherAuthenticationOffers` 结束。
+
+**去掉的时机 / 上游**：可以提给 Apple；依赖 0008 的三参数要求，单独提交时把默认实现改为转调两参数版本。
+
+## 0015 修改声明（始终最后）
+
+Apache-2.0 第 4(b) 条：0001–0014 改过的 23 个上游源文件和 1 个上游测试文件
 （`ChildChannelMultiplexerTests.swift`）头部各加一行 `Modified by uAppKit`。补丁新加的文件文件头写明出自
 uAppKit，不用再加。新补丁插在它前面；改到别的上游文件，就在这个补丁里给那个文件也加一行。
 
 ## 验证
 
-- `swift test --filter NIOSSHTests`：上游的 347 个用例加补丁的 79 个（共 426），全过才算补丁打对。
+- `swift test --filter NIOSSHTests`：上游的 347 个用例加补丁的 83 个（共 430），全过才算补丁打对。
 - 0001 / 0002 的线上崩溃只在 `-L` / `-D` / 长连接**远端先断**时出现。改这几个补丁之后，发版前要在真机上做
   断网 smoke，编译和测试通过不等于修好。
 - 0005 / 0006 只用测试专用的玩具算法验证了接口本身；0007 / 0008 只在 NIOSSH 两端之间验证过。RSA、DH 接上之后，

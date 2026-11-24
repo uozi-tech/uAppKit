@@ -53,6 +53,20 @@ public protocol NIOSSHClientUserAuthenticationDelegate {
         serverSignatureAlgorithms: [String]?,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     )
+
+    /// The same, plus whether the previous offer partially succeeded (SSH_MSG_USERAUTH_FAILURE with
+    /// `partial success` set, RFC 4252 §5.1): the server accepted it but requires one of `availableMethods` as well.
+    /// `false` on the first call and after a plain rejection. This is the variant NIOSSH calls; the default
+    /// implementation drops `partialSuccess` and calls the variant above.
+    ///
+    /// Implement it for multi-step authentication, or to know that a key was accepted with the signature
+    /// algorithm just offered (so the same key is not offered again under another algorithm).
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        partialSuccess: Bool,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    )
 }
 
 extension NIOSSHClientUserAuthenticationDelegate {
@@ -62,5 +76,18 @@ extension NIOSSHClientUserAuthenticationDelegate {
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
         self.nextAuthenticationType(availableMethods: availableMethods, nextChallengePromise: nextChallengePromise)
+    }
+
+    public func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        partialSuccess: Bool,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
+        self.nextAuthenticationType(
+            availableMethods: availableMethods,
+            serverSignatureAlgorithms: serverSignatureAlgorithms,
+            nextChallengePromise: nextChallengePromise
+        )
     }
 }

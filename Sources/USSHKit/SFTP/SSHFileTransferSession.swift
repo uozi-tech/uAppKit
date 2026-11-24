@@ -16,6 +16,9 @@ public struct SSHRemoteFileInfo: Sendable, Hashable {
 public enum SSHFileTransferError: Error, LocalizedError, Sendable {
     case downloadTooLarge(observed: Int64, maximum: Int64)
     case localFileUnavailable(String)
+    /// 上传已经写进了临时文件 `temporaryPath`，旧的 `destination` 也已经删掉（服务器没有 `posix-rename`，只能先删
+    /// 再改名），最后的改名却失败了：新内容只在临时文件里，**没有删它**。`reason` 是改名失败的原因。
+    case uploadNotMovedIntoPlace(temporaryPath: String, destination: String, reason: String)
 
     public var errorDescription: String? {
         switch self {
@@ -23,6 +26,8 @@ public enum SSHFileTransferError: Error, LocalizedError, Sendable {
             return String(localized: "远程文件过大（\(observed) 字节，超过上限 \(maximum) 字节）", bundle: ModuleBundle.bundle)
         case .localFileUnavailable(let path):
             return String(localized: "无法访问本地文件：\(path)", bundle: ModuleBundle.bundle)
+        case .uploadNotMovedIntoPlace(let temporaryPath, let destination, let reason):
+            return String(localized: "文件已上传到 \(temporaryPath)，但没能替换 \(destination)（旧文件已删除）：\(reason)", bundle: ModuleBundle.bundle)
         }
     }
 }
@@ -117,6 +122,10 @@ public actor SSHFileTransferSession {
     /// wait for a window adjust.
     static let downloadWindow = 16
 
+    /// 上传时一次从本地文件读进内存（也就是一个 WRITE）的上限，与 OpenSSH 的 256 KiB 一致。实际取它与
+    /// `SFTPClient.maximumWriteLength`（服务端的宣告，已经封顶在 `SFTPClient.maximumTransferLength`）的小者。
+    static let uploadChunkBytes = 256 * 1024
+
     /// How much of the stat'ed size one `readAll(expectedLength:)` covers (and
     /// so how much is held in memory before it is written out).
     static let downloadSegmentBytes = 8 << 20
@@ -128,6 +137,9 @@ public actor SSHFileTransferSession {
     /// reporting EOF early) fails with `SFTPError.shortRead` instead of being
     /// reported as a complete download. Bytes past the stat'ed size (the file
     /// grew) are still copied until EOF.
+    ///
+    /// 先写进同目录下的临时文件（随机名、独占创建），读完才 `rename(2)` 原子地换到 `localURL`。远程文件打不开、读到一半
+    /// 失败（`shortRead`、断线）或被取消时，`localURL` 原来的文件原封不动，临时文件删掉。
     ///
     /// - Parameter maximumBytes: When non-nil, the download fails fast (both from
     ///   the pre-flight `stat` and while reading) once the observed size exceeds
@@ -144,15 +156,16 @@ public actor SSHFileTransferSession {
             throw SSHFileTransferError.downloadTooLarge(observed: info.size, maximum: maximumBytes)
         }
 
-        let fm = FileManager.default
-        try? fm.removeItem(at: localURL)
-        guard fm.createFile(atPath: localURL.path, contents: nil) else {
+        let file = try await sftp.openFile(remotePath, flags: .read)
+        let temporary = localURL.deletingLastPathComponent()
+            .appendingPathComponent(".\(localURL.lastPathComponent).usshkit-download-\(Self.randomSuffix())")
+        // O_EXCL：不跟随、不复用已经在那儿的东西（包括符号链接）。权限交给 umask，与以前 createFile 的一样。
+        let descriptor = Darwin.open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o666)
+        guard descriptor >= 0 else {
+            try? await file.close()
             throw SSHFileTransferError.localFileUnavailable(localURL.path)
         }
-        let handle = try FileHandle(forWritingTo: localURL)
-        defer { try? handle.close() }
-
-        let file = try await sftp.openFile(remotePath, flags: .read)
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         let chunk = sftp.maximumReadLength
         do {
             _ = try await Self.segmentedRead(
@@ -165,9 +178,15 @@ public actor SSHFileTransferSession {
                 readNext: { offset in try await file.read(from: offset, length: chunk) },
                 write: { buffer in try handle.write(contentsOf: Data(buffer.readableBytesView)) }
             )
+            try handle.close()
             try await file.close()
+            guard Darwin.rename(temporary.path, localURL.path) == 0 else {
+                throw SSHFileTransferError.localFileUnavailable(localURL.path)
+            }
         } catch {
-            try? await file.close()
+            try? handle.close()
+            Darwin.unlink(temporary.path)
+            await Self.ignoringCancellation { try? await file.close() }
             throw error
         }
         return info
@@ -227,25 +246,72 @@ public actor SSHFileTransferSession {
     /// replaces an existing file. Servers without it only have SFTP v3 RENAME,
     /// which refuses to overwrite: there the old file is removed first, so the
     /// replacement is not atomic.
+    ///
+    /// 临时文件名带随机后缀、独占创建（`SSH_FXF_EXCL`：共享的可写目录里别人预先放好的同名文件或符号链接不会被
+    /// 写穿）。目标还完好时（上传失败、被取消、改名失败）删掉临时文件；没有 `posix-rename`、旧文件已经删掉之后
+    /// 最后的改名失败了，就**留着**临时文件，抛 `SSHFileTransferError.uploadNotMovedIntoPlace` 说出它在哪。
+    /// 只在第一次改名的失败可能是「目标已存在」（SFTP v3 只回 `SSH_FX_FAILURE`；v5 起的 `FILE_ALREADY_EXISTS`）、
+    /// 而且目标确实存在时才走「先删再改名」，权限不足之类的失败原样报出，不删目标。
     public func uploadAtomically(_ localURL: URL, to remotePath: String) async throws {
-        let tempPath = remotePath + ".utable-upload.tmp"
-        try await uploadStreaming(localURL, to: tempPath)
+        let tempPath = Self.temporaryPath(for: remotePath)
+        let sftp = self.sftp
+        let cleanUp = { await Self.ignoringCancellation { try? await sftp.remove(tempPath) } }
         do {
-            if sftp.supportsExtension(SFTPExtensionName.posixRename) {
-                try await sftp.rename(tempPath, to: remotePath, mode: .posix)
-            } else {
-                do {
-                    try await sftp.rename(tempPath, to: remotePath)
-                } catch let error as SFTPError where error.statusCode != nil {
-                    // 目标已存在时 v3 的 RENAME 回 FAILURE：删掉旧文件再改名。
-                    try? await sftp.remove(remotePath)
-                    try await sftp.rename(tempPath, to: remotePath)
-                }
-            }
+            try await uploadStreaming(localURL, to: tempPath)
         } catch {
-            try? await sftp.remove(tempPath)
+            await cleanUp()
             throw error
         }
+        if sftp.supportsExtension(SFTPExtensionName.posixRename) {
+            do {
+                try await sftp.rename(tempPath, to: remotePath, mode: .posix)
+            } catch {
+                await cleanUp()
+                throw error
+            }
+            return
+        }
+        let firstFailure: SFTPError
+        do {
+            try await sftp.rename(tempPath, to: remotePath)
+            return
+        } catch let error as SFTPError where error.statusCode == .failure || error.statusCode == .fileAlreadyExists {
+            firstFailure = error
+        } catch {
+            await cleanUp()
+            throw error
+        }
+        // SSH_FX_FAILURE 是兜底码，先确认目标真的在。
+        guard (try? await sftp.stat(remotePath)) != nil else {
+            await cleanUp()
+            throw firstFailure
+        }
+        do {
+            try await sftp.remove(remotePath)
+        } catch {
+            await cleanUp()                                    // 目标没删掉，还完好
+            throw error
+        }
+        do {
+            try await sftp.rename(tempPath, to: remotePath)
+        } catch {
+            throw SSHFileTransferError.uploadNotMovedIntoPlace(
+                temporaryPath: tempPath, destination: remotePath, reason: SSHErrorText.describe(error))
+        }
+    }
+
+    /// `<remotePath>.utable-upload-<16 位十六进制>.tmp`。
+    static func temporaryPath(for remotePath: String) -> String {
+        "\(remotePath).utable-upload-\(randomSuffix()).tmp"
+    }
+
+    static func randomSuffix() -> String {
+        String(format: "%016llx", UInt64.random(in: .min ... .max))
+    }
+
+    /// 收尾动作不受所在任务的取消影响（取消后 SFTP 请求一发就会抛 `CancellationError`，临时文件就留下了）。
+    static func ignoringCancellation(_ body: @escaping @Sendable () async -> Void) async {
+        await Task { await body() }.value
     }
 
     private func uploadStreaming(_ localURL: URL, to remotePath: String) async throws {
@@ -256,10 +322,11 @@ public actor SSHFileTransferSession {
 
         let file = try await sftp.openFile(
             remotePath,
-            flags: [.write, .create, .truncate]
+            flags: [.write, .create, .exclusive]
         )
-        // 每个 WRITE 按服务端允许的上限切（`limits@openssh.com`，没宣告时 SFTPClient 按 32 KiB）。
-        let chunkSize = sftp.maximumWriteLength
+        // 每个 WRITE 按服务端允许的上限切（`limits@openssh.com`，没宣告时 SFTPClient 按 32 KiB），再封顶在
+        // `uploadChunkBytes`：一次从本地读进内存的就这么多，服务端宣告多大都一样。
+        let chunkSize = min(sftp.maximumWriteLength, Self.uploadChunkBytes)
         do {
             var offset: UInt64 = 0
             while true {
@@ -273,7 +340,7 @@ public actor SSHFileTransferSession {
             }
             try await file.close()
         } catch {
-            try? await file.close()
+            await Self.ignoringCancellation { try? await file.close() }
             throw error
         }
     }

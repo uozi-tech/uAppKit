@@ -1,0 +1,252 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 19:48:13 +0800
+Subject: [PATCH 14/15] =?UTF-8?q?NIOSSH:=20=E6=8A=8A=20USERAUTH=5FFAILURE?=
+ =?UTF-8?q?=20=E7=9A=84=20partial=20success=20=E4=BA=A4=E7=BB=99=E5=AE=A2?=
+ =?UTF-8?q?=E6=88=B7=E7=AB=AF=E8=AE=A4=E8=AF=81=E5=A7=94=E6=89=98=EF=BC=88?=
+ =?UTF-8?q?partial=20success=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+UserAuthenticationStateMachine.receiveUserAuthFailure 只把服务端剩下的认证方式交给委托，丢掉了
+partial success 标志（RFC 4252 §5.1）。客户端于是分不清「这一步通过了、还要再来一步」和「这一步被拒了」：
+做多步认证没法写；对 RSA 来说，rsa-sha2-512 其实已被接受（partial success）时，客户端层会换 rsa-sha2-256
+再递一次同一把钥匙，白白耗掉一次认证尝试（可能撞上 MaxAuthTries），也记不下是哪个签名算法通过的。
+
+与补丁 0008 同样的做法：NIOSSHClientUserAuthenticationDelegate 新增带默认实现的要求
+nextAuthenticationType(availableMethods:serverSignatureAlgorithms:partialSuccess:nextChallengePromise:)，
+NIOSSH 改为调用它；默认实现丢掉 partialSuccess、转调三参数版本，已有的委托（两参数、三参数）不用改。
+第一次调用（SERVICE_ACCEPT 之后）与普通拒绝之后为 false，服务端回 partial success 时为 true，availableMethods
+是服务端还要求的方式。状态机里 requestNextAuthRequest 多一个默认 false 的参数，失败路径传入报文里的标志。
+
+测试（PartialSuccessTests）：服务端先回 partial success（还要 password）再接受，委托依次看到 false / true，
+第二次的方式为 password；普通拒绝两次都是 false；两参数与三参数的老委托照常认证；partial success 之后委托
+没有可提供的了，仍以 noFurtherAuthenticationOffers 结束。
+
+可以提给上游。
+---
+ .../ClientUserAuthenticationDelegate.swift    |  27 ++++
+ .../UserAuthenticationStateMachine.swift      |   8 +-
+ Tests/NIOSSHTests/PartialSuccessTests.swift   | 137 ++++++++++++++++++
+ 3 files changed, 171 insertions(+), 1 deletion(-)
+ create mode 100644 Tests/NIOSSHTests/PartialSuccessTests.swift
+
+diff --git a/Sources/NIOSSH/User Authentication/ClientUserAuthenticationDelegate.swift b/Sources/NIOSSH/User Authentication/ClientUserAuthenticationDelegate.swift
+index 88941ce..4bdb6dd 100644
+--- a/Sources/NIOSSH/User Authentication/ClientUserAuthenticationDelegate.swift	
++++ b/Sources/NIOSSH/User Authentication/ClientUserAuthenticationDelegate.swift	
+@@ -51,6 +51,20 @@ public protocol NIOSSHClientUserAuthenticationDelegate {
+         serverSignatureAlgorithms: [String]?,
+         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+     )
++
++    /// The same, plus whether the previous offer partially succeeded (SSH_MSG_USERAUTH_FAILURE with
++    /// `partial success` set, RFC 4252 §5.1): the server accepted it but requires one of `availableMethods` as well.
++    /// `false` on the first call and after a plain rejection. This is the variant NIOSSH calls; the default
++    /// implementation drops `partialSuccess` and calls the variant above.
++    ///
++    /// Implement it for multi-step authentication, or to know that a key was accepted with the signature
++    /// algorithm just offered (so the same key is not offered again under another algorithm).
++    func nextAuthenticationType(
++        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
++        serverSignatureAlgorithms: [String]?,
++        partialSuccess: Bool,
++        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
++    )
+ }
+ 
+ extension NIOSSHClientUserAuthenticationDelegate {
+@@ -61,4 +75,17 @@ extension NIOSSHClientUserAuthenticationDelegate {
+     ) {
+         self.nextAuthenticationType(availableMethods: availableMethods, nextChallengePromise: nextChallengePromise)
+     }
++
++    public func nextAuthenticationType(
++        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
++        serverSignatureAlgorithms: [String]?,
++        partialSuccess: Bool,
++        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
++    ) {
++        self.nextAuthenticationType(
++            availableMethods: availableMethods,
++            serverSignatureAlgorithms: serverSignatureAlgorithms,
++            nextChallengePromise: nextChallengePromise
++        )
++    }
+ }
+diff --git a/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift b/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift
+index 10f08d0..e696dc3 100644
+--- a/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift	
++++ b/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift	
+@@ -244,7 +244,11 @@ extension UserAuthenticationStateMachine {
+             // Ok, the server didn't like that much. Let's try another one.
+             self.state = .awaitingNextRequest(attempts: attempts)
+             precondition(responseCount == 1, "We don't support parallel authentication attempts yet!")
+-            return self.requestNextAuthRequest(methods: .init(message), delegate: delegate)
++            return self.requestNextAuthRequest(
++                methods: .init(message),
++                partialSuccess: message.partialSuccess,
++                delegate: delegate
++            )
+         case (.client, .authenticationSucceeded):
+             // We should ignore all further auth messages in this state.
+             return nil
+@@ -481,12 +485,14 @@ extension UserAuthenticationStateMachine {
+ extension UserAuthenticationStateMachine {
+     fileprivate func requestNextAuthRequest(
+         methods: NIOSSHAvailableUserAuthenticationMethods,
++        partialSuccess: Bool = false,
+         delegate: NIOSSHClientUserAuthenticationDelegate
+     ) -> EventLoopFuture<SSHMessage.UserAuthRequestMessage?> {
+         let promise = self.loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
+         delegate.nextAuthenticationType(
+             availableMethods: methods,
+             serverSignatureAlgorithms: self.serverSignatureAlgorithms,
++            partialSuccess: partialSuccess,
+             nextChallengePromise: promise
+         )
+ 
+diff --git a/Tests/NIOSSHTests/PartialSuccessTests.swift b/Tests/NIOSSHTests/PartialSuccessTests.swift
+new file mode 100644
+index 0000000..36d4e92
+--- /dev/null
++++ b/Tests/NIOSSHTests/PartialSuccessTests.swift
+@@ -0,0 +1,137 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++/// A server that answers the first request with partial success (password still required), then succeeds.
++final class PartialThenAcceptDelegate: NIOSSHServerUserAuthenticationDelegate {
++    let supportedAuthenticationMethods: NIOSSHAvailableUserAuthenticationMethods = .all
++    private(set) var requests = 0
++
++    func requestReceived(
++        request: NIOSSHUserAuthenticationRequest,
++        responsePromise: EventLoopPromise<NIOSSHUserAuthenticationOutcome>
++    ) {
++        self.requests += 1
++        responsePromise.succeed(self.requests == 1 ? .partialSuccess(remainingMethods: .password) : .success)
++    }
++}
++
++/// Records what NIOSSH tells it and offers passwords, at most `offers` of them.
++final class PartialSuccessRecorder: NIOSSHClientUserAuthenticationDelegate {
++    private(set) var calls: [(methods: NIOSSHAvailableUserAuthenticationMethods, partialSuccess: Bool)] = []
++    private var offers: Int
++
++    init(offers: Int) {
++        self.offers = offers
++    }
++
++    func nextAuthenticationType(
++        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
++        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
++    ) {
++        XCTFail("NIOSSH must call the variant with partialSuccess")
++        nextChallengePromise.succeed(nil)
++    }
++
++    func nextAuthenticationType(
++        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
++        serverSignatureAlgorithms: [String]?,
++        partialSuccess: Bool,
++        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
++    ) {
++        self.calls.append((availableMethods, partialSuccess))
++        guard self.offers > 0 else {
++            nextChallengePromise.succeed(nil)
++            return
++        }
++        self.offers -= 1
++        nextChallengePromise.succeed(.init(username: "foo", serviceName: "", offer: .password(.init(password: "bar"))))
++    }
++}
++
++final class PartialSuccessTests: XCTestCase {
++    private var channel: BackToBackEmbeddedChannel!
++
++    override func setUp() {
++        super.setUp()
++        self.channel = BackToBackEmbeddedChannel()
++    }
++
++    override func tearDown() {
++        try? self.channel.finish()
++        self.channel = nil
++        super.tearDown()
++    }
++
++    private func run(
++        client: NIOSSHClientUserAuthenticationDelegate,
++        server: NIOSSHServerUserAuthenticationDelegate
++    ) throws -> UserAuthSuccessRecorder {
++        var harness = TestHarness()
++        harness.clientAuthDelegate = client
++        harness.serverAuthDelegate = server
++        let successes = UserAuthSuccessRecorder()
++        try self.channel.configureWithHarness(harness)
++        try self.channel.client.pipeline.syncOperations.addHandler(successes)
++        try self.channel.activate()
++        return successes
++    }
++
++    func testPartialSuccessIsPassedOn() throws {
++        let recorder = PartialSuccessRecorder(offers: 2)
++        let successes = try self.run(client: recorder, server: PartialThenAcceptDelegate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(successes.successes, 1)
++        XCTAssertEqual(recorder.calls.map(\.partialSuccess), [false, true])
++        XCTAssertEqual(recorder.calls.last?.methods, .password)
++    }
++
++    func testPlainRejectionIsNotPartialSuccess() throws {
++        let recorder = PartialSuccessRecorder(offers: 2)
++        let successes = try self.run(client: recorder, server: DenyThenAcceptDelegate(messagesToDeny: 1))
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(successes.successes, 1)
++        XCTAssertEqual(recorder.calls.map(\.partialSuccess), [false, false])
++    }
++
++    func testOlderDelegatesStillWork() throws {
++        // Two-argument delegate.
++        let successes = try self.run(client: InfinitePasswordDelegate(), server: PartialThenAcceptDelegate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(successes.successes, 1)
++
++        // Three-argument delegate (server-sig-algs).
++        try? self.channel.finish()
++        self.channel = BackToBackEmbeddedChannel()
++        let recorder = ServerSignatureAlgorithmsRecorder()
++        let moreSuccesses = try self.run(client: recorder, server: PartialThenAcceptDelegate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(moreSuccesses.successes, 1)
++        XCTAssertEqual(recorder.calls.count, 2)
++    }
++
++    func testNoFurtherOfferAfterPartialSuccessStillFails() throws {
++        let recorder = PartialSuccessRecorder(offers: 1)
++        let successes = try self.run(client: recorder, server: PartialThenAcceptDelegate())
++        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .noFurtherAuthenticationOffers)
++        }
++        XCTAssertEqual(recorder.calls.map(\.partialSuccess), [false, true])
++        XCTAssertEqual(successes.successes, 0)
++    }
++}

@@ -5,7 +5,7 @@ SSH 栈最底下的 swift-nio-ssh 带着补丁，没法作为普通依赖引用�
 
 | target | 上游 | 基线 | 许可证 | 补丁 |
 |---|---|---|---|---|
-| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 14 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
+| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 15 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
 
 每个组件一个目录：`UPSTREAM`（来源与基线）、`patches/`（按序重放的补丁，`git format-patch` 格式）、
 `PATCHES.md`（每个补丁为什么存在、什么时候能去掉）、上游的 `LICENSE`。
@@ -81,6 +81,6 @@ bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 在新基线上重做或去掉，另加两个扩展接口；同月又补上会话密钥续长、`sendChannelEOF` 状态写反、strict KEX
 （Terrapin 对策）、RFC 8308 `server-sig-algs`、公开的通用全局请求（keepalive）、CHANNEL_OPEN_FAILURE 原因码、认证委托用完
 即报错，又按安全审查加固了两个扩展接口、修了重新交换期间 channel 写入失败、加上按需与按流量的自动重新交换，
-共 14 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
+把 USERAUTH_FAILURE 的 partial success 交给认证委托，共 15 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
 2026-11-24 起客户端层换成 USSHCore，Citadel（`ThirdParty/Citadel/` 与它唯一的补丁「login timeout 可配置、登录失败关 channel」）
 删除：USSHCore 把握手时限做成配置项、等主机密钥确认的时间单独计，失败时关通道，那个补丁要解决的问题不存在了。

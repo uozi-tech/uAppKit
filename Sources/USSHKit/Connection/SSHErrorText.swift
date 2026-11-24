@@ -38,13 +38,15 @@ nonisolated enum SSHErrorText {
             return "\(channelError)（NIOCore.ChannelError）"
         }
         if let sshError = error as? NIOSSHError {
-            return String(describing: sshError)
+            // 有的带对端的原话（协议错误里的 DEBUG 文本、拒绝开通道的说明）。
+            return SSHPeerText.sanitize(String(describing: sshError))
         }
         if error is LocalizedError || type(of: error) is NSError.Type {
             let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
             if !localized.isEmpty { return localized }
         }
-        let described = String(describing: error)
+        // 不认识的错误类型：描述里可能有对端的文字。
+        let described = SSHPeerText.sanitize(String(describing: error))
         let typeName = String(reflecting: type(of: error))
         if described.isEmpty || described == typeName {
             return typeName
@@ -79,7 +81,7 @@ nonisolated enum SSHErrorText {
             return String(localized: "服务器资源不足，暂时打不开新通道（例如超过了 MaxSessions）", bundle: ModuleBundle.bundle)
         case .other:
             let code = String(failure.reasonCode)
-            let detail = failure.description.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = SSHPeerText.sanitize(failure.description)
             if detail.isEmpty {
                 return String(localized: "服务器拒绝打开通道（原因码 \(code)）", bundle: ModuleBundle.bundle)
             }
@@ -100,7 +102,7 @@ nonisolated enum SSHErrorText {
         let name = describe(category)
         let offer = failure.serverOffer.isEmpty
             ? String(localized: "无", bundle: ModuleBundle.bundle, comment: "服务器在这一类里什么算法都没报")
-            : failure.serverOffer.joined(separator: ", ")
+            : SSHPeerText.sanitize(failure.serverOffer.joined(separator: ", "))
         let server = Set(failure.serverOffer)
         if !server.isDisjoint(with: SSHAlgorithms.standard.names(of: category)) {
             return String(localized: "这次连接没有启用服务器提供的任何\(name)算法（服务器提供：\(offer)）", bundle: ModuleBundle.bundle)
@@ -234,17 +236,17 @@ extension SFTPError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .status(let code, let message, _):
-            return Self.describe(code, message: message.trimmingCharacters(in: .whitespacesAndNewlines))
+            return Self.describe(code, message: SSHPeerText.sanitize(message))
         case .connectionClosed:
             return String(localized: "SFTP 通道已断开", bundle: ModuleBundle.bundle)
         case .invalidResponse(let detail):
-            return String(localized: "SFTP 服务器的回应不符合协议：\(detail)", bundle: ModuleBundle.bundle)
+            return String(localized: "SFTP 服务器的回应不符合协议：\(SSHPeerText.sanitize(detail))", bundle: ModuleBundle.bundle)
         case .unsupportedVersion(let version):
             return String(localized: "SFTP 服务器的协议版本 \(String(version)) 不受支持", bundle: ModuleBundle.bundle)
         case .requestTooLarge(let length, let limit):
             return String(localized: "SFTP 请求过大（\(length) 字节，上限 \(limit) 字节）", bundle: ModuleBundle.bundle)
         case .extensionUnsupported(let name):
-            return String(localized: "SFTP 服务器不支持 \(name)", bundle: ModuleBundle.bundle)
+            return String(localized: "SFTP 服务器不支持 \(SSHPeerText.sanitize(name))", bundle: ModuleBundle.bundle)
         case .handleClosed:
             return String(localized: "文件句柄已关闭", bundle: ModuleBundle.bundle)
         case .limitExceeded(let maximumBytes):
@@ -298,7 +300,7 @@ extension SSHCommandError: LocalizedError {
         case .nonZeroExit(.exited(let status), _):
             return String(localized: "命令以状态 \(String(status)) 退出", bundle: ModuleBundle.bundle)
         case .nonZeroExit(.signaled(let signal), _):
-            return String(localized: "命令被信号 \(signal.name) 终止", bundle: ModuleBundle.bundle)
+            return String(localized: "命令被信号 \(SSHPeerText.sanitize(signal.name)) 终止", bundle: ModuleBundle.bundle)
         case .nonZeroExit(.unknown, _):
             return String(localized: "命令结束时没有报告退出状态", bundle: ModuleBundle.bundle)
         case .outputTooLarge(let limit):
