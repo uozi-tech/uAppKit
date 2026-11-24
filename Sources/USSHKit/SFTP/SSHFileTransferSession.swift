@@ -71,6 +71,12 @@ public actor SSHFileTransferSession {
     /// the server only supports SHA-1-era algorithms and the automatic fallback
     /// used them).
     ///
+    /// `keepAliveInterval` sends `keepalive@openssh.com` on every hop at that
+    /// interval; after `SSHClient.Configuration.keepAliveMaximumUnanswered` (3)
+    /// unanswered probes the connection is closed (`disconnectReason` becomes
+    /// `.keepAliveTimeout`) and every request in flight fails instead of hanging.
+    /// `nil` (the default) sends none.
+    ///
     /// On any failure after the SSH transport is established the transport is
     /// closed before the error propagates, so a caller that only receives the
     /// thrown error never leaks a live connection.
@@ -83,7 +89,8 @@ public actor SSHFileTransferSession {
         approvalTimeout: Duration = .seconds(180),
         channelWindowBytes: Int = SSHFileTransferSession.defaultChannelWindowBytes,
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in false },
-        logger: any SSHLogger = NoOpSSHLogger()
+        logger: any SSHLogger = NoOpSSHLogger(),
+        keepAliveInterval: Duration? = nil
     ) async throws -> SSHFileTransferSession {
         let connected = try await SSHClientFactory.connect(
             endpoint: endpoint,
@@ -94,6 +101,7 @@ public actor SSHFileTransferSession {
             approvalTimeout: approvalTimeout,
             approver: approver,
             maximumPacketSize: maximumPacketSize(forWindow: channelWindowBytes),
+            keepAliveInterval: keepAliveInterval,
             logger: logger
         )
         do {
@@ -103,6 +111,19 @@ public actor SSHFileTransferSession {
             await connected.close()
             throw error
         }
+    }
+
+    /// Every hop of the SSH connection is still up. Once the connection is lost
+    /// (server closed it, transport error, keepalive timeout) the session never
+    /// recovers: open a new one.
+    public nonisolated var isConnected: Bool { connected.isConnected }
+
+    /// Why the SSH connection went away, or nil while it is up or after a local
+    /// `close()`.
+    public nonisolated var disconnectReason: SSHDisconnectReason? {
+        let reason = connected.target.disconnectReason ?? connected.bastion?.disconnectReason
+        if let reason, reason.isLocalClose { return nil }
+        return reason
     }
 
     /// `stat(2)` the remote file, returning size and modification date.
@@ -256,8 +277,11 @@ public actor SSHFileTransferSession {
         let tempPath = Self.temporaryPath(for: remotePath)
         let sftp = self.sftp
         let cleanUp = { await Self.ignoringCancellation { try? await sftp.remove(tempPath) } }
+        // 目标已经在的话，新文件要继承它的权限（以及尽量继承属主 / 属组）：改名是换一个新文件上去，
+        // 不继承的话 0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不在就照服务端默认。
+        let destination = try? await sftp.stat(remotePath)
         do {
-            try await uploadStreaming(localURL, to: tempPath)
+            try await uploadStreaming(localURL, to: tempPath, matching: destination?.isRegularFile == true ? destination : nil)
         } catch {
             await cleanUp()
             throw error
@@ -300,6 +324,26 @@ public actor SSHFileTransferSession {
         }
     }
 
+    /// 让临时文件的权限位（含 setuid / setgid / sticky）与属主 / 属组跟目标一样。尽力而为：服务端拒绝
+    /// （`PERMISSION_DENIED`、不支持 setstat……）就算了，上传照样成功——数据比权限要紧。只改和临时文件现状
+    /// 不同的那几项（不是 root 的用户改不了属主，白发一次请求还会多一条拒绝）。
+    static func adoptAttributes(of destination: SFTPFileAttributes, on file: SFTPFile) async {
+        let current = try? await file.stat()
+        if let bits = destination.permissionBits, current?.permissionBits != bits {
+            try? await file.setAttributes(SFTPFileAttributes(permissions: bits))
+        }
+        guard let owner = destination.owner, let currentOwner = current?.owner, currentOwner != owner else { return }
+        do {
+            try await file.setAttributes(SFTPFileAttributes(owner: owner))
+        } catch {
+            // 换不了属主（不是 root）时属组往往还能换（登录用户在那个组里）。
+            if currentOwner.groupID != owner.groupID {
+                try? await file.setAttributes(SFTPFileAttributes(
+                    owner: SFTPFileOwner(userID: currentOwner.userID, groupID: owner.groupID)))
+            }
+        }
+    }
+
     /// `<remotePath>.utable-upload-<16 位十六进制>.tmp`。
     static func temporaryPath(for remotePath: String) -> String {
         "\(remotePath).utable-upload-\(randomSuffix()).tmp"
@@ -314,7 +358,8 @@ public actor SSHFileTransferSession {
         await Task { await body() }.value
     }
 
-    private func uploadStreaming(_ localURL: URL, to remotePath: String) async throws {
+    private func uploadStreaming(_ localURL: URL, to remotePath: String,
+                                 matching destination: SFTPFileAttributes? = nil) async throws {
         guard let handle = try? FileHandle(forReadingFrom: localURL) else {
             throw SSHFileTransferError.localFileUnavailable(localURL.path)
         }
@@ -337,6 +382,9 @@ public actor SSHFileTransferSession {
                 buffer.writeBytes(chunk)
                 try await file.write(buffer, at: offset)
                 offset += UInt64(chunk.count)
+            }
+            if let destination {
+                await Self.adoptAttributes(of: destination, on: file)
             }
             try await file.close()
         } catch {

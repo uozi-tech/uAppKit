@@ -77,6 +77,61 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         await session.close()
     }
 
+    // MARK: - 原子上传保留目标的权限
+
+    private func mode(of path: String) throws -> Int {
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileSystem.hostPath(for: path))
+        return (attributes[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    }
+
+    private func uploadOverExisting(mode: Int, faults: SFTPFaultInjector = SFTPFaultInjector()) async throws -> Int {
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        let host = fileSystem.hostPath(for: "/db.sqlite")
+        try Data("old".utf8).write(to: URL(fileURLWithPath: host))
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: host)
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("db-\(mode).sqlite")
+        try Data("new contents".utf8).write(to: local)
+        try await session.uploadAtomically(local, to: "/db.sqlite")
+        await session.close()
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: host)), Data("new contents".utf8))
+        XCTAssertEqual(remoteTemporaryFiles(), [])
+        return try self.mode(of: "/db.sqlite")
+    }
+
+    /// 改名换上去的是新文件：0600 / 0660 / 0644 的目标换完权限不变（以前一律变成服务端默认）。
+    func testAtomicUploadKeepsTheDestinationPermissions() async throws {
+        for wanted in [0o600, 0o660, 0o644, 0o640] {
+            let got = try await uploadOverExisting(mode: wanted)
+            XCTAssertEqual(got, wanted, String(format: "目标原来是 %o", wanted))
+        }
+    }
+
+    /// 目标不在：照服务端默认（测试服务端是 0666 & umask），不额外设权限。
+    func testAtomicUploadWithoutDestinationUsesServerDefault() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("fresh.bin")
+        try Data("x".utf8).write(to: local)
+        try await session.uploadAtomically(local, to: "/fresh.bin")
+        await session.close()
+        let umaskValue = umask(0); umask(umaskValue)
+        XCTAssertEqual(try mode(of: "/fresh.bin"), 0o666 & ~Int(umaskValue))
+        XCTAssertEqual(faults.requestCount(of: .fsetstat), 0, "没有目标就不发 FSETSTAT")
+    }
+
+    /// 服务端拒绝改权限：上传照样成功（数据比权限要紧），权限是服务端给的默认值。
+    func testAtomicUploadSucceedsWhenSetstatIsRefused() async throws {
+        let faults = SFTPFaultInjector()
+        faults.fail(.fsetstat, times: nil, with: .permissionDenied)
+        let got = try await uploadOverExisting(mode: 0o600, faults: faults)
+        let umaskValue = umask(0); umask(umaskValue)
+        XCTAssertEqual(got, 0o666 & ~Int(umaskValue))
+    }
+
     /// 服务端没有 posix-rename：v3 的 RENAME 不覆盖，删掉旧文件再改名（迁移前的行为，保留给非 OpenSSH 的服务端）。
     func testUploadReplacesExistingFileWithoutPosixRename() async throws {
         var extensions = SFTPServer.defaultExtensions

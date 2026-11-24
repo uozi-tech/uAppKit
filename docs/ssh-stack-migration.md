@@ -99,7 +99,9 @@ public struct SSHLegacyAlgorithm: Sendable, Hashable {
 | `struct SSHPrivateKey: @unchecked Sendable` | `struct SSHPrivateKey: Sendable` |
 | `SSHConnectionError` | **新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
 | `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变（`SSHFileTransferSession.open` 末尾多一个可选的 `logger:`）；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
-| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口**没有** `algorithms:` / `keepAliveInterval:` / `legacyFallback:`：一律 `.standard`、自动退级、不保活（隧道或 SFTP 会话闲置时链路死了没人发现，要保活得经 SPI 自己 `connect`） |
+| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口没有 `algorithms:` / `legacyFallback:`：一律 `.standard`、自动退级 |
+| 隧道 / SFTP 会话闲置时链路死了没人发现；SSH 断了隧道照样监听着本地端口 | 新增保活与存活（第 5 节「隧道与 SFTP 会话」）：`SSHLocalForwardingTunnel(…, keepAliveInterval: Duration? = nil, onDisconnect: @escaping @Sendable (SSHDisconnectReason) -> Void = { _ in })`，`public var isConnected: Bool`、`public var disconnectReason: SSHDisconnectReason?`；`SSHFileTransferSession.open(…, keepAliveInterval: Duration? = nil)`，`public nonisolated var isConnected: Bool`、`public nonisolated var disconnectReason: SSHDisconnectReason?`；`SSHDisconnectReason.userDescription`（给人看的原因） |
+| `HostKeyStore.verify` / `remember` 抛的错被包成 `SSHConnectionError.hostKeyRejected(String)`，类型丢了 | 抛的错遵守新的 `public protocol HostKeyStoreRejection: Error` 时原样交给 `connect` / `open` 的调用方（直连与经跳板机两跳都是），不包；没遵守的照旧包（第 7.1 节） |
 | USSHCore 的错误类型没有文案 | USSHKit 给 `SSHClientError`、`SSHChannelError`、`SFTPError`、`SSHCommandError`、`SSHRSAError` 补上 `LocalizedError`（四种语言），`error.localizedDescription` 直接可用。判断一律看类型与 case，不看文案 |
 
 ## 3. 直接用 `connected.target` 的地方（Citadel → USSHCore）
@@ -148,6 +150,13 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **保活**：`keepAliveInterval: .seconds(n)` 之后，认证成功每隔 n 秒发一个 `keepalive@openssh.com`；连续 3 个
   （`Configuration.keepAliveMaximumUnanswered`）没回应就关连接，断开原因 `SSHDisconnectReason.keepAliveTimeout(unansweredProbes:)`，
   判死约需 `n × 4` 秒。默认 `nil`（不发，今天的行为）。跳板机两跳各自保活。uTerm 自己的看门狗可以改用它，或继续用 `ping()`。
+- **隧道与 SFTP 会话**（`SSHLocalForwardingTunnel` / `SSHFileTransferSession`）：
+  - `keepAliveInterval:` 给了就每一跳都保活（同上），判死约需 `n × 4` 秒；默认 nil，不发。没开保活时链路卡死（NAT 掐了、
+    防火墙丢包、对端失联但 TCP 不复位）**什么都察觉不到**：在途的请求、隧道里的查询一直挂着。长期挂着的隧道建议开（uTable 用 30 秒）。
+  - SSH 连接（任一跳）不是本端关的而断了（服务器关闭、传输出错、保活判死）：隧道收掉本地监听（之后连本地端口立刻被拒，
+    不会再在死连接上开通道），正在转发的连接随各自的 SSH 通道结束，关掉连接，然后调一次 `onDisconnect(reason)`（收完才调）。
+    `isConnected` 从此为 false、`disconnectReason` 是那个原因；隧道不会自己重连，app 要换一条新的。本端 `close()` 不回调。
+  - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。
 - **算法预设**（`SSHAlgorithms`）：
   - `.standard`（**USSHKit 默认**）：NIOSSH 自带的算法排在最前（AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥），后面只补 SHA-2
     时代的：RSA 主机密钥（`rsa-sha2-512/256`）、DH group16-sha512 / group14-sha256、AES-CTR + hmac-sha2（ETM 在前）。所以以前连得上的
@@ -211,6 +220,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   `SSHFileTransferSession.download` 现在按 stat 的大小分段（每段 8 MiB）`readAll(expectedLength:)`：**下载过程中文件变短 →
   报 `shortRead`**（以前按成功返回、只拿到前一部分）；变长照旧读到 EOF。
 - **`SSHFileTransferSession` 失败时不丢数据**：
+  - 目标已经存在（普通文件）时，上传前先 stat 它，写完临时文件、改名之前把它的权限位（含 setuid / setgid / sticky）
+    用 FSETSTAT 设到临时文件上，属主 / 属组不同时也试一次（换不了属主就只换属组）。全部尽力而为：服务端拒绝就算了，上传照样成功。
+    以前改名换上去的是一个新文件，0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不存在时不设，照服务端默认。
   - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`）、
     独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而目标还完好时删掉它。
   - 没有 `posix-rename` 时，只在第一次改名回 `SSH_FX_FAILURE` / `FILE_ALREADY_EXISTS`、**且目标确实存在**时才先删目标再改名；
@@ -251,6 +263,10 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 | `.handshakeFailed`（协议错误，包括 USSHCore 算法实现抛的错；**不含**协商不成） | `.handshakeFailed`（「SSH 握手失败：…」） | 否（重试不会好） |
 | `.authenticationFailed`、`.authenticationDelegateFailed` | `.authenticationFailed` | 否 |
 | `.hostKeyRejected`、`.hostKeyValidationTimeout` | `.hostKeyRejected` | 否 |
+
+**主机密钥库自己的拒绝**：`HostKeyStore.verify` / `remember` 抛出遵守 `HostKeyStoreRejection` 的错误时，USSHKit 原样交给
+调用方（不归进上表、不包成 `.hostKeyRejected` 或 `.jumpHostFailed`），app 拿到的就是自己的类型（例如 uTable 的
+「主机密钥变了」错误，带两边的指纹）。它当然也不会触发自动退级或重试。
 
 **经跳板机时**两跳的失败都包成 `SSHConnectionError.jumpHostFailed(String, cause: SSHConnectionError?)`（签名从
 `jumpHostFailed(String)` 改成这样，`cause` 有默认值 `nil`，`.jumpHostFailed("…")` 的构造照常编译）。`String` 是给用户看的整句，
