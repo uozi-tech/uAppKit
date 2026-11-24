@@ -151,9 +151,13 @@ uappkit_bcrypt_pbkdf(const unsigned char *pass, size_t passlen, const uint8_t *s
     
     /* zap */
 //    freezero(countsalt, saltlen + 4);
+    explicit_bzero(countsalt, saltlen + 4);
     free(countsalt);
     explicit_bzero(out, sizeof(out));
     explicit_bzero(tmpout, sizeof(tmpout));
+    /* uAppKit: SHA512(passphrase) alone decrypts every key that uses this passphrase; do not leave it on the stack. */
+    explicit_bzero(sha2pass, sizeof(sha2pass));
+    explicit_bzero(sha2salt, sizeof(sha2salt));
     
     return 0;
     
