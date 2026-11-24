@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 /// A state machine that manages the state of child channels.
