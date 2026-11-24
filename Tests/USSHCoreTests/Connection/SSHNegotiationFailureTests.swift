@@ -5,7 +5,7 @@ import USSHTestServer
 import XCTest
 
 /// 双方没有共同算法时的报错：`SSHClientError.noCommonAlgorithm`，带类别与服务器的报价；每种都连很多次，证明结果
-/// 与「先处理对端的关闭还是先处理 KEXINIT」无关。对本机真实 sshd 的同类用例在 `OpenSSHAlgorithmInteropTests`。
+/// 与「先处理对端的关闭还是先处理 KEXINIT」无关。对本机真实 sshd 的同类用例在 `OpenSSHNegotiationFailureTests`。
 final class SSHNegotiationFailureTests: XCTestCase {
     static let rsaKey = try! SSHRSAPrivateKey(pemRepresentation: RSAFixtures.keys[1].pkcs1PEM)
     static let attempts = 12

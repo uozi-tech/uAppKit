@@ -289,10 +289,16 @@ final class SSHTestFreezeHandler: ChannelDuplexHandler {
 }
 
 /// 连接上出了错就关掉它（NIOSSH 自己只报错不关）。
+///
+/// 关之前先 flush：NIOSSH 只在 `channelReadComplete` 里 flush，客户端的版本行与 KEXINIT 在同一次读里到达时，
+/// 服务端被版本行触发写出的 KEXINIT 还没 flush，处理客户端的 KEXINIT 就已经协商失败、报错——不 flush 就关，
+/// 这个 KEXINIT 永远发不出去，客户端只看到对端关闭（分不出是不是协商失败）。真实的服务器（OpenSSH）在读对方的
+/// KEXINIT 之前就已经发出自己的，失败时还会先发 DISCONNECT。
 final class SSHTestErrorCloser: ChannelInboundHandler {
     typealias InboundIn = Never
 
     func errorCaught(context: ChannelHandlerContext, error: any Error) {
+        context.flush()
         context.close(promise: nil)
     }
 }
