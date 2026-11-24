@@ -88,8 +88,9 @@ public nonisolated enum PrivateKeyImportError: Error, LocalizedError, Equatable 
             return String(localized: "请用 ssh-keygen 重新导出为常见 OpenSSH/PEM 格式后再导入。", bundle: ModuleBundle.bundle)
         case .unsupportedKDF:
             return String(localized: "请改用 PBES2/PBKDF2 等常见 PEM 加密格式，或重新导出为 OpenSSH 私钥后再导入。", bundle: ModuleBundle.bundle)
-        case .unsupportedKDFCost(_, let maximum):
-            return String(localized: "请在终端用 ssh-keygen -p -a \(String(maximum)) -f <key> 以较低的轮数重新保存私钥后再导入。", bundle: ModuleBundle.bundle)
+        case .unsupportedKDFCost:
+            // 建议的轮数用 100（常见加固指南的写法，一次约 2 秒），不是上限：每次连接都要解一遍，贴着上限存仍然很慢。
+            return String(localized: "请在终端用 ssh-keygen -p -a \(String(OpenSSHKeyDecryption.suggestedRounds)) -f <key> 以较低的轮数重新保存私钥后再导入。", bundle: ModuleBundle.bundle)
         case .malformedKey:
             return String(localized: "请确认文件未被截断、复制时没有丢行；也不要粘贴 .pub 公钥内容。", bundle: ModuleBundle.bundle)
         }

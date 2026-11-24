@@ -284,9 +284,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **协商不成有自己的错误**：`SSHClientError.noCommonAlgorithm`（以前是 `.handshakeFailed`，或者在对端先关连接时变成「服务器关闭了
   连接」，两种随机出现）。现在无论先处理对端的关闭还是先处理 KEXINIT，结果都一样：USSHCore 在 NIOSSH 前面读双方的第一个 KEXINIT，
   按同样的规则自己算一遍，协商不出来就立刻报。
-- **私钥导入的上限**：带口令的 OpenSSH 容器 bcrypt 轮数最多 128（`ssh-keygen -a` 默认 16；一轮约 20 ms，每次连接都要解一遍），
+- **私钥导入的上限**：带口令的 OpenSSH 容器 bcrypt 轮数最多 1024（`ssh-keygen -a` 默认 16；一轮约 20 ms，每次连接都要解一遍），
   更高的报新的 `PrivateKeyImportError.unsupportedKDFCost(rounds:maximum:)`（app 对这个 enum 的 `switch` 要补；建议文案让用户
-  `ssh-keygen -p -a 128` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对
+  `ssh-keygen -p -a 100` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对
   尺寸（n 1024–8192 位、e ≤ 33 位、d < n、p·q = n），线格式的 string ≤ 64 KiB、整数 ≤ 1024 字节；缺素因子的容器改用确定性的
   还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟）。
 - **服务器给的文字先消毒再进文案**：SFTP 状态消息、开通道失败的说明、服务器报的算法列表、NIOSSH 错误里夹带的对端文本、

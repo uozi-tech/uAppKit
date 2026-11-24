@@ -201,7 +201,8 @@ final class BcryptLimitsTests: XCTestCase {
         let path = directory.appendingPathComponent("key").path
         let process = Process()
         process.executableURL = URL(fileURLWithPath: keygen)
-        process.arguments = ["-q", "-t", "ed25519", "-N", "pw", "-a", String(OpenSSHKeyDecryption.maxRounds), "-f", path]
+        // 用 128 轮而不是上限（1024）：真跑一遍上限要几十秒，「不超过上限就放行」由上面的越界用例和这里一起保证。
+        process.arguments = ["-q", "-t", "ed25519", "-N", "pw", "-a", "128", "-f", path]
         try process.run()
         process.waitUntilExit()
         let pem = try String(contentsOfFile: path, encoding: .utf8)
