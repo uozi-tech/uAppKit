@@ -95,6 +95,16 @@ public final class SSHTestServer: Sendable {
         }
     }
 
+    /// 让每条连接现在就（由服务端发起）重新交换密钥。返回发起成功的连接数（交换已在进行中的不算）。
+    @discardableResult
+    public func rekeyAllConnections() async throws -> Int {
+        let started = NIOLockedValueBox(0)
+        try await withEachConnection { handler in
+            if handler.rekey() { started.withLockedValue { $0 += 1 } }
+        }
+        return started.withLockedValue { $0 }
+    }
+
     /// 服务端主动向（第一条）客户端连接开一条通道，返回开成的通道或抛出客户端的拒绝
     /// （`NIOSSHError`，`channelOpenFailureReasonCode` 是客户端给的原因码）。
     public func openChannelToClient(_ type: SSHChannelType) async throws -> any Channel {
@@ -194,6 +204,7 @@ final class SSHTestServerState: Sendable {
             userAuthDelegate: SSHTestAuthDelegate(state: self, eventLoop: channel.eventLoop),
             globalRequestDelegate: forwarding)
         serverConfiguration.maximumPacketSize = configuration.maximumPacketSize
+        serverConfiguration.rekeyLimits = configuration.rekeyLimits
         let handler = NIOSSHHandler(
             role: .server(serverConfiguration),
             allocator: channel.allocator,

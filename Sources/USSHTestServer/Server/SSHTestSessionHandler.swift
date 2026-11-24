@@ -122,14 +122,14 @@ final class SSHTestSessionHandler: ChannelInboundHandler, RemovableChannelHandle
                     exit = .status(1)
                 }
             }
-            Self.finish(channel, exit: exit)
+            Self.finish(channel, exit: exit, sendEOF: !execContext.eofSent.withLockedValue { $0 })
         }
     }
 
     /// EOF、退出状态、CHANNEL_CLOSE（OpenSSH 的顺序）。通道已经关了的话这些调用都会默默失败。
-    /// 客户端先发过 EOF 也照发（NIOSSH 补丁 0004 之后这是合法的）。
-    private static func finish(_ channel: any Channel, exit: SSHTestExit) {
-        channel.close(mode: .output, promise: nil)
+    /// 客户端先发过 EOF 也照发（NIOSSH 补丁 0004 之后这是合法的）；处理函数自己发过就不再发。
+    private static func finish(_ channel: any Channel, exit: SSHTestExit, sendEOF: Bool) {
+        if sendEOF { channel.close(mode: .output, promise: nil) }
         switch exit {
         case .status(let code):
             channel.triggerUserOutboundEvent(SSHChannelRequestEvent.ExitStatus(exitStatus: code), promise: nil)

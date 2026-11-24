@@ -21,6 +21,8 @@ extension SSHTestServer {
         /// 服务端愿意接收的通道包长（决定它通告给客户端的窗口：× 64）。
         public var maximumPacketSize: Int
         public var faults: SSHTestFaults
+        /// 服务端按流量自动重新交换密钥的上限（默认 NIOSSH 的 2^31 包 / 1 GiB）。测试设小就能频繁交换。
+        public var rekeyLimits: NIOSSHRekeyLimits = .default
 
         public init(
             hostKey: NIOSSHPrivateKey = NIOSSHPrivateKey(ed25519Key: .init()),
