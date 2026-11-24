@@ -404,4 +404,28 @@ final class AESCTRTransportProtectionTests: XCTestCase {
         }
         return value
     }
+
+    // MARK: AES-CTR 的 updateKeys
+
+    func testUpdateKeysRefusesKeystreamReuse() throws {
+        for scheme in SchemeUnderTest.all {
+            let material = TestKeys.Material.random(scheme.type.keySizes)
+            let protection = try scheme.type.init(initialKeys: material.client)
+            XCTAssertThrowsError(try protection.updateKeys(material.client), scheme.label) { error in
+                XCTAssertEqual(error as? SSHTransportProtectionError, .keyReuse)
+            }
+            // 只有一个方向重复也拒绝。
+            var halfFresh = TestKeys.Material.random(scheme.type.keySizes)
+            halfFresh.encS2C = material.encS2C
+            halfFresh.ivS2C = material.ivS2C
+            XCTAssertThrowsError(try protection.updateKeys(halfFresh.client), scheme.label)
+            // 拒绝之后状态没变：用原来的密钥还能和对端通。
+            let server = try scheme.type.init(initialKeys: material.server)
+            var wire = TestPacket.plaintext(payload: [1, 2, 3], lengthEncrypted: protection.lengthEncrypted, blockSize: 16)
+            try protection.encryptPacket(&wire, sequenceNumber: 0)
+            XCTAssertEqual(TestPacket.parse(wire, protection: server, sequenceNumber: 0), .payload([1, 2, 3]), scheme.label)
+            // 新的密钥照常接受。
+            XCTAssertNoThrow(try protection.updateKeys(TestKeys.Material.random(scheme.type.keySizes).client))
+        }
+    }
 }
