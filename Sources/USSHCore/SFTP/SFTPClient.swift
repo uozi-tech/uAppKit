@@ -134,6 +134,8 @@ public final class SFTPClient: Sendable {
         } catch {
             channel.close(promise: nil)
             if Task.isCancelled { throw CancellationError() }
+            // 通道在装 handler 之前就关了（pipeline 已拆）：对调用方来说和握手中途断开是一回事。
+            if error is ChannelError { throw SFTPError.connectionClosed }
             throw error
         }
         guard handshake.version == 3 else {
