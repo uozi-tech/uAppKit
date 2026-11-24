@@ -177,6 +177,24 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         await session.close()
     }
 
+    /// 目标是符号链接（哪怕悬空）时什么都不继承：调用方给的 fallbackAttributes 也不用——那多半是之前 stat
+    /// 跟着链接读到的、链接指向的文件的属性。
+    func testFallbackAttributesAreIgnoredWhenTheDestinationIsASymlink() async throws {
+        let server = try await startServer()
+        defer { Task { await server.stop() } }
+        let link = fileSystem.hostPath(for: "/linked.sqlite")
+        try? FileManager.default.removeItem(atPath: link)
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/nonexistent/target")
+        let session = try await open(server)
+        let remembered = SSHRemoteFileInfo(size: 3, modificationDate: nil, permissions: 0o640)
+        let local = localDirectory.appendingPathComponent("linked.sqlite")
+        try Data("new".utf8).write(to: local)
+        try await session.uploadAtomically(local, to: "/linked.sqlite", fallbackAttributes: remembered)
+        let umaskValue = umask(0); umask(umaskValue)
+        XCTAssertEqual(try mode(of: "/linked.sqlite"), 0o666 & ~Int(umaskValue), "符号链接目标不该套用 fallback 的权限")
+        await session.close()
+    }
+
     /// 服务端拒绝改权限：上传照样成功（数据比权限要紧），权限是服务端给的默认值。
     func testAtomicUploadSucceedsWhenSetstatIsRefused() async throws {
         let faults = SFTPFaultInjector()
