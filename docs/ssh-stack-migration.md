@@ -290,7 +290,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   更高的报新的 `PrivateKeyImportError.unsupportedKDFCost(rounds:maximum:)`（app 对这个 enum 的 `switch` 要补；建议文案让用户
   `ssh-keygen -p -a 100` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对
   尺寸（n 1024–8192 位、e ≤ 33 位、d < n、p·q = n），线格式的 string ≤ 64 KiB、整数 ≤ 1024 字节；缺素因子的容器改用确定性的
-  还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟）。
+  还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟；构造出来的最坏输入 Debug 下 1.4 秒，修之前 25 秒）。还原不了的只有
+  gcd(p − 1, q − 1) > 4096 的钥匙（按 λ 算 d 的钥匙里大约万分之二到万分之五），而且只涉及缺素因子的容器——OpenSSH 与
+  PuTTYgen 写的都带素因子。
 - **服务器给的文字先消毒再进文案**：SFTP 状态消息、开通道失败的说明、服务器报的算法列表、NIOSSH 错误里夹带的对端文本、
   退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，

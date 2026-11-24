@@ -192,6 +192,7 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOEmbedded", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "BigInt", package: "BigInt"),
             ],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

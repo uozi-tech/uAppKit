@@ -98,7 +98,13 @@ nonisolated enum RSAKeyMaterial {
     /// φ(n) = n − (p + q) + 1 只比 n 小一点（差不到 2^(位数/2 + 2)），而 e 最多 33 位，于是 m 只能是
     /// ⌊k·g / n⌋ + 1（或 ⌊k·g / n⌋）。由 φ 得 s = p + q，再由 s² − 4n 是完全平方数解出 p、q，最后核对 p·q = n。
     /// 私钥指数按 φ 算的 g 取 1，按 λ 算的（OpenSSL 1.1 起）g 就是 gcd(p − 1, q − 1)，实际的钥匙都很小；
-    /// 枚举到 `maximumTotientCofactor` 为止，枚举不到就当分量不一致（最坏也只是几千次小除法）。
+    /// 枚举到 `maximumTotientCofactor` 为止，枚举不到就当分量不一致。
+    ///
+    /// 代价：每个 g 一次乘法、两次除法（被除数 ~8200 位、除数很短），几千次加起来是毫秒级。开方贵（与 n 同长），
+    /// 只给通过了余数检查、落在范围内、**没被拒过**（构造出来的 e = 3、d = (2n − 2s + 1) / 3 会让每个 g 都给出同一个
+    /// φ）、而且判别式模 64 / 63 / 65 / 11 都是平方剩余（非平方数一千个里只漏过六个左右）的候选。
+    /// 实测（Debug，M5 Pro，8192 位）：上面那种构造（s ≈ 2√n，判别式非负）以前每个 g 都开方，24.8 秒；现在 1.4 秒，
+    /// 随机垃圾 1.0 秒，都花在枚举的除法上；合法的钥匙 0.09 秒。Release 快一个数量级。
     static func recoverPrimes(modulus: [UInt8], publicExponent: [UInt8],
                               privateExponent: [UInt8]) throws -> (p: [UInt8], q: [UInt8])? {
         try validate(modulus: modulus, publicExponent: publicExponent, privateExponent: privateExponent, primes: nil)
@@ -111,18 +117,29 @@ nonisolated enum RSAKeyMaterial {
         guard n > slack else { return nil }
         let lowestTotient = n - slack
         let four = BigUInt(4)
+        var rejected = Set<BigUInt>()
         for g in 1...maximumTotientCofactor {
             let kg = k * BigUInt(g)
             let estimate = kg / n
             for m in [estimate + 1, estimate] where m > 0 {
                 let (totient, remainder) = kg.quotientAndRemainder(dividingBy: m)
-                guard remainder == 0, totient < n, totient > lowestTotient else { continue }
+                guard remainder == 0, totient < n, totient > lowestTotient, !rejected.contains(totient) else { continue }
                 let sum = n - totient + 1                      // p + q
                 let square = sum * sum
-                guard square > four * n else { continue }
+                guard square > four * n else {
+                    rejected.insert(totient)
+                    continue
+                }
                 let discriminant = square - four * n           // (p − q)²
+                guard mayBeSquare(discriminant) else {
+                    rejected.insert(totient)
+                    continue
+                }
                 let root = discriminant.squareRoot()
-                guard root * root == discriminant, (sum + root) % 2 == 0 else { continue }
+                guard root * root == discriminant, (sum + root) % 2 == 0 else {
+                    rejected.insert(totient)
+                    continue
+                }
                 let p = (sum + root) / 2
                 let q = (sum - root) / 2
                 guard q > 1, p * q == n else { continue }
@@ -132,7 +149,19 @@ nonisolated enum RSAKeyMaterial {
         return nil
     }
 
-    /// `recoverPrimes` 枚举 gcd(p − 1, q − 1) 的上限。它总是偶数，随机素数的 gcd 超过几千的概率在万分之一以下；
-    /// 这样的钥匙又恰好是缺素因子的容器时导入会失败（用 `ssh-keygen -p` 重新存一次就会写上素因子）。
+    /// `recoverPrimes` 枚举 gcd(p − 1, q − 1) 的上限。它总是偶数；按 λ 算私钥指数的钥匙里超过 4096 的大约是
+    /// 万分之二到万分之五（量级，样本不大）。只影响**缺素因子**的容器——OpenSSH 与 PuTTYgen 写的都带素因子——
+    /// 这样的钥匙导入会失败（用 `ssh-keygen -p` 重新存一次就会写上素因子）。
     static let maximumTotientCofactor = 4096
+
+    /// 模 64 / 63 / 65 / 11 的平方剩余表：不在表里的一定不是完全平方数（开方之前的廉价筛子）。
+    private static let squareResidues: [(modulus: UInt, residues: Set<UInt>)] = [64, 63, 65, 11].map { m in
+        (UInt(m), Set((0..<UInt(m)).map { $0 * $0 % UInt(m) }))
+    }
+
+    static func mayBeSquare(_ value: BigUInt) -> Bool {
+        squareResidues.allSatisfy { table in
+            table.residues.contains(UInt(value % BigUInt(table.modulus)))
+        }
+    }
 }
