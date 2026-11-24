@@ -94,7 +94,8 @@ final class SFTPClientProtocolErrorTests: XCTestCase {
             XCTAssertTrue(detail.contains("150"), detail)
         }
         try await channel.closeFuture.get()
-        await XCTAssertSFTPError(.invalidResponse("unknown SFTP packet type 150")) { _ = try await client.realPath(".") }
+        // 通道已经关了：之后的请求不再发出，直接 connectionClosed。
+        await XCTAssertSFTPError(.connectionClosed) { _ = try await client.realPath(".") }
     }
 
     func testWrongResponseTypeFailsOnlyThatRequest() async throws {

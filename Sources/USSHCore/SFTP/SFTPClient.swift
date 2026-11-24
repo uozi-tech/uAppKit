@@ -166,6 +166,8 @@ public final class SFTPClient: Sendable {
 
     /// 关掉整条通道；在途请求以 `connectionClosed` 失败。重复调用无害。
     public func close() async {
+        // 已经不活跃：不再等 closeFuture——EventLoop 关停之后，它上面的 future 永远等不到回调。
+        guard channel.isActive else { return }
         channel.close(promise: nil)
         try? await channel.closeFuture.get()
     }
@@ -399,7 +401,9 @@ extension SFTPClient {
 /// 一个已经交出去、还在等回答的请求。
 struct SFTPInFlightRequest: Sendable {
     let id: UInt32
-    let promise: EventLoopPromise<SFTPResponse>
+    /// nil = 交出去的时候通道就已经不活跃了，请求没有发（`wait` 直接抛 `connectionClosed`）。
+    /// 这时不建 promise：EventLoop 可能已经关停，它上面的 future 既完成不了、也等不到。
+    let promise: EventLoopPromise<SFTPResponse>?
 }
 
 /// 客户端与文件句柄共用的收发内核。
@@ -409,13 +413,19 @@ struct SFTPClientCore: Sendable {
     let requestIDs: NIOLockedValueBox<UInt32>
 
     /// 取号、建 promise、交给 EventLoop 上的 handler。不检查取消（清理路径也用它）。
+    ///
+    /// 通道已经不活跃时直接以 `connectionClosed` 失败、不往 EventLoop 上交：EventLoop 关停之后
+    /// `execute` 会把任务丢掉，promise 就永远不会完成（调试构建里还会撞上 NIO 的「promise 泄漏」断言）。
     func submit(_ build: (UInt32) -> SFTPRequest) -> SFTPInFlightRequest {
         let id = requestIDs.withLockedValue { next in
             defer { next &+= 1 }
             return next
         }
-        let request = build(id)
+        guard channel.isActive else {
+            return SFTPInFlightRequest(id: id, promise: nil)
+        }
         let promise = channel.eventLoop.makePromise(of: SFTPResponse.self)
+        let request = build(id)
         let handler = self.handler
         channel.eventLoop.execute {
             handler.value.enqueue(request, promise: promise)
@@ -423,23 +433,27 @@ struct SFTPClientCore: Sendable {
         return SFTPInFlightRequest(id: id, promise: promise)
     }
 
-    /// 等回答。任务被取消时立刻抛 `CancellationError`，并撤掉 handler 里的记录。
+    /// 等回答。任务被取消时（一次 EventLoop 往返之内）抛 `CancellationError`，并撤掉 handler 里的记录。
     func wait(_ request: SFTPInFlightRequest) async throws -> SFTPResponse {
-        try await withTaskCancellationHandler {
-            try await request.promise.futureResult.get()
+        guard let promise = request.promise else { throw SFTPError.connectionClosed }
+        return try await withTaskCancellationHandler {
+            try await promise.futureResult.get()
         } onCancel: {
             abandon(request)
         }
     }
 
     /// 不再等这个请求了（取消、或者批量读写里前面的请求已经失败）。
+    ///
+    /// 撤记录与让 promise 失败必须在**同一个** EventLoop 任务里做（见 `SFTPClientChannelHandler.abandon`）：
+    /// 分成两步时，夹在中间到达的 HANDLE 会把记录拿走、成功被忽略，句柄就漏在服务端了。
     func abandon(_ request: SFTPInFlightRequest) {
-        // promise 被完成两次时 NIO 静默忽略第二次：这里先让等的一方走，handler 那边随后再完成也无妨。
-        request.promise.fail(CancellationError())
         let handler = self.handler
         let id = request.id
+        // 通道没了：handler 已经（或马上会）让所有记录失败；EventLoop 可能已经关停，不往上交任务。
+        guard let promise = request.promise, channel.isActive else { return }
         channel.eventLoop.execute {
-            handler.value.forget(id)
+            handler.value.abandon(id, promise: promise)
         }
     }
 
