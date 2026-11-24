@@ -143,6 +143,11 @@ extension NIOSSHError {
 
     internal static let invalidUserAuthSignature = NIOSSHError(type: .invalidUserAuthSignature, diagnostics: nil)
 
+    internal static let noFurtherAuthenticationOffers = NIOSSHError(
+        type: .noFurtherAuthenticationOffers,
+        diagnostics: "The user authentication delegate has no further offers"
+    )
+
     @inline(never)
     internal static func unknownPacketType(diagnostic: String) -> NIOSSHError {
         NIOSSHError(type: .unknownPacketType, diagnostics: diagnostic)
@@ -230,6 +235,7 @@ extension NIOSSHError {
             case invalidHostKeyForKeyExchange
             case invalidOpenSSHPublicKey
             case invalidCertificate
+            case noFurtherAuthenticationOffers
         }
 
         private var base: Base
@@ -327,6 +333,10 @@ extension NIOSSHError {
 
         /// A certificate failed validation.
         public static let invalidCertificate: ErrorType = .init(.invalidCertificate)
+
+        /// The client's user authentication delegate offered nothing more (completed its promise with `nil`)
+        /// before the server accepted an offer: user authentication has failed.
+        public static let noFurtherAuthenticationOffers: ErrorType = .init(.noFurtherAuthenticationOffers)
     }
 }
 
