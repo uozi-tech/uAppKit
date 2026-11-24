@@ -20,7 +20,7 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
     private var connected: ConnectedClient?
     private var listener: LocalForwardListener?
     private var isClosed = false
-    /// SSH 连接（任一跳）断开的原因；断了之后监听已经关掉。
+    /// SSH 连接（任一跳）断开的原因；断了之后监听不再接连接（端口留到 `close()`）。
     private var lostReason: SSHDisconnectReason?
     private var disconnectTokens: [(SSHClient, SSHDisconnectObserverToken)] = []
 
@@ -114,7 +114,7 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
         return SSHForwardingEndpoint(host: request.localHost, port: port)
     }
 
-    /// SSH 连接断了：和本端关闭一样收掉本地监听（之后连进本地端口的连接立刻被拒，不会再在死连接上开通道），
+    /// SSH 连接断了：本地监听不再接连接（连进来的立刻关掉，不会再在死连接上开通道；端口留到 `close()` 才释放），
     /// 正在转发的连接随各自的 SSH 通道一起结束；连接本身也关掉（另一跳可能还连着）。只处理第一次。
     private func connectionLost(_ reason: SSHDisconnectReason) async {
         guard !isClosed, lostReason == nil else { return }
@@ -124,9 +124,10 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
             message: "SSH 隧道断开：\(reason.userDescription)",
             metadata: ["host": request.endpoint.host, "port": String(request.endpoint.port)]
         ))
-        let listener = self.listener
-        self.listener = nil
-        await listener?.close()
+        // 监听的端口**不还给系统**，只是不再接连接（连进来的立刻关掉）：还给系统之后它可能被别的进程绑上，
+        // app 还没来得及关掉的连接池（后台补连接、探活）再去连，就会把握手、密码、查询发给那个进程。
+        // 端口在 `close()` 时才释放。
+        await listener?.stopAccepting()
         await connected?.close()
         onDisconnect(reason)
     }

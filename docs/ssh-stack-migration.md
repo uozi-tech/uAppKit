@@ -155,7 +155,7 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **隧道与 SFTP 会话**（`SSHLocalForwardingTunnel` / `SSHFileTransferSession`）：
   - `keepAliveInterval:` 给了就每一跳都保活（同上），判死约需 `n × 4` 秒；默认 nil，不发。没开保活时链路卡死（NAT 掐了、
     防火墙丢包、对端失联但 TCP 不复位）**什么都察觉不到**：在途的请求、隧道里的查询一直挂着。长期挂着的隧道建议开（uTable 用 30 秒）。
-  - SSH 连接（任一跳）不是本端关的而断了（服务器关闭、传输出错、保活判死）：隧道收掉本地监听（之后连本地端口立刻被拒，
+  - SSH 连接（任一跳）不是本端关的而断了（服务器关闭、传输出错、保活判死）：隧道的本地监听不再接连接（之后连本地端口的连接立刻被关掉；端口**不还给系统**，留到 `close()`——还回去可能被别的进程绑上，app 里还没关的连接池再去连就把握手、密码发给了它，
     不会再在死连接上开通道），正在转发的连接随各自的 SSH 通道结束，关掉连接，然后调一次 `onDisconnect(reason)`（收完才调）。
     `isConnected` 从此为 false、`disconnectReason` 是那个原因；隧道不会自己重连，app 要换一条新的。本端 `close()` 不回调。
   - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。它们也看 SFTP 通道：
@@ -250,7 +250,11 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     会清掉 setuid / setgid，顺序反过来就丢了。setuid 与 sticky 只在临时文件的属主确实与目标相同时才带过去，setgid 只在属组
     确实相同时才带过去：换属主被拒时（普通用户覆盖别人的 04755 文件）结果是不带 setuid 的 0755，绝不会是一个属于上传者的
     setuid 文件。全部尽力而为：服务端拒绝就算了，上传照样成功。以前改名换上去的是一个新文件，0660 的库会变成服务端默认的
-    0644、属主变成登录用户。目标不存在（或是符号链接）时不设，照服务端默认。
+    0644、属主变成登录用户。
+  - 目标不在时 `uploadAtomically(_:to:fallbackAttributes:)` 用调用方给的那份（通常是先前 `stat` / `download` 返回的
+    `SSHRemoteFileInfo`，它现在带 `permissions` / `ownerID` / `groupID`）设新文件的属主与权限，规则同上（先属主后权限、特殊位
+    只在属主 / 属组对得上时带过去）：上一次替换做到「旧文件已删、新文件没到位」之后重传，原来的权限还能接上。不给就照服务端
+    默认。目标在的时候一律跟目标走；目标是符号链接（或别的非普通文件）时什么都不继承，`fallbackAttributes` 也不用。
   - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`；原名太长时
     截短，保证不超过 255 字节）、独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而
     目标还完好时删掉它。

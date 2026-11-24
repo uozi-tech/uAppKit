@@ -97,6 +97,9 @@ public actor LocalForwardListener {
                         // 关闭竞态守卫：监听器正在关闭时不再包装，抛错让 NIO 直接关掉该 child
                         // （无 NIOAsyncChannel 被创建 → 无未 finish 的出站 writer → 不 abort）。
                         guard !closing.withLockedValue({ $0 }) else {
+                            // 抛错只会让这个 child 不进 accept 循环，NIO 并不替我们关它：对端会一直等着。
+                            // 显式关掉，连进来的客户端立刻读到 EOF（SSH 断了之后端口留着时就是这条路）。
+                            childChannel.close(mode: .all, promise: nil)
                             throw ChannelError.ioOnClosedChannel
                         }
                         return try NIOAsyncChannel<ByteBuffer, ByteBuffer>(
@@ -186,6 +189,13 @@ public actor LocalForwardListener {
         // 0 字节 EOF」——此形对 onChannelFailure（只在开通道失败时触发）不可见。
         let outcome = await TunnelGlue.pipe(localAsync, remoteAsync, counter: counter)
         onTunnelClosed(outcome)
+    }
+
+    /// 端口留着、但之后连进来的连接一律立刻关掉（不包装、不开通道）。SSH 断了时用：本地端口不能放回系统——
+    /// 放回去之后可能被别的进程绑上，app 里还没来得及关掉的连接池再去连这个端口，就会把握手、密码、查询发给它。
+    /// 真正释放端口等 `close()`。
+    public func stopAccepting() {
+        closing.withLockedValue { $0 = true }
     }
 
     /// 关闭监听通道并停止接受新连接。已建立的隧道由各自的粘合 Task 自然收尾。
