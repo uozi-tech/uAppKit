@@ -276,21 +276,11 @@ struct CustomKeyExchange<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>: Ellipti
         sessionID: ByteBuffer,
         expectedKeySizes: ExpectedKeySizes
     ) -> NIOSSHSessionKeys {
+        var base = Algorithm.Hasher()
+        base.update(data: encodedSecret.readableBytesView)
+        exchangeHash.withUnsafeBytes { base.update(bufferPointer: $0) }
         func derive(_ letter: Character, _ length: Int) -> [UInt8] {
-            var base = Algorithm.Hasher()
-            base.update(data: encodedSecret.readableBytesView)
-            exchangeHash.withUnsafeBytes { base.update(bufferPointer: $0) }
-
-            var first = base
-            first.update(data: [letter.asciiValue!])
-            first.update(data: sessionID.readableBytesView)
-            var key = Array(first.finalize())
-            while key.count < length {
-                var next = base
-                next.update(data: key)
-                key.append(contentsOf: next.finalize())
-            }
-            return Array(key.prefix(length))
+            base.sshDerivedKey(discriminatorByte: letter.asciiValue!, sessionID: sessionID, length: length)
         }
 
         let ivClientToServer = derive("A", expectedKeySizes.ivSize)
