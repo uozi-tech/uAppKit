@@ -181,8 +181,8 @@ public final class SSHClient: Sendable {
 
     /// 确认对端还活着：发一个 `keepalive@openssh.com`（want-reply）。对端回 SUCCESS 或 FAILURE 都算活着。
     ///
-    /// 超时抛 `SSHChannelError.timeout`，连接已断抛 `SSHChannelError.connectionClosed`——要不要因此关闭连接
-    /// 由调用方决定（自动判死用 `Configuration.keepAliveInterval`）。
+    /// 超时抛 `SSHChannelError.timeout`，连接已断（或正在断）抛 `SSHChannelError.connectionClosed`——要不要因此关闭连接
+    /// 由调用方决定（自动判死用 `Configuration.keepAliveInterval`）。连接还在时的别的失败原样抛出，不说成断开。
     public func ping(timeout: Duration = .seconds(10)) async throws {
         let sshHandler = self.sshHandler
         let lifecycle = self.lifecycle
@@ -205,7 +205,7 @@ public final class SSHClient: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            throw SSHChannelError.connectionClosed(await connectionClosedReason(error))
+            throw await globalRequestError(error)
         }
     }
 }
@@ -387,7 +387,7 @@ extension SSHClient {
         if let error = error as? ChannelError {
             switch error {
             case .eof, .ioOnClosedChannel, .alreadyClosed:
-                if lifecycle.disconnectReason != nil || !transport.isActive || lifecycle.localCloseRequested {
+                if isClosing {
                     return SSHChannelError.connectionClosed(await connectionClosedReason(error))
                 }
                 return SSHChannelError.channelClosed
@@ -399,14 +399,25 @@ extension SSHClient {
     }
 
     /// 连接断了的原因。子通道先于连接的 closeFuture 回调被拆掉，所以原因可能还差一拍才定下来：
-    /// 本端在关就是 `.localClose`，否则稍等它落定（最多半秒），实在等不到才按 `fallback` 算传输错误。
+    /// 本端在关就是 `.localClose`，否则等它落定（最多半秒；所在任务被取消时立刻不等），实在等不到才按 `fallback`
+    /// 算传输错误。只该在连接确实在断（`isClosing`）时调。
     func connectionClosedReason(_ fallback: any Error) async -> SSHDisconnectReason {
-        for _ in 0..<100 {
-            if let reason = lifecycle.disconnectReason { return reason }
-            if lifecycle.localCloseRequested { return .localClose }
-            try? await Task.sleep(for: .milliseconds(5))
-        }
-        return lifecycle.disconnectReason ?? .transportError(fallback)
+        if let reason = lifecycle.disconnectReason { return reason }
+        if lifecycle.localCloseRequested { return .localClose }
+        if let reason = await lifecycle.waitForDisconnect(within: .milliseconds(500)) { return reason }
+        return lifecycle.localCloseRequested ? .localClose : .transportError(fallback)
+    }
+
+    /// 连接已经断了或正在断（本端在关、传输不活跃、原因已定）。
+    var isClosing: Bool {
+        lifecycle.disconnectReason != nil || !transport.isActive || lifecycle.localCloseRequested
+    }
+
+    /// 全局请求（保活、`tcpip-forward`）以别的错误失败时：连接确实在断才归成 `connectionClosed`，否则原样交出去——
+    /// 连接还好好的，不能让调用方以为它断了。
+    func globalRequestError(_ error: any Error) async -> any Error {
+        guard isClosing else { return error }
+        return SSHChannelError.connectionClosed(await connectionClosedReason(error))
     }
 }
 

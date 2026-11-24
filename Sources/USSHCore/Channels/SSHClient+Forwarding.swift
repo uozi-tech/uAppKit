@@ -121,7 +121,7 @@ extension SSHClient {
             case let error as NIOSSHError where error.type == .globalRequestRefused:
                 throw SSHChannelError.globalRequestRejected(.tcpipForward(host: host, port: port))
             default:
-                throw SSHChannelError.connectionClosed(await connectionClosedReason(error))
+                throw await globalRequestError(error)
             }
         }
         remoteForwards.confirm(token, boundPort: boundPort)
