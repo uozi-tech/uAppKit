@@ -34,6 +34,8 @@ public actor LocalForwardListener {
 
     /// 绑定后的监听通道，`close()` 时关闭。
     private var serverChannel: Channel?
+    /// 实际绑上的端口（请求 0 时由系统挑），日志里报它。
+    private var boundPort: Int?
     /// 关闭中标志（线程安全，供 childChannelInitializer 在 EventLoop 上读取）。置位后新 accept
     /// 的 child 不再包成 NIOAsyncChannel —— 否则「关闭 ↔ accept」竞态下，来不及被 accept 循环
     /// 消费的 child 其出站 writer 未 finish 即析构 → NIO preconditionFailure abort（崩溃栈即此）。
@@ -114,6 +116,7 @@ public actor LocalForwardListener {
         self.serverChannel = listener.channel
 
         let boundPort = listener.channel.localAddress?.port ?? listenPort
+        self.boundPort = boundPort
         logger.log(SSHLogEvent(
             level: .info,
             message: "本地转发已绑定 \(listenHost):\(boundPort) → \(destHost):\(destPort)"
@@ -208,7 +211,7 @@ public actor LocalForwardListener {
             self.serverChannel = nil
             logger.log(SSHLogEvent(
                 level: .info,
-                message: "本地转发已停止 \(listenHost):\(listenPort)"
+                message: "本地转发已停止 \(listenHost):\(boundPort ?? listenPort)"
             ))
         }
     }

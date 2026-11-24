@@ -548,11 +548,19 @@ public actor SSHFileTransferSession {
         }
     }
 
+    /// 关掉 SFTP 通道与连接。不管对端怎样，最多约 `SSHClient.closeGracePeriod`（2 秒）就返回：链路正常时 SFTP 通道
+    /// 先有序关掉（对端回 CHANNEL_CLOSE），再断连接；链路被黑洞、服务端卡死时 SFTP 通道等满宽限，连接（经跳板机时
+    /// 要等跳板机回 CHANNEL_CLOSE）只用剩下的一点时间。在途请求立刻失败。不等保活判死。
     public func close() async {
         closedLocally.set()
-        await sftp.close()
-        await connected.close()
+        let deadline = ContinuousClock.now + SSHClient.closeGracePeriod
+        await sftp.close(gracePeriod: SSHClient.closeGracePeriod)
+        let remaining = deadline - ContinuousClock.now
+        await connected.close(gracePeriod: max(remaining, Self.minimumConnectionCloseGrace))
     }
+
+    /// SFTP 通道已经用完了宽限时，留给连接的关闭这么久（直连用不上；经跳板机时给跳板机一个回 CHANNEL_CLOSE 的机会）。
+    static let minimumConnectionCloseGrace: Duration = .milliseconds(200)
 
     /// SFTP sizes are `UInt64`; a corrupt/hostile server can report a value above
     /// `Int64.max`. Saturating avoids a trap that would turn network input into a

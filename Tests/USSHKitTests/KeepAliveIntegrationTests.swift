@@ -180,6 +180,44 @@ final class KeepAliveIntegrationTests: XCTestCase {
             keepAliveInterval: keepAlive)
     }
 
+    /// 计时跑 `body`，最多等 `cap`（body 不响应取消时也不等它）。
+    private func timed(cap: Duration = .seconds(20), _ body: @escaping @Sendable () async -> Void) async -> Duration {
+        let start = ContinuousClock.now
+        let done = AsyncStream<Void>.makeStream()
+        Task { await body(); done.continuation.yield() }
+        Task { try? await Task.sleep(for: cap); done.continuation.yield() }
+        for await _ in done.stream { break }
+        return ContinuousClock.now - start
+    }
+
+    /// 链路被黑洞（没开保活，什么也察觉不到）时 `close()` 照样很快返回：以前等服务端回 CHANNEL_CLOSE，要等到保活判死
+    /// （uTable 实测 120 秒），没开保活就是永远。直连与经跳板机两种；之后会话报已断、在途的请求失败。
+    func testSessionCloseIsBoundedOnABlackholedLink() async throws {
+        let fileSystem = try SFTPLocalFileSystem.makeTemporary(prefix: "usshkit-close")
+        defer { try? fileSystem.removeRoot() }
+        let target = try await sftpServer(fileSystem)
+        let bastion = try await TestSSH.startServer()
+        defer { Task { await target.stop(); await bastion.stop() } }
+        let jump = SSHJumpHost(host: bastion.host, port: bastion.port, username: TestSSH.username,
+                               credential: .password(TestSSH.password))
+        for (label, jumpHost, frozen) in [("direct", nil, target), ("jump", Optional(jump), bastion)] {
+            let session = try await SSHFileTransferSession.open(
+                endpoint: TestSSH.endpoint(target, jumpHost: jumpHost), credential: .password(TestSSH.password),
+                hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll, approver: { _ in true })
+            _ = try await session.stat("/")
+            await frozen.freezeAllConnections()
+            let pending = Task { try await session.stat("/") }
+            try await Task.sleep(for: .milliseconds(50))
+
+            let elapsed = await timed { await session.close() }
+            print("BOUNDED-CLOSE sftp-session-\(label) \(elapsed)")
+            XCTAssertLessThan(elapsed, SSHClient.closeGracePeriod + .seconds(1), label)
+            XCTAssertFalse(session.isConnected, label)
+            let pendingEnded = await timed(cap: .seconds(3)) { _ = try? await pending.value }
+            XCTAssertLessThan(pendingEnded, .seconds(1), "\(label): 在途请求随关闭失败")
+        }
+    }
+
     func testSessionKeepAliveDetectsAFrozenLinkAndFailsRequests() async throws {
         let fileSystem = try SFTPLocalFileSystem.makeTemporary(prefix: "usshkit-keepalive")
         defer { try? fileSystem.removeRoot() }

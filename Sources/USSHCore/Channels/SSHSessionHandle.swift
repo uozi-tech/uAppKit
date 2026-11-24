@@ -116,6 +116,8 @@ public final class SSHSessionHandle: Sendable {
     let requests: NIOLoopBound<SSHChannelRequestHandler>
     let outputHandler: NIOLoopBound<SSHSessionOutputHandler>
     let client: SSHClient
+    /// 通道关了：对端回了 CHANNEL_CLOSE / 连接断了，或者本端 `close()` 等过了宽限、在本端收了尾。
+    private let closed = SSHCloseSignal()
 
     init(channel: any Channel, output: SSHChannelOutput, requests: NIOLoopBound<SSHChannelRequestHandler>,
          outputHandler: NIOLoopBound<SSHSessionOutputHandler>, client: SSHClient) {
@@ -124,11 +126,14 @@ public final class SSHSessionHandle: Sendable {
         self.requests = requests
         self.outputHandler = outputHandler
         self.client = client
+        let closed = self.closed
+        channel.closeFuture.whenComplete { _ in closed.markClosed() }
     }
 
     /// 写到远端的标准输入。返回时数据已交给连接（对端窗口满时会等）。任务被取消时立刻抛
     /// `CancellationError`（数据可能已经排进去了）。
     public func write(_ buffer: ByteBuffer) async throws {
+        guard !abandonedLocally else { throw SSHChannelError.channelClosed }
         let promise = channel.eventLoop.makePromise(of: Void.self)
         channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)), promise: promise)
         try await awaitWrite(promise.futureResult)
@@ -141,6 +146,7 @@ public final class SSHSessionHandle: Sendable {
 
     /// 发 EOF（关掉远端的标准输入）。之后不能再写。对端先发过 EOF 也没关系（RFC 4254 §5.3）。
     public func sendEOF() async throws {
+        guard !abandonedLocally else { throw SSHChannelError.channelClosed }
         let promise = channel.eventLoop.makePromise(of: Void.self)
         channel.close(mode: .output, promise: promise)
         try await awaitWrite(promise.futureResult)
@@ -169,7 +175,7 @@ public final class SSHSessionHandle: Sendable {
             let outputHandler = self.outputHandler
             channel.eventLoop.execute { outputHandler.value.discardOutput() }
         }
-        await waitForClose(timeout: nil)
+        await closed.wait()
         let requests = self.requests
         return (try? await channel.eventLoop.submit { requests.value.exitStatus ?? .unknown }.get()) ?? .unknown
     }
@@ -187,31 +193,30 @@ public final class SSHSessionHandle: Sendable {
     }
 
     /// 关闭通道。幂等。正常情况下返回时通道已关闭（对端回了 CHANNEL_CLOSE）；传输半死、对端迟迟不回时
-    /// 最多等 `gracePeriod` 就返回，通道留给连接断开时一起收拾。
-    public func close(gracePeriod: Duration = .seconds(5)) async {
+    /// 最多等 `gracePeriod`（默认 `SSHClient.closeGracePeriod`）就在本端收尾：输出序列结束、`exitStatus()` 返回
+    /// （多半是 `.unknown`）、等回应的请求以 `channelClosed` 失败、之后的写入立刻失败、`isActive` 为 false。
+    /// 留下的 NIOSSH 子通道随连接断开时一起拆掉。
+    public func close(gracePeriod: Duration = SSHClient.closeGracePeriod) async {
         channel.close(promise: nil)
-        await waitForClose(timeout: gracePeriod)
+        guard await !channel.closeFuture.completes(within: gracePeriod) else { return }
+        let requests = self.requests
+        let outputHandler = self.outputHandler
+        channel.eventLoop.execute {
+            requests.value.closeLocally()
+            outputHandler.value.closeLocally()
+        }
+        closed.markClosed()
     }
 
-    /// 通道是否还开着。
-    public var isActive: Bool { channel.isActive }
+    /// 本端 `close()` 等过了宽限、在本端收了尾，NIOSSH 却还留着这条通道。这时的写入直接报通道已关；通道真的关了
+    /// （对端关、连接断了）照旧走下面的错误归类（连接断了报 `connectionClosed` 及原因）。
+    private var abandonedLocally: Bool { closed.isClosed && channel.isActive }
 
-    private func waitForClose(timeout: Duration?) async {
-        // closeFuture 成败都算关了。`get()` 不响应取消，用可取消的版本。
-        let closed = channel.closeFuture
-        guard let timeout else {
-            _ = try? await closed.getCancellable(lateValue: { _ in })
-            return
-        }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { _ = try? await closed.getCancellable(lateValue: { _ in }) }
-            group.addTask { try? await Task.sleep(for: timeout) }
-            await group.next()
-            group.cancelAll()
-        }
-    }
+    /// 通道是否还开着（本端关过、等过了宽限的也算关了）。
+    public var isActive: Bool { channel.isActive && !closed.isClosed }
 
     func sendRequest(_ event: any Sendable, kind: SSHChannelRequestKind, wantReply: Bool) async throws {
+        guard !abandonedLocally else { throw SSHChannelError.channelClosed }
         let requests = self.requests
         let future = channel.eventLoop.flatSubmit {
             requests.value.send(event, kind: kind, wantReply: wantReply)

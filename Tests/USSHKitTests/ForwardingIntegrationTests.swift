@@ -13,6 +13,29 @@ final class ForwardingIntegrationTests: XCTestCase {
                              targetHost: "127.0.0.1", targetPort: targetPort)
     }
 
+    private final class MessageLog: SSHLogger, @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [String] = []
+        var messages: [String] { lock.withLock { recorded } }
+        func log(_ event: SSHLogEvent) { lock.withLock { recorded.append(event.message) } }
+    }
+
+    /// 绑 0 号端口的监听：停止时日志报实际绑上的端口（以前报请求的 0）。
+    func testListenerOnPortZeroLogsTheBoundPortWhenClosed() async throws {
+        let server = try await TestSSH.startServer()
+        defer { Task { await server.stop() } }
+        let connected = try await TestSSH.connect(server)
+        let log = MessageLog()
+        let listener = LocalForwardListener(connected: connected, listenHost: "127.0.0.1", listenPort: 0,
+                                            destHost: "127.0.0.1", destPort: 9, logger: log)
+        let port = try await listener.start()
+        XCTAssertNotEqual(port, 0)
+        await listener.close()
+        await connected.close()
+        let stopped = log.messages.filter { $0.hasPrefix("本地转发已停止") }
+        XCTAssertEqual(stopped, ["本地转发已停止 127.0.0.1:\(port)"])
+    }
+
     /// 本机端口收到的第一包就是远端服务先说的话（服务器先说话的协议不丢首包）。
     func testTunnelCarriesServerFirstGreeting() async throws {
         let greeter = try await GreetingServer.start(greeting: "220 ready")

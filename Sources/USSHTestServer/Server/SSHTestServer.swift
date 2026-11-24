@@ -159,6 +159,22 @@ public struct SSHTestServerEvents: Sendable {
     public var closedConnections = 0
     /// 接受过的 TCP 连接数（含已断开的）。
     public var acceptedConnections = 0
+    /// 关闭的先后：session 通道（exec / shell / subsystem）关了记 `session-closed`，TCP 连接不活跃了记
+    /// `connection-closed`（在 SSH 拆掉子通道之前记，所以对端直接断 TCP 时通道的记录排在它后面）。
+    public var lifecycle: [String] = []
+}
+
+/// 连接 pipeline 最前面：TCP 不活跃时先记一笔，再往后传（之后 NIOSSH 才拆子通道）。
+final class SSHTestLifecycleRecorder: ChannelInboundHandler {
+    typealias InboundIn = ByteBuffer
+    let state: SSHTestServerState
+
+    init(state: SSHTestServerState) { self.state = state }
+
+    func channelInactive(context: ChannelHandlerContext) {
+        state.record { $0.lifecycle.append("connection-closed") }
+        context.fireChannelInactive()
+    }
 }
 
 /// 服务端共享的状态（所有连接共用）。
@@ -196,6 +212,7 @@ final class SSHTestServerState: Sendable {
     func installConnection(on channel: any Channel) throws {
         let id = ObjectIdentifier(channel)
         let freezer = SSHTestFreezeHandler()
+        try channel.pipeline.syncOperations.addHandler(SSHTestLifecycleRecorder(state: self))
         try channel.pipeline.syncOperations.addHandler(freezer)
         if configuration.faults.unusualNameLists {
             try channel.pipeline.syncOperations.addHandler(SSHTestNameListRewriter())
@@ -242,6 +259,7 @@ final class SSHTestServerState: Sendable {
     private func initializeChild(_ child: any Channel, type: SSHChannelType) -> EventLoopFuture<Void> {
         switch type {
         case .session:
+            child.closeFuture.whenComplete { [self] _ in record { $0.lifecycle.append("session-closed") } }
             return child.setOption(ChannelOptions.allowRemoteHalfClosure, value: true).flatMapThrowing {
                 try child.pipeline.syncOperations.addHandler(SSHTestSessionHandler(state: self))
             }

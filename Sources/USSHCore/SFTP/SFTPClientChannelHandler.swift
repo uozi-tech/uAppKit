@@ -294,6 +294,11 @@ final class SFTPClientChannelHandler: ChannelInboundHandler, RemovableChannelHan
 
     // MARK: 收尾
 
+    /// 本端在关：在途的与之后的请求都以 `connectionClosed` 失败，不等对端回 CHANNEL_CLOSE。
+    func closeLocally() {
+        failAll(.connectionClosed)
+    }
+
     private func failAll(_ error: SFTPError) {
         let previous = state
         if case .closed = previous { return }
