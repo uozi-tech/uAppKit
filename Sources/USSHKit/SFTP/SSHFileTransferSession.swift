@@ -6,10 +6,26 @@ import USSHCore
 public struct SSHRemoteFileInfo: Sendable, Hashable {
     public let size: Int64
     public let modificationDate: Date?
+    /// Permission bits (`0o7777`, incl. setuid / setgid / sticky); nil when the server did not say.
+    public let permissions: UInt32?
+    /// Numeric owner / group; nil when the server did not say.
+    public let ownerID: UInt32?
+    public let groupID: UInt32?
 
-    public init(size: Int64, modificationDate: Date?) {
+    public init(size: Int64, modificationDate: Date?,
+                permissions: UInt32? = nil, ownerID: UInt32? = nil, groupID: UInt32? = nil) {
         self.size = size
         self.modificationDate = modificationDate
+        self.permissions = permissions
+        self.ownerID = ownerID
+        self.groupID = groupID
+    }
+
+    /// 给 `uploadAtomically(fallbackAttributes:)` 用的那部分属性。
+    var attributesToRestore: SFTPFileAttributes? {
+        guard permissions != nil || (ownerID != nil && groupID != nil) else { return nil }
+        let owner = ownerID.flatMap { uid in groupID.map { SFTPFileOwner(userID: uid, groupID: $0) } }
+        return SFTPFileAttributes(owner: owner, permissions: permissions)
     }
 }
 
@@ -138,7 +154,10 @@ public actor SSHFileTransferSession {
         let attributes = try await sftp.stat(remotePath)
         return SSHRemoteFileInfo(
             size: Self.clampedSize(attributes.size),
-            modificationDate: attributes.modificationDate
+            modificationDate: attributes.modificationDate,
+            permissions: attributes.permissionBits,
+            ownerID: attributes.owner?.userID,
+            groupID: attributes.owner?.groupID
         )
     }
 
@@ -302,15 +321,21 @@ public actor SSHFileTransferSession {
     /// - 删成了、最后的改名被服务器拒绝：留着临时文件，抛 `.uploadNotMovedIntoPlace`；改名没有确定的回答：`.uploadOutcomeUnknown`。
     /// 目标还完好时（上传失败、被取消、第一次改名失败）删掉临时文件并原样抛出（取消仍是 `CancellationError`）。
     /// 收尾在后台进行、最多等 `cleanupDeadline`，连接卡死时取消也能马上返回。
-    public func uploadAtomically(_ localURL: URL, to remotePath: String) async throws {
+    ///
+    /// `fallbackAttributes`：目标不在（或不是普通文件）时让新文件用的权限 / 属主 / 属组，通常是调用方先前 `stat`
+    /// 到的那份。例如上一次替换做到「旧文件已删、新文件没改名到位」，这次重传时目标已经没了，靠它把原来的权限接上；
+    /// 不给就照服务端默认。目标在的时候一律跟目标走。
+    public func uploadAtomically(_ localURL: URL, to remotePath: String,
+                                 fallbackAttributes: SSHRemoteFileInfo? = nil) async throws {
         let tempPath = Self.temporaryPath(for: remotePath)
         let sftp = self.sftp
         let cleanUp = { await Self.bestEffort(within: Self.cleanupDeadline) { try? await sftp.remove(tempPath) } }
         // 目标已经在的话，新文件要继承它的权限（以及尽量继承属主 / 属组）：改名是换一个新文件上去，
-        // 不继承的话 0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不在就照服务端默认。
+        // 不继承的话 0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不在就用调用方给的，再没有就照服务端默认。
         let destination = try? await sftp.stat(remotePath)
+        let model = destination?.isRegularFile == true ? destination : fallbackAttributes?.attributesToRestore
         do {
-            try await uploadStreaming(localURL, to: tempPath, matching: destination?.isRegularFile == true ? destination : nil)
+            try await uploadStreaming(localURL, to: tempPath, matching: model)
         } catch {
             await cleanUp()
             throw error

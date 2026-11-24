@@ -123,6 +123,31 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         XCTAssertEqual(faults.requestCount(of: .fsetstat), 0, "没有目标就不发 FSETSTAT")
     }
 
+    /// stat 带回权限；目标已经没了（上一次替换做到一半）时，`fallbackAttributes` 让新文件接上原来的权限。
+    func testFallbackAttributesApplyOnlyWhenTheDestinationIsGone() async throws {
+        let server = try await startServer()
+        defer { Task { await server.stop() } }
+        let host = fileSystem.hostPath(for: "/db.sqlite")
+        try Data("old".utf8).write(to: URL(fileURLWithPath: host))
+        try FileManager.default.setAttributes([.posixPermissions: 0o640], ofItemAtPath: host)
+        let session = try await open(server)
+        let remembered = try await session.stat("/db.sqlite")
+        XCTAssertEqual(remembered.permissions, 0o640)
+        XCTAssertNotNil(remembered.ownerID)
+
+        try FileManager.default.removeItem(atPath: host)
+        let local = localDirectory.appendingPathComponent("again.sqlite")
+        try Data("new".utf8).write(to: local)
+        try await session.uploadAtomically(local, to: "/db.sqlite", fallbackAttributes: remembered)
+        XCTAssertEqual(try mode(of: "/db.sqlite"), 0o640, "目标没了也要接上原来的权限")
+
+        // 目标在的时候跟目标走，不用 fallback。
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: host)
+        try await session.uploadAtomically(local, to: "/db.sqlite", fallbackAttributes: remembered)
+        XCTAssertEqual(try mode(of: "/db.sqlite"), 0o600)
+        await session.close()
+    }
+
     /// 服务端拒绝改权限：上传照样成功（数据比权限要紧），权限是服务端给的默认值。
     func testAtomicUploadSucceedsWhenSetstatIsRefused() async throws {
         let faults = SFTPFaultInjector()
