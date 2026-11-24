@@ -203,7 +203,7 @@ final class SSHChannelLifecycleTests: XCTestCase {
             let delivered = await Harness.eventually {
                 received.withLockedValue { $0 } == "upload" && sawEOF.withLockedValue { $0 }
             }
-            XCTAssertTrue(delivered)
+            XCTAssertTrue(delivered, "target got \(received.withLockedValue { $0 }.count) bytes, EOF \(sawEOF.withLockedValue { $0 }), events \(server.events.directTCPIPTargets)")
             var count = 0
             for try await buffer in inbound { count += buffer.readableBytes }
             return count
@@ -348,5 +348,11 @@ final class SendCloseAndRecord: ChannelInboundHandler {
             sawEOF.withLockedValue { $0 = true }
             context.close(promise: nil)
         }
+    }
+
+    /// 自己先关了写端，再收到对端的 FIN：NIO 直接整条关掉、不发 inputClosed，这里也算看到了 EOF。
+    func channelInactive(context: ChannelHandlerContext) {
+        sawEOF.withLockedValue { $0 = true }
+        context.fireChannelInactive()
     }
 }

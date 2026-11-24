@@ -3,7 +3,7 @@ import NIOConcurrencyHelpers
 import NIOCore
 import NIOEmbedded
 import NIOPosix
-@testable import NIOSSH
+import NIOSSH
 @testable import USSHCore
 import USSHTestServer
 import XCTest
@@ -45,27 +45,41 @@ final class SSHClientResilienceTests: XCTestCase {
         }
     }
 
-    func testFirstResolvedAddressUnreachable() async throws {
+    func testFirstResolvedAddressRefused() async throws {
         let server = try await SSHTestServer.start(Harness.serverConfiguration(exec: .scripted(stdout: "ok")))
         defer { Task { await server.stop() } }
-        // 第一个地址是黑洞（TEST-NET-1，连接挂住或不可达），第二个才是服务端。
+        // 每一族的第一个地址上都没人监听（立刻被拒），后面才是服务端。不用黑洞地址：开发机上的代理 TUN
+        // 会替任何 IP 应答 SYN，黑洞地址反而会「连上」。
+        let refused = try await Self.unusedPort()
         let resolver = FixedResolver(
-            a: [try SocketAddress(ipAddress: "192.0.2.1", port: server.port),
+            a: [try SocketAddress(ipAddress: "127.0.0.1", port: refused),
                 try SocketAddress(ipAddress: "127.0.0.1", port: server.port)],
-            aaaa: [])
-        let client = try await SSHClient.connect(host: "multi.test", port: server.port,
-                                                 configuration: Harness.clientConfiguration(), resolver: resolver)
-        let output = try await client.executeCommand("x")
-        XCTAssertEqual(String(buffer: output), "ok")
-        XCTAssertTrue(client.isConnected)
-        await client.close()
+            aaaa: [try SocketAddress(ipAddress: "::1", port: server.port)])
+        for _ in 0..<5 {
+            let client = try await SSHClient.connect(host: "multi.test", port: server.port,
+                                                     configuration: Harness.clientConfiguration(), resolver: resolver)
+            let output = try await client.executeCommand("x")
+            XCTAssertEqual(String(buffer: output), "ok")
+            await client.close()
+        }
+    }
+
+    static func unusedPort() async throws -> Int {
+        let probe = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .bind(host: "127.0.0.1", port: 0).get()
+        let port = probe.localAddress!.port!
+        try await probe.close()
+        return port
     }
 
     // MARK: - #6 没装上就没有 promise（Debug 下泄漏的 promise 会崩）
 
     func testDNSFailureIsTypedAndDoesNotLeak() async throws {
+        // 解析不出任何地址（真实的不存在域名在装了代理的开发机上会被解析成假 IP，所以换解析器）。
+        let resolver = FixedResolver(a: [], aaaa: [])
         await XCTAssertThrowsAsync(try await SSHClient.connect(
-            host: "no-such-host.invalid", port: 22, configuration: Harness.clientConfiguration())) { error in
+            host: "no-such-host.invalid", port: 22, configuration: Harness.clientConfiguration(),
+            resolver: resolver)) { error in
             guard case SSHClientError.connectFailed = error else { return XCTFail("unexpected \(error)") }
         }
     }
@@ -73,14 +87,11 @@ final class SSHClientResilienceTests: XCTestCase {
     func testConnectTimeoutBeforeAnyChannel() async throws {
         var configuration = Harness.clientConfiguration()
         configuration.connectTimeout = .milliseconds(300)
-        let resolver = FixedResolver(a: [try SocketAddress(ipAddress: "192.0.2.1", port: 22)], aaaa: [])
         let start = ContinuousClock.now
         await XCTAssertThrowsAsync(try await SSHClient.connect(
-            host: "blackhole.test", port: 22, configuration: configuration, resolver: resolver)) { error in
-            switch error {
-            case SSHClientError.connectTimeout, SSHClientError.connectFailed: break
-            default: XCTFail("unexpected \(error)")
-            }
+            host: "slow-dns.test", port: 22, configuration: configuration, resolver: HangingResolver())) { error in
+            guard case SSHClientError.connectTimeout(let timeout) = error else { return XCTFail("unexpected \(error)") }
+            XCTAssertEqual(timeout, .milliseconds(300))
         }
         XCTAssertLessThan(ContinuousClock.now - start, .seconds(3))
     }
@@ -276,12 +287,21 @@ final class SSHClientResilienceTests: XCTestCase {
             calls.add(1)
         }))
         defer { Task { await client.close() } }
-        try await server.withEachConnection { handler in try handler._rekey() }
-        // 重新交换之后连接照常可用，回调只在第一次被调过。
+        let serverStarted = try await server.rekeyAllConnections()
+        XCTAssertEqual(serverStarted, 1)
+        // 服务端发起的重新交换之后连接照常可用。
         for _ in 0..<3 {
             let output = try await client.executeCommand("x")
             XCTAssertEqual(String(buffer: output), "after")
         }
+        // 再由客户端发起一次（上一次可能还没收尾，重试到发起成功）。
+        let started = await Harness.eventually { await client.rekey() }
+        XCTAssertTrue(started)
+        for _ in 0..<3 {
+            let output = try await client.executeCommand("x")
+            XCTAssertEqual(String(buffer: output), "after")
+        }
+        // 两次重新交换都没有再调回调。
         XCTAssertEqual(calls.value, 1)
     }
 
@@ -373,6 +393,32 @@ final class FixedResolver: Resolver, Sendable {
     }
 
     func cancelQueries() {}
+}
+
+/// 永远不回答的解析器（被取消时才以错误结束查询），用来让建连在拿到任何通道之前超时。
+final class HangingResolver: Resolver, Sendable {
+    private let pending = NIOLockedValueBox<[EventLoopPromise<[SocketAddress]>]>([])
+
+    private func query() -> EventLoopFuture<[SocketAddress]> {
+        let promise = MultiThreadedEventLoopGroup.singleton.next().makePromise(of: [SocketAddress].self)
+        pending.withLockedValue { $0.append(promise) }
+        return promise.futureResult
+    }
+
+    func initiateAQuery(host: String, port: Int) -> EventLoopFuture<[SocketAddress]> { query() }
+    func initiateAAAAQuery(host: String, port: Int) -> EventLoopFuture<[SocketAddress]> { query() }
+
+    func cancelQueries() {
+        let promises = pending.withLockedValue { pending in
+            defer { pending.removeAll() }
+            return pending
+        }
+        for promise in promises { promise.fail(ChannelError.connectTimeout(.zero)) }
+    }
+
+    deinit {
+        cancelQueries()
+    }
 }
 
 /// 以错误完成 promise 的认证委托（比如读钥匙串失败）。

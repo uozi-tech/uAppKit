@@ -199,6 +199,17 @@ public final class SSHClient: Sendable {
     }
 }
 
+extension SSHClient {
+    /// 现在就重新交换密钥（RFC 4253 §9）。连接没建立好、或已有一次交换在进行（任一方发起）时什么也不做，
+    /// 返回 false。交换期间各通道的写入排队，完成后按序发出（NIOSSH 补丁 0012）；主机密钥必须与第一次相同，
+    /// 不会再调主机密钥回调。
+    @discardableResult
+    public func rekey() async -> Bool {
+        let sshHandler = self.sshHandler
+        return (try? await eventLoop.submit { sshHandler.value.rekey() }.get()) ?? false
+    }
+}
+
 /// `onDisconnect` 返回的 token。
 public struct SSHDisconnectObserverToken: Sendable, Hashable {
     let id: UInt64
@@ -245,6 +256,7 @@ final class SSHConnectionSetup: Sendable {
             globalRequestDelegate: nil,
             transportProtectionSchemes: configuration.algorithms.transportProtectionSchemes)
         nioConfiguration.maximumPacketSize = configuration.effectiveMaximumPacketSize
+        nioConfiguration.rekeyLimits = configuration.rekeyLimits
         let remoteForwards = self.remoteForwards
         let handler = NIOSSHHandler(
             role: .client(nioConfiguration),

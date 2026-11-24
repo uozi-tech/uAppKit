@@ -235,6 +235,8 @@ public final class SSHSessionHandle: Sendable {
                 break
             }
         }
+        // 通道已经（被本端或对端）关掉了还在用它：NIOSSH 报的是状态机的协议错误，对调用方就是「通道已关」。
+        if !channel.isActive { return SSHChannelError.channelClosed }
         return SSHChannelError.channelFailed(error)
     }
 }

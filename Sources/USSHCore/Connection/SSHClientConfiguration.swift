@@ -55,6 +55,10 @@ extension SSHClient {
         /// `keepAliveInterval × (keepAliveMaximumUnanswered + 1)`。
         public var keepAliveMaximumUnanswered: Int = 3
 
+        /// 什么时候自动重新交换密钥（任一方向在当前密钥下的加密包数或字节数到达上限）。默认与 NIOSSH 相同：
+        /// 2^31 个包或 1 GiB。重新交换时主机密钥按第一次交换钉住，不会再调主机密钥回调。
+        public var rekeyLimits: NIOSSHRekeyLimits = .default
+
         public init(
             authentication: SSHAuthentication,
             hostKeyValidation: SSHHostKeyValidation,

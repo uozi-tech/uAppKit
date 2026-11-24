@@ -292,6 +292,65 @@ final class OpenSSHInteropTests: XCTestCase {
         XCTAssertTrue(client.isConnected)
     }
 
+    // MARK: - 重新交换密钥
+
+    func testDataSurvivesFrequentServerRekeys() async throws {
+        // sshd 每 64 KiB 就重新交换一次：exec 的 stdin/stdout 与 direct-tcpip 各传 2 MiB，不丢不乱。
+        let rekeying = try await OpenSSHFixture.start(extraConfig: "RekeyLimit 64K")
+        defer { rekeying.stop() }
+        let echo = try await EchoServer.start()
+        defer { Task { await echo.stop() } }
+        let calls = Counter()
+        var configuration = rekeying.configuration()
+        let trusted = rekeying.hostKey
+        configuration.hostKeyValidation = .custom { context in
+            calls.add(1)
+            if context.hostKey != trusted { throw SSHUntrustedHostKey(hostKey: context.hostKey) }
+        }
+        let client = try await SSHClient.connect(host: "127.0.0.1", port: rekeying.port, configuration: configuration)
+        defer { Task { await client.close() } }
+
+        let total = 2 * 1024 * 1024
+        let cat = try await client.openExec("cat")
+        let received = try await SSHRekeyChannelTests.streamThrough(cat, total: total)
+        XCTAssertEqual(received, total)
+        let status = await cat.exitStatus()
+        XCTAssertEqual(status, .exited(0))
+
+        let tunnel = try await client.openDirectTCPIPAsyncChannel(
+            targetHost: "127.0.0.1", targetPort: echo.port,
+            originatorAddress: try SocketAddress(ipAddress: "127.0.0.1", port: 0))
+        let echoed = try await tunnel.executeThenClose { inbound, outbound in
+            try await withThrowingTaskGroup(of: Int.self) { group in
+                group.addTask {
+                    var sent = 0
+                    while sent < total {
+                        let size = min(32 * 1024, total - sent)
+                        try await outbound.write(SSHRekeyChannelTests.pattern(size, offset: sent))
+                        sent += size
+                    }
+                    outbound.finish()
+                    return -1
+                }
+                group.addTask {
+                    var expected = 0
+                    for try await buffer in inbound {
+                        guard let next = SSHRekeyChannelTests.verify(buffer, from: expected) else { return -2 }
+                        expected = next
+                    }
+                    return expected
+                }
+                var received = 0
+                for try await value in group where value != -1 { received = value }
+                return received
+            }
+        }
+        XCTAssertEqual(echoed, total)
+        // 64 KiB 一次，几十次重新交换，主机密钥回调只在第一次被调过。
+        XCTAssertEqual(calls.value, 1)
+        XCTAssertTrue(client.isConnected)
+    }
+
     // MARK: - 断开
 
     func testDisconnectNotificationWhenSSHDIsKilled() async throws {
