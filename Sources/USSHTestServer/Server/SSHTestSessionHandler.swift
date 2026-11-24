@@ -16,8 +16,6 @@ final class SSHTestSessionHandler: ChannelInboundHandler, RemovableChannelHandle
     private var windowChanges: AsyncStream<SSHTestWindowSize>.Continuation?
     private var execContext: SSHTestExecContext?
     private var task: Task<Void, Never>?
-    /// 客户端已经发过 EOF。
-    private let stdinClosed = NIOLockedValueBox(false)
 
     init(state: SSHTestServerState) {
         self.state = state
@@ -75,7 +73,6 @@ final class SSHTestSessionHandler: ChannelInboundHandler, RemovableChannelHandle
             task?.cancel()
 
         case ChannelEvent.inputClosed:
-            stdinClosed.withLockedValue { $0 = true }
             stdin?.finish()
 
         default:
@@ -112,7 +109,6 @@ final class SSHTestSessionHandler: ChannelInboundHandler, RemovableChannelHandle
             command: command, environment: environment, pty: pty, stdin: stdinStream,
             windowChanges: windowStream, channel: channel)
         self.execContext = execContext
-        let stdinClosed = self.stdinClosed
         task = Task {
             let exit: SSHTestExit
             do {
@@ -126,14 +122,12 @@ final class SSHTestSessionHandler: ChannelInboundHandler, RemovableChannelHandle
                     exit = .status(1)
                 }
             }
-            Self.finish(channel, exit: exit, sendEOF: !stdinClosed.withLockedValue { $0 })
+            Self.finish(channel, exit: exit, sendEOF: !execContext.eofSent.withLockedValue { $0 })
         }
     }
 
     /// EOF、退出状态、CHANNEL_CLOSE（OpenSSH 的顺序）。通道已经关了的话这些调用都会默默失败。
-    ///
-    /// 客户端已经发过 EOF 时不发 EOF（RFC 4254 §5.3 里 EOF 是可选的）：NIOSSH 0.15.2 的
-    /// `ChildChannelStateMachine.sendChannelEOF` 在「对端已 EOF」状态下误判为乱序、把通道当协议错误拆掉。
+    /// 客户端先发过 EOF 也照发（NIOSSH 补丁 0004 之后这是合法的）；处理函数自己发过就不再发。
     private static func finish(_ channel: any Channel, exit: SSHTestExit, sendEOF: Bool) {
         if sendEOF { channel.close(mode: .output, promise: nil) }
         switch exit {

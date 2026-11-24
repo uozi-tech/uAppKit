@@ -145,6 +145,42 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         XCTAssertEqual(delegate.attemptedRSAAlgorithms, [.rsaSHA2_512])
     }
 
+    /// 认证结束后 `forgetCredentials()` 连同正在逐个算法尝试的 RSA 私钥一起丢掉：之后再被问也拿不出任何东西。
+    func testRSAKeyMaterialIsDroppedWithTheOtherCredentials() throws {
+        let key = try SSHRSAPrivateKey(pemRepresentation: RSAFixtures.keys[1].pkcs1PEM)
+        let loop = EmbeddedEventLoop()
+        let delegate = SSHClientAuthDelegate(
+            authentication: SSHAuthentication(username: "u", methods: [.rsaPrivateKey(key), .password("pw")]),
+            allowsLegacyAlgorithms: true)
+        let first = loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
+        delegate.nextAuthenticationType(availableMethods: [.publicKey, .password], serverSignatureAlgorithms: nil,
+                                        nextChallengePromise: first)
+        XCTAssertNotNil(try first.futureResult.wait())
+        delegate.forgetCredentials()
+        let next = loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
+        delegate.nextAuthenticationType(availableMethods: [.publicKey, .password], serverSignatureAlgorithms: nil,
+                                        nextChallengePromise: next)
+        XCTAssertNil(try next.futureResult.wait(), "rsa-sha2-256 与口令都不该再出现")
+        XCTAssertEqual(delegate.attemptedRSAAlgorithms, [.rsaSHA2_512])
+    }
+
+    /// `server-sig-algs` 里没有 RSA：RSA 被跳过，列表用完时交给 NIOSSH 的 nil（唯一的用完路径），
+    /// 失败详情里是服务器最后声明的方式与实际尝试过的（这里一个都没有）。
+    func testSkippedRSAPlanEndsThroughTheSingleExhaustionPath() throws {
+        let key = try SSHRSAPrivateKey(pemRepresentation: RSAFixtures.keys[1].pkcs1PEM)
+        let loop = EmbeddedEventLoop()
+        let delegate = SSHClientAuthDelegate(
+            authentication: SSHAuthentication(username: "u", methods: [.rsaPrivateKey(key)]),
+            allowsLegacyAlgorithms: false)
+        let promise = loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
+        delegate.nextAuthenticationType(availableMethods: [.publicKey], serverSignatureAlgorithms: ["ssh-ed25519"],
+                                        nextChallengePromise: promise)
+        XCTAssertNil(try promise.futureResult.wait())
+        XCTAssertEqual(delegate.failure.attemptedMethods, [])
+        XCTAssertEqual(delegate.failure.remainingMethods, [.publicKey])
+        XCTAssertEqual(delegate.attemptedRSAAlgorithms, [])
+    }
+
     // MARK: 辅助
 
     /// 内置主机密钥算法与 NIOSSH 自己的一致（`builtInOnly` 必须恰好是它们）。

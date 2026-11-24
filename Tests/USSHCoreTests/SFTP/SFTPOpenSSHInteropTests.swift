@@ -10,63 +10,23 @@ import XCTest
 ///
 /// 服务端以 `-d <临时目录>` 启动，所有路径都是该目录下的真实绝对路径。
 final class SFTPOpenSSHInteropTests: XCTestCase {
-    private static let serverPath = "/usr/libexec/sftp-server"
-
-    private var process: Process?
-    private var exit = ProcessExitSignal()
+    private var server: OpenSSHServer?
     private var client: SFTPClient!
     private var root: String!
+    private var process: Process? { server?.process }
+    private var exit: ProcessExitSignal { server!.exit }
 
     override func setUp() async throws {
-        guard FileManager.default.isExecutableFile(atPath: Self.serverPath) else {
-            throw XCTSkip("\(Self.serverPath) not available")
-        }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("usshcore-openssh-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        root = try XCTUnwrap(directory.path.withCString { pointer -> String? in
-            guard let resolved = realpath(pointer, nil) else { return nil }
-            defer { free(resolved) }
-            return String(cString: resolved)
-        })
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.serverPath)
-        process.arguments = ["-d", root, "-e", "-l", "ERROR"]
-        let toServer = Pipe()
-        let fromServer = Pipe()
-        process.standardInput = toServer
-        process.standardOutput = fromServer
-        process.standardError = FileHandle.nullDevice
-        // 不用 `waitUntilExit()`：它在测试的异步 tearDown 里转主线程的 run loop，实测会偶发地永远等不到结束。
-        let exit = ProcessExitSignal()
-        self.exit = exit
-        process.terminationHandler = { _ in exit.signal() }
-        try process.run()
-        self.process = process
-
-        // NIO 接管的是复制出来的描述符；Pipe 自己那份关掉，子进程才能在通道关闭时读到 EOF。
-        let input = dup(fromServer.fileHandleForReading.fileDescriptor)
-        let output = dup(toServer.fileHandleForWriting.fileDescriptor)
-        try fromServer.fileHandleForReading.close()
-        try toServer.fileHandleForWriting.close()
-        let channel = try await NIOPipeBootstrap(group: MultiThreadedEventLoopGroup.singleton)
-            .takingOwnershipOfDescriptors(input: input, output: output).get()
-        client = try await SFTPClient.start(on: channel)
+        let server = try await OpenSSHServer.start()
+        self.server = server
+        client = server.client
+        root = server.root
     }
 
     override func tearDown() async throws {
-        // 关通道 = 关掉子进程的 stdin，sftp-server 读到 EOF 自己退出；等不到再发 SIGTERM。
-        if let client { await client.close() }
-        if let process {
-            if await !exit.wait(timeout: .seconds(5)) {
-                process.terminate()
-                _ = await exit.wait(timeout: .seconds(5))
-            }
-        }
-        if let root { try? FileManager.default.removeItem(atPath: root) }
+        await server?.stop()
+        server = nil
         client = nil
-        process = nil
     }
 
     private func path(_ name: String) -> String { root + "/" + name }
@@ -342,51 +302,82 @@ final class SFTPOpenSSHInteropTests: XCTestCase {
         try await file.close()
     }
 
+    /// OpenSSH 把释放的句柄编号马上分给下一个 OPEN。CLOSE 之后还发到旧句柄上的 WRITE 会写进新文件、并且回成功。
+    /// 客户端必须等在途的请求结束才发 CLOSE，之后再也不往这个句柄上发请求。
+    func testStaleRequestsNeverReachAReusedHandle() async throws {
+        let payload = SFTPTestData.bytes(count: 4 * 1024 * 1024)
+        var sawReuse = false
+        for trial in 0..<12 {
+            let a = try await client.openFile(path("a\(trial)"), flags: [.write, .create, .truncate])
+            let writer = Task { try await a.write(contentsOf: payload, window: 16) }
+            let readers = (0..<4).map { _ in
+                Task { () -> Int in
+                    var count = 0
+                    while true {
+                        do { _ = try await a.stat() } catch SFTPError.handleClosed { return count }
+                        count += 1
+                    }
+                }
+            }
+            try await Task.sleep(for: .milliseconds(trial % 4))
+            try await a.close()
+            let b = try await client.openFile(path("b\(trial)"), flags: [.write, .create, .truncate])
+            if b.handle == a.handle { sawReuse = true }
+            do {
+                try await writer.value
+            } catch let error as SFTPError {
+                XCTAssertEqual(error, .handleClosed)
+            }
+            for reader in readers { _ = try await reader.value }
+            await XCTAssertSFTPError(.handleClosed) { _ = try await a.read(from: 0, length: 10) }
+            try await b.close()
+            let size = try FileManager.default.attributesOfItem(atPath: path("b\(trial)"))[.size] as? Int
+            XCTAssertEqual(size, 0, "a request on the closed handle landed in the file that reused it (trial \(trial))")
+        }
+        XCTAssertTrue(sawReuse, "sftp-server reuses handle slots, which is what makes this dangerous")
+    }
+
+    /// 长度为 0（或负数）的读：OpenSSH 对 0 字节的 READ 回 EOF，那会被当成文件到头。客户端直接回空、不发请求。
+    func testZeroLengthReadIsNotEOF() async throws {
+        put("z", Data("abc".utf8))
+        let file = try await client.openFile(path("z"), flags: .read)
+        let empty = try await file.read(from: 0, length: 0)
+        XCTAssertEqual(empty, ByteBuffer())
+        let negative = try await file.read(from: 1, length: -5)
+        XCTAssertEqual(negative, ByteBuffer())
+        let data = try await file.read(from: 0, length: 10)
+        XCTAssertEqual(data.map { String(buffer: $0) }, "abc")
+        try await file.close()
+    }
+
+    /// 4 GiB 以上的 offset（稀疏文件）：写、读、stat、readAll 都对，加法不会溢出。
+    func testOffsetsBeyondFourGiB() async throws {
+        let far: UInt64 = (1 << 32) + 12_345
+        let file = try await client.openFile(path("sparse"), flags: [.read, .write, .create, .truncate])
+        try await file.write(ByteBuffer(string: "tail"), at: far)
+        let size = try await file.stat().size
+        XCTAssertEqual(size, far + 4)
+        let back = try await file.read(from: far, length: 100)
+        XCTAssertEqual(back.map { String(buffer: $0) }, "tail")
+        let all = try await file.readAll(from: far - 6)
+        XCTAssertEqual(Array(all.readableBytesView), [0, 0, 0, 0, 0, 0] + Array("tail".utf8))
+        try await file.write(contentsOf: SFTPTestData.bytes(count: 100_000), at: far + 4)
+        let grown = try await file.stat().size
+        XCTAssertEqual(grown, far + 4 + 100_000)
+        // 越过 UInt64 上限的区间：本地就抛错，不 trap。
+        await XCTAssertSFTPError(.offsetOutOfRange) {
+            try await file.write(contentsOf: SFTPTestData.bytes(count: 10), at: .max - 5)
+        }
+        await XCTAssertSFTPError(.offsetOutOfRange) {
+            _ = try await file.readAll(from: .max - 5)
+        }
+        try await file.close()
+    }
+
     func testServerExitFailsPendingRequests() async throws {
         process?.terminate()
         let exited = await exit.wait(timeout: .seconds(10))
         XCTAssertTrue(exited)
         await XCTAssertSFTPError(.connectionClosed) { _ = try await self.client.stat(self.root) }
-    }
-}
-
-/// 子进程结束的信号（`terminationHandler` 里触发），可以带时限地等。
-final class ProcessExitSignal: Sendable {
-    private let state = NIOLockedValueBox<(exited: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
-
-    func signal() {
-        resumeWaiters(markingExited: true)
-    }
-
-    private func resumeWaiters(markingExited: Bool) {
-        let waiters = state.withLockedValue { state -> [CheckedContinuation<Void, Never>] in
-            if markingExited { state.exited = true }
-            defer { state.waiters = [] }
-            return state.waiters
-        }
-        for waiter in waiters { waiter.resume() }
-    }
-
-    private func wait() async {
-        await withCheckedContinuation { continuation in
-            let exited = state.withLockedValue { state -> Bool in
-                if !state.exited { state.waiters.append(continuation) }
-                return state.exited
-            }
-            if exited { continuation.resume() }
-        }
-    }
-
-    /// 在时限内结束了返回 true。
-    func wait(timeout: Duration) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await self.wait(); return true }
-            group.addTask { try? await Task.sleep(for: timeout); return false }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            // 超时：放走还挂着的等待者（不当作已结束），任务组才能收尾。
-            if !first { self.resumeWaiters(markingExited: false) }
-            return first
-        }
     }
 }

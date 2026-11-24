@@ -281,7 +281,9 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         return try await SSHTestServer.start(configuration)
     }
 
-    /// 每种 DH 都能握手、跑命令，客户端发起换钥（`NIOSSHHandler.rekey()`）之后照样能用，换钥时又核对了一次主机密钥。
+    /// 每种 DH 都能握手、跑命令，客户端发起换钥（`SSHClient.rekey()`）之后照样能用。服务器只提供这一种 DH，
+    /// 所以换钥也走它。第二次 `rekey()` 只有在第一次交换完成之后才会返回 true，以此确认换钥做完了；
+    /// 主机密钥按第一次交换钉住，换钥时不再问回调。
     func testEachDiffieHellmanAlgorithmIncludingRekey() async throws {
         for algorithm in SSHDiffieHellmanAlgorithm.allCases {
             let server = try await dhServer([algorithm.name])
@@ -294,12 +296,13 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
             let handshake = ContinuousClock.now - started
             let outputX = String(buffer: try await client.executeCommand("x"))
             XCTAssertEqual(outputX, "ok\n", algorithm.name)
-            let rekeyStarted = try await client.eventLoop.submit { client.sshHandler.value.rekey() }.get()
+            let rekeyStarted = await client.rekey()
             XCTAssertTrue(rekeyStarted)
-            let rekeyed = await Harness.eventually(timeout: Self.slowHandshake) { validations.value == 2 }
+            let rekeyed = await Harness.eventually(timeout: Self.slowHandshake) { await client.rekey() }
             XCTAssertTrue(rekeyed, "\(algorithm.name) 换钥没有完成")
             let outputY = String(buffer: try await client.executeCommand("y"))
             XCTAssertEqual(outputY, "ok\n", algorithm.name)
+            XCTAssertEqual(validations.value, 1, "换钥时主机密钥不再回调")
             print("[measure] in-process handshake \(algorithm.name): \(handshake)")
             await client.close()
         }
@@ -369,7 +372,9 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
             }
             defer { Task { await proxy.stop() } }
             await XCTAssertThrowsAsync(try await self.connect(port: proxy.port, client())) { error in
-                let underlying = Self.underlyingError(error)
+                guard case SSHClientError.handshakeFailed(let underlying) = error else {
+                    return XCTFail("f = \(label): \(error)")
+                }
                 if rejectedByAdapter {
                     XCTAssertEqual(underlying as? SSHDiffieHellmanError, .invalidPeerPublicValue, "f = \(label): \(error)")
                 } else {
@@ -379,9 +384,8 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         }
     }
 
-    /// 握手期间算法适配层抛的错误（这里是 DH 拒绝对端公开值）应当归成 `SSHClientError.handshakeFailed`，
-    /// 和 NIOSSH 自己的协议错误一样；现在 `SSHConnectionGuard.handshakeError` 只认 `NIOSSHError`，其余的落到
-    /// `.connectionClosed(.transportError(…))`，app 的分类器会把它当成网络断开、去重连。
+    /// 握手期间算法适配层抛的错误（这里是 DH 拒绝对端公开值）归成 `SSHClientError.handshakeFailed`，
+    /// 和 NIOSSH 自己的协议错误一样，不是 `.connectionClosed(.transportError(…))`（app 会当成断网去重连）。
     func testAlgorithmErrorDuringHandshakeIsHandshakeFailed() async throws {
         let server = try await dhServer([SSHDiffieHellmanAlgorithm.group14SHA256.name])
         defer { Task { await server.stop() } }
@@ -390,15 +394,9 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
             reply.publicValue = prime
         }
         defer { Task { await proxy.stop() } }
-        do {
-            _ = try await connect(port: proxy.port, client())
-            XCTFail("f = p 应该被拒绝")
-        } catch SSHClientError.handshakeFailed(let underlying) {
+        await XCTAssertThrowsAsync(try await connect(port: proxy.port, client())) { error in
+            guard case SSHClientError.handshakeFailed(let underlying) = error else { return XCTFail("\(error)") }
             XCTAssertEqual(underlying as? SSHDiffieHellmanError, .invalidPeerPublicValue)
-        } catch SSHClientError.connectionClosed(.transportError(let underlying))
-            where underlying is SSHDiffieHellmanError {
-            throw XCTSkip("SSH-STACK-TODO(client): SSHConnectionGuard.handshakeError 把非 NIOSSHError 的握手错误"
-                + "（SSHDiffieHellmanError 等算法错误）归成 connectionClosed(.transportError)，应为 handshakeFailed")
         }
     }
 
@@ -436,15 +434,6 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
 
     private func connect(port: Int, _ configuration: SSHClient.Configuration) async throws -> SSHClient {
         try await SSHClient.connect(host: "127.0.0.1", port: port, configuration: configuration)
-    }
-
-    /// 从 `SSHClientError` 里取出底层错误（握手失败与连接断开两种包法）。
-    static func underlyingError(_ error: any Error) -> (any Error)? {
-        switch error {
-        case SSHClientError.handshakeFailed(let underlying): return underlying
-        case SSHClientError.connectionClosed(.transportError(let underlying)): return underlying
-        default: return nil
-        }
     }
 }
 

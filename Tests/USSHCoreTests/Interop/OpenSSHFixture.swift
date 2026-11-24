@@ -12,25 +12,11 @@ import XCTest
 ///
 /// 非 root 的 sshd 校验不了系统口令（`UsePAM no`），所以只测公钥认证。
 ///
-/// `Options` 调主机密钥（ed25519 / 只有 RSA）、日志级别，以及在默认配置**之前**插入的 sshd 配置行
-/// （sshd 对大多数选项取第一次出现的值，所以插在前面就能覆盖默认）。authorized_keys 里另有两把
+/// `start` 的参数：`extraConfig` 追加在默认配置之后（只能加默认里没有的选项——sshd 对大多数选项取第一次
+/// 出现的值）；`rsaHostKeyBits` 给了就只有一把这么长的 RSA 主机密钥（否则 ed25519）；`logLevel` 是 sshd 的
+/// LogLevel（`DEBUG1` 才有协商结果与 KEXINIT 的记录，strict KEX 的那一行要 `DEBUG3`）。authorized_keys 里另有两把
 /// `ssh-keygen` 生成的 RSA 用户密钥（2048、4096 位，`rsa2048Key` / `rsa4096Key`）。
 final class OpenSSHFixture: Sendable {
-    struct Options: Sendable {
-        /// 主机密钥：`nil` = ed25519；给位数 = 只有一把这么长的 RSA 主机密钥。
-        var rsaHostKeyBits: Int?
-        /// sshd 的 LogLevel（`DEBUG1` 才有协商结果与 KEXINIT 的记录）。
-        var logLevel = "INFO"
-        /// 插在默认配置之前的行，例如 `KexAlgorithms diffie-hellman-group14-sha256`。
-        var extraConfig: [String] = []
-
-        init(rsaHostKeyBits: Int? = nil, logLevel: String = "INFO", extraConfig: [String] = []) {
-            self.rsaHostKeyBits = rsaHostKeyBits
-            self.logLevel = logLevel
-            self.extraConfig = extraConfig
-        }
-    }
-
     let port: Int
     let directory: URL
     let username: String
@@ -83,7 +69,8 @@ final class OpenSSHFixture: Sendable {
     static let sshd = "/usr/sbin/sshd"
     static let sshKeygen = "/usr/bin/ssh-keygen"
 
-    static func start(_ options: Options = Options()) async throws -> OpenSSHFixture {
+    static func start(extraConfig: String = "", rsaHostKeyBits: Int? = nil,
+                      logLevel: String = "INFO") async throws -> OpenSSHFixture {
         let fileManager = FileManager.default
         guard fileManager.isExecutableFile(atPath: sshd), fileManager.isExecutableFile(atPath: sshKeygen) else {
             throw XCTSkip("没有 \(sshd) 或 \(sshKeygen)")
@@ -94,7 +81,7 @@ final class OpenSSHFixture: Sendable {
         // RSA 主机 / 用户公钥要经 NIOSSH 解析，先登记（建连接时本来也会登记）。
         SSHAlgorithms.registerStandardAlgorithms()
         let hostKeyPath: String
-        if let bits = options.rsaHostKeyBits {
+        if let bits = rsaHostKeyBits {
             hostKeyPath = directory.appendingPathComponent("host_rsa").path
             try run(sshKeygen, ["-q", "-t", "rsa", "-b", String(bits), "-N", "", "-f", hostKeyPath])
         } else {
@@ -120,9 +107,7 @@ final class OpenSSHFixture: Sendable {
         for _ in 0..<3 {
             let port = try await freePort()
             let configPath = directory.appendingPathComponent("sshd_config").path
-            let extra = options.extraConfig.joined(separator: "\n")
             let config = """
-            \(extra)
             ListenAddress 127.0.0.1:\(port)
             HostKey \(hostKeyPath)
             AuthorizedKeysFile \(authorizedKeysPath)
@@ -136,8 +121,9 @@ final class OpenSSHFixture: Sendable {
             AcceptEnv LANG USSH_*
             MaxSessions 64
             MaxStartups 64
-            LogLevel \(options.logLevel)
+            LogLevel \(logLevel)
             Subsystem sftp /usr/libexec/sftp-server
+            \(extraConfig)
 
             """
             try config.write(toFile: configPath, atomically: true, encoding: .utf8)

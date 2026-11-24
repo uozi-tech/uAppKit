@@ -13,8 +13,10 @@ import XCTest
 ///
 /// 每条用例的 sshd 选项写在用例里；sshd 自己的日志（`LogLevel DEBUG1–3`）是协商结果的凭据。
 final class OpenSSHAlgorithmInteropTests: XCTestCase {
-    private func start(_ options: OpenSSHFixture.Options = .init()) async throws -> OpenSSHFixture {
-        let fixture = try await OpenSSHFixture.start(options)
+    private func start(rsaHostKeyBits: Int? = nil, logLevel: String = "INFO",
+                       extraConfig: [String] = []) async throws -> OpenSSHFixture {
+        let fixture = try await OpenSSHFixture.start(
+            extraConfig: extraConfig.joined(separator: "\n"), rsaHostKeyBits: rsaHostKeyBits, logLevel: logLevel)
         addTeardownBlock { fixture.stop() }
         return fixture
     }
@@ -39,7 +41,7 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
 
     /// sshd 默认（`server-sig-algs` 里有 rsa-sha2-512）：2048 / 4096 位都一次用 rsa-sha2-512 成功。
     func testRSAUserKeysAuthenticateWithRSASHA2512() async throws {
-        let fixture = try await start(.init(logLevel: "DEBUG2"))
+        let fixture = try await start(logLevel: "DEBUG2")
         for key in [fixture.rsa2048Key, fixture.rsa4096Key] {
             let client = try await fixture.connect(methods: [.rsaPrivateKey(key)])
             _ = try await client.executeCommand("true")
@@ -54,7 +56,7 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
 
     /// `PubkeyAcceptedAlgorithms rsa-sha2-256`：sshd 的 server-sig-algs 只剩 256，客户端第一次就用它。
     func testRSAUserKeyWithServerRestrictedToRSASHA2256() async throws {
-        let fixture = try await start(.init(logLevel: "DEBUG2", extraConfig: ["PubkeyAcceptedAlgorithms rsa-sha2-256"]))
+        let fixture = try await start(logLevel: "DEBUG2", extraConfig: ["PubkeyAcceptedAlgorithms rsa-sha2-256"])
         for key in [fixture.rsa2048Key, fixture.rsa4096Key] {
             let client = try await fixture.connect(methods: [.rsaPrivateKey(key)])
             await client.close()
@@ -68,7 +70,7 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
 
     /// `PubkeyAcceptedAlgorithms ssh-rsa`：标准预设干净地失败（RSA 一次都不试），旧算法预设用 ssh-rsa 成功。
     func testSSHRSAOnlyServerNeedsLegacy() async throws {
-        let fixture = try await start(.init(logLevel: "DEBUG2", extraConfig: ["PubkeyAcceptedAlgorithms ssh-rsa"]))
+        let fixture = try await start(logLevel: "DEBUG2", extraConfig: ["PubkeyAcceptedAlgorithms ssh-rsa"])
         await XCTAssertThrowsAsync(try await fixture.connect(methods: [.rsaPrivateKey(fixture.rsa2048Key)], algorithms: .standard)) { error in
             guard case SSHClientError.authenticationFailed(let failure) = error else { return XCTFail("\(error)") }
             XCTAssertEqual(failure.attemptedMethods, [])
@@ -84,7 +86,7 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
     /// 只有 RSA 主机密钥的 sshd：回调拿到的钥匙和 `ssh-keygen -lf` 的指纹一致，连接可用。
     func testRSAOnlyHostKey() async throws {
         for algorithm in ["rsa-sha2-512", "rsa-sha2-256"] {
-            let fixture = try await start(.init(rsaHostKeyBits: 3072, logLevel: "DEBUG1", extraConfig: ["HostKeyAlgorithms \(algorithm)"]))
+            let fixture = try await start(rsaHostKeyBits: 3072, logLevel: "DEBUG1", extraConfig: ["HostKeyAlgorithms \(algorithm)"])
             let seen = NIOLockedValueBox<NIOSSHPublicKey?>(nil)
             let client = try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: .standard,
                                                    hostKeyValidation: .custom { context in
@@ -114,7 +116,7 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
 
     /// `HostKeyAlgorithms ssh-rsa`：只有旧算法预设能连。
     func testSSHRSAHostKeyNeedsLegacy() async throws {
-        let fixture = try await start(.init(rsaHostKeyBits: 2048, logLevel: "DEBUG1", extraConfig: ["HostKeyAlgorithms ssh-rsa"]))
+        let fixture = try await start(rsaHostKeyBits: 2048, logLevel: "DEBUG1", extraConfig: ["HostKeyAlgorithms ssh-rsa"])
         await XCTAssertThrowsAsync(try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: .standard)) { error in
             guard case SSHClientError.handshakeFailed = error else { return XCTFail("\(error)") }
         }
@@ -132,9 +134,9 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
     func testEachDiffieHellmanAgainstSSHDIncludingServerRekey() async throws {
         var timings: [String] = []
         for algorithm in SSHDiffieHellmanAlgorithm.allCases {
-            let fixture = try await start(.init(logLevel: "DEBUG1", extraConfig: [
+            let fixture = try await start(logLevel: "DEBUG1", extraConfig: [
                 "KexAlgorithms \(algorithm.name)", "RekeyLimit 64K",
-            ]))
+            ])
             let presets: SSHAlgorithms = algorithm.isLegacy ? .legacyCompatible : .standard
             let started = ContinuousClock.now
             let client = try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: presets)
@@ -165,13 +167,13 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
         let schemes = SSHAlgorithmsPresetSchemes.standardAESCTRSchemes + SSHAlgorithmsPresetSchemes.legacyAESCTRSchemes
         let legacy = Set(SSHAlgorithmsPresetSchemes.legacyAESCTRSchemes.map { ObjectIdentifier($0) })
         for kex in ["curve25519-sha256", "diffie-hellman-group14-sha256"] {
-            let fixture = try await start(.init(logLevel: "DEBUG3", extraConfig: [
+            let fixture = try await start(logLevel: "DEBUG3", extraConfig: [
                 "KexAlgorithms \(kex)",
                 "Ciphers aes128-ctr,aes192-ctr,aes256-ctr",
                 "MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha1-etm@openssh.com,"
                     + "hmac-sha2-256,hmac-sha2-512,hmac-sha1",
                 "RekeyLimit 64K",
-            ]))
+            ])
             for scheme in schemes {
                 let label = "\(scheme.cipherName) + \(scheme.macName!) [\(kex)]"
                 let before = (kex: fixture.keyExchangeCount, strict: Self.strictCount(fixture))
@@ -198,9 +200,9 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
             SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA512>.self,
         ]
         let kexes = SSHDiffieHellmanAlgorithm.allCases.map(\.name) + ["curve25519-sha256", "ecdh-sha2-nistp256", "ecdh-sha2-nistp384"]
-        let fixture = try await start(.init(logLevel: "DEBUG1", extraConfig: [
+        let fixture = try await start(logLevel: "DEBUG1", extraConfig: [
             "KexAlgorithms " + kexes.joined(separator: ","), "MACs hmac-sha2-512-etm@openssh.com,hmac-sha2-512",
-        ]))
+        ])
         for kex in kexes {
             for scheme in schemes {
                 let algorithms = SSHAlgorithms(
@@ -319,7 +321,7 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
     /// `RekeyLimit 1M`：客户端大批写入的同时 sshd 一次次发起换钥（NIOSSH 补丁 0012 之前，换钥期间子通道的写入
     /// 直接失败），上传下载都要完整。
     func testSFTPUploadWhileServerRekeys() async throws {
-        let fixture = try await start(.init(logLevel: "DEBUG1", extraConfig: ["RekeyLimit 1M"]))
+        let fixture = try await start(logLevel: "DEBUG1", extraConfig: ["RekeyLimit 1M"])
         let client = try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: .standard)
         defer { Task { await client.close() } }
         let sftp = try await client.openSFTP()
@@ -340,18 +342,10 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
 
     /// `-L`：两个方向都有大量数据的同时 sshd 一次次换钥（`RekeyLimit 256K`），回显的字节一个不差。
     func testDirectTCPIPStreamAcrossRekeys() async throws {
-        // 不用 `EchoServer`：它读到 EOF 就整个 close()，还没写进 socket 的回显会被 NIO 丢掉（大数据量时必现）。
-        let echo = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
-            .childChannelOption(.allowRemoteHalfClosure, value: true)
-            .childChannelInitializer { channel in
-                channel.eventLoop.makeCompletedFuture {
-                    try channel.pipeline.syncOperations.addHandler(DrainingEcho())
-                }
-            }
-            .bind(host: "127.0.0.1", port: 0).get()
-        defer { Task { try? await echo.close() } }
-        let echoPort = echo.localAddress!.port!
-        let fixture = try await start(.init(logLevel: "DEBUG1", extraConfig: ["RekeyLimit 256K"]))
+        let echo = try await EchoServer.start()
+        defer { Task { await echo.stop() } }
+        let echoPort = echo.port
+        let fixture = try await start(logLevel: "DEBUG1", extraConfig: ["RekeyLimit 256K"])
         let client = try await fixture.connect()
         defer { Task { await client.close() } }
         let before = fixture.keyExchangeCount
@@ -482,30 +476,6 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
                 }
             }
         return try await channel.executeThenClose { inbound, outbound in try await body(inbound, outbound) }
-    }
-}
-
-/// 回显；对端 EOF 后等已经写出的回显全部交给 socket 再关通道。
-final class DrainingEcho: ChannelInboundHandler {
-    typealias InboundIn = ByteBuffer
-    typealias OutboundOut = ByteBuffer
-    private var lastWrite: EventLoopFuture<Void>?
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let promise = context.eventLoop.makePromise(of: Void.self)
-        context.write(data, promise: promise)
-        lastWrite = promise.futureResult
-    }
-
-    func channelReadComplete(context: ChannelHandlerContext) {
-        context.flush()
-    }
-
-    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
-        guard case ChannelEvent.inputClosed = event else { return context.fireUserInboundEventTriggered(event) }
-        context.flush()
-        guard let lastWrite else { return context.close(promise: nil) }
-        lastWrite.assumeIsolated().whenComplete { _ in context.close(promise: nil) }
     }
 }
 
