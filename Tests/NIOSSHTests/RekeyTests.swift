@@ -31,6 +31,39 @@ final class DataRecorder: ChannelInboundHandler {
     }
 }
 
+/// Accepts the first host key at once and holds every later validation (rekeys) until told to complete it.
+final class HoldRekeyHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
+    private var validations = 0
+    private(set) var pending: EventLoopPromise<Void>?
+
+    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        self.validations += 1
+        if self.validations == 1 {
+            validationCompletePromise.succeed(())
+        } else {
+            self.pending = validationCompletePromise
+        }
+    }
+
+    func complete() {
+        self.pending?.succeed(())
+        self.pending = nil
+    }
+}
+
+/// A server global request delegate that holds TCP forwarding requests until told to answer them.
+final class HeldForwardingDelegate: GlobalRequestDelegate {
+    private(set) var pending: EventLoopPromise<GlobalRequest.TCPForwardingResponse>?
+
+    func tcpForwardingRequest(
+        _ request: GlobalRequest.TCPForwardingRequest,
+        handler: NIOSSHHandler,
+        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
+    ) {
+        self.pending = promise
+    }
+}
+
 final class RekeyTests: XCTestCase {
     private var channel: BackToBackEmbeddedChannel!
     private var serverReceived = DataRecorder()
@@ -158,6 +191,128 @@ final class RekeyTests: XCTestCase {
         XCTAssertNoThrow(try self.channel.interactInMemory())
         XCTAssertNotNil(failure.value)
         XCTAssertEqual(self.serverReceived.bytes.readableBytes, 0)
+    }
+
+    // MARK: Global requests during a key exchange
+
+    /// The result of `future` if it has completed, without blocking (an embedded loop would hang in `wait()`).
+    private func completed<T>(_ future: EventLoopFuture<T>) -> Result<T, Error>? {
+        var result: Result<T, Error>?
+        future.whenComplete { result = $0 }
+        return result
+    }
+
+    private func keepalive(from handler: NIOSSHHandler, on loop: EventLoop) -> NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?> {
+        let box = NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?>(nil, eventLoop: loop)
+        let promise = loop.makePromise(of: GlobalRequest.GenericResponse.self)
+        promise.futureResult.whenComplete { box.value = $0 }
+        handler.sendGlobalRequest(type: "keepalive@openssh.com", payload: nil, wantReply: true, promise: promise)
+        return box
+    }
+
+    func testPeerGlobalRequestAfterOurKEXINITIsAnsweredAfterTheExchange() throws {
+        let (client, _) = try self.connect()
+
+        // We start a rekey; the peer's keepalive (want reply) crossed our KEXINIT on the wire.
+        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
+        let answer = self.keepalive(from: self.channel.serverSSHHandler!, on: self.channel.server.eventLoop)
+        XCTAssertNoThrow(try self.deliverServerToClient())
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+
+        XCTAssertEqual(try answer.value?.get(), .failure)
+        let write = self.send("still alive", on: client)
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNoThrow(try self.completed(write)?.get())
+        XCTAssertEqual(String(buffer: self.serverReceived.bytes), "still alive")
+    }
+
+    func testPeerGlobalRequestAfterThePeersNEWKEYSIsAnsweredAfterOurs() throws {
+        let hostKeys = HoldRekeyHostKeyDelegate()
+        _ = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
+
+        // Rekey; the client holds host key validation, so it has the server's NEWKEYS but has not sent its own.
+        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNotNil(hostKeys.pending)
+        // The server may send again (it sent NEWKEYS); its keepalive reaches a client that may not answer yet.
+        let answer = self.keepalive(from: self.channel.serverSSHHandler!, on: self.channel.server.eventLoop)
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNil(answer.value)
+
+        hostKeys.complete()
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertEqual(try answer.value?.get(), .failure)
+    }
+
+    func testOurOwnAsyncReplyCompletingMidRekeyWaits() throws {
+        let forwarding = HeldForwardingDelegate()
+        _ = try self.connect(server: { $0.globalRequestDelegate = forwarding })
+
+        let response = self.channel.client.eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
+        self.channel.clientSSHHandler!.sendTCPForwardingRequest(.listen(host: "localhost", port: 0), promise: response)
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        let held = try XCTUnwrap(forwarding.pending)
+
+        // The server starts a rekey, then its delegate answers the forwarding request: the reply must wait.
+        XCTAssertNoThrow(try self.channel.serverSSHHandler!._rekey())
+        held.succeed(.init(boundPort: 2222))
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertEqual(try self.completed(response.futureResult)?.get(), .init(boundPort: 2222))
+    }
+
+    /// Starts a client rekey that stops with the server's NEWKEYS received and the client's own NEWKEYS held back by
+    /// host key validation.
+    private func rekeyHeldAtHostKeyValidation(_ hostKeys: HoldRekeyHostKeyDelegate) throws {
+        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
+        try self.channel.interactInMemory()
+        XCTAssertNotNil(hostKeys.pending)
+    }
+
+    func testGlobalRequestQueuedDuringARekeyGoesOutWhenItCompletesOnAnIdleLink() throws {
+        let hostKeys = HoldRekeyHostKeyDelegate()
+        _ = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
+        try self.rekeyHeldAtHostKeyValidation(hostKeys)
+
+        let answer = self.keepalive(from: self.channel.clientSSHHandler!, on: self.channel.client.eventLoop)
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNil(answer.value)
+
+        // Validation completes outside any read, and nothing else is going on: the keepalive must still go out.
+        hostKeys.complete()
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertEqual(try answer.value?.get(), .failure)
+    }
+
+    func testChannelOpenedDuringARekeyGoesOutWhenItCompletes() throws {
+        let hostKeys = HoldRekeyHostKeyDelegate()
+        _ = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
+        try self.rekeyHeldAtHostKeyValidation(hostKeys)
+
+        let opened = self.channel.client.eventLoop.makePromise(of: Channel.self)
+        self.channel.clientSSHHandler!.createChannel(opened) { channel, _ in channel.eventLoop.makeSucceededVoidFuture() }
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNil(self.completed(opened.futureResult))
+
+        hostKeys.complete()
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNotNil(try self.completed(opened.futureResult)?.get())
+    }
+
+    func testDataQueuedAroundAGlobalRequestKeepsItsOrder() throws {
+        let hostKeys = HoldRekeyHostKeyDelegate()
+        let (client, _) = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
+        try self.rekeyHeldAtHostKeyValidation(hostKeys)
+
+        // Data, a keepalive and more data, all queued during the exchange.
+        let first = self.send("first ", on: client)
+        let answer = self.keepalive(from: self.channel.clientSSHHandler!, on: self.channel.client.eventLoop)
+        let second = self.send("second", on: client)
+        hostKeys.complete()
+        XCTAssertNoThrow(try self.channel.interactInMemory())
+        XCTAssertNotNil(try self.completed(first)?.get())
+        XCTAssertNotNil(try self.completed(second)?.get())
+        XCTAssertEqual(try answer.value?.get(), .failure)
+        XCTAssertEqual(String(buffer: self.serverReceived.bytes), "first second")
     }
 
     // MARK: Rekeying on demand and after a traffic limit
@@ -334,5 +489,42 @@ final class RekeyTests: XCTestCase {
         XCTAssertTrue(NIOSSHRekeyLimits.default.isReached(by: .init(packets: 1 << 31, bytes: 0)))
         XCTAssertTrue(NIOSSHRekeyLimits.default.isReached(by: .init(packets: 0, bytes: 1 << 30)))
         XCTAssertFalse(NIOSSHRekeyLimits.default.isReached(by: .init(packets: (1 << 31) - 1, bytes: (1 << 30) - 1)))
+    }
+
+    func testTrafficLimitReachedWhileSendingQueuedGlobalRequestsHoldsTheRest() throws {
+        let hostKeys = HoldRekeyHostKeyDelegate()
+        _ = try self.connect(
+            client: {
+                self.useKeyCheckingProtection(&$0)
+                $0.serverAuthDelegate = hostKeys
+                $0.rekeyLimits = .init(packets: 3, bytes: nil)
+            },
+            server: {
+                self.useKeyCheckingProtection(&$0)
+                $0.rekeyLimits = .disabled
+            }
+        )
+        // Logging in already crossed the limit: that exchange is under way, held at host key validation.
+        let exchanges = self.keyExchangeCount()
+        if hostKeys.pending == nil {
+            XCTAssertTrue(self.channel.clientSSHHandler!.rekey())
+            XCTAssertNoThrow(try self.channel.interactInMemory())
+        }
+        XCTAssertNotNil(hostKeys.pending)
+        let answers = (0..<8).map { _ in
+            self.keepalive(from: self.channel.clientSSHHandler!, on: self.channel.client.eventLoop)
+        }
+
+        // Our NEWKEYS goes out with the server's already in: the queued requests go out while active, and the third
+        // one reaches the limit and starts the next exchange. The rest wait for that one instead of failing.
+        // (Every exchange after the first holds host key validation; let each through.)
+        for _ in 0..<8 where hostKeys.pending != nil {
+            hostKeys.complete()
+            XCTAssertNoThrow(try self.channel.interactInMemory())
+        }
+        for answer in answers {
+            XCTAssertEqual(try answer.value?.get(), .failure)
+        }
+        XCTAssertGreaterThanOrEqual(self.keyExchangeCount(), exchanges + 2)
     }
 }

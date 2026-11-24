@@ -1275,8 +1275,8 @@ extension SSHConnectionStateMachine {
         return (state.parser.trafficSinceNewKeys, state.serializer.trafficSinceNewKeys)
     }
 
-    /// Whether channel messages may be sent now. During a key exchange they may not, from our KEXINIT until our
-    /// NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
+    /// Whether channel messages, global requests and their replies may be sent now. During a key exchange they may
+    /// not, from our KEXINIT until our NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
     var canSendChannelMessages: Bool {
         switch self.state {
         case .active, .rekeyingSentNewKeysState:

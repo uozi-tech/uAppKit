@@ -402,7 +402,7 @@ extension GlobalRequest {
 }
 
 extension NIOSSHHandler {
-    /// 只能在 channel 的 event loop 上调用。连接建立前调用会排队，建立后按顺序发出。
+    /// 只能在 channel 的 event loop 上调用。连接建立前、重新密钥交换进行中调用会排队，之后按顺序发出。
     public func sendGlobalRequest(
         type: String,                      // 例如 "keepalive@openssh.com"
         payload: ByteBuffer?,              // want_reply 之后的数据，nil = 没有
@@ -459,7 +459,8 @@ extension SSHServerConfiguration { public var rekeyLimits: NIOSSHRekeyLimits }  
 - 到达上限就由 NIOSSH 自己发起，计数每次换密钥清零；交换进行中不会再发起，双方同时发起合成一次交换。
 - 重新交换期间（我方 KEXINIT 之后、NEWKEYS 之前）child channel 的写入由 handler 按顺序排队，交换完成后发出，
   写入的 promise 到那时才完成；连接断开时以 `ChannelError.eof` 失败。对端发起的交换也一样（以前这些写入直接以
-  `protocolViolation` 失败）。
+  `protocolViolation` 失败）。我方的全局请求（`sendGlobalRequest`、TCP 转发请求）与对对端全局请求的回复同样等到
+  交换完成再发，排队不改变写出的先后；以前对端在交换中途发来 keepalive 会让整条连接以 `protocolViolation` 断开。
 - 客户端层：用序号算 MAC 的自定义传输保护（AES-CTR + `hmac-*` / `*-etm`）保持默认上限即可；想按时间换密钥（RFC 4253
   §9 建议每小时一次），自己定时调 `rekey()`。
 

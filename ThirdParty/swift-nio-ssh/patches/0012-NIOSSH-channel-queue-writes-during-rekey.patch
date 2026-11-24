@@ -1,0 +1,553 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 13:22:30 +0800
+Subject: [PATCH 12/15] =?UTF-8?q?NIOSSH:=20=E5=AF=86=E9=92=A5=E9=87=8D?=
+ =?UTF-8?q?=E6=96=B0=E4=BA=A4=E6=8D=A2=E6=9C=9F=E9=97=B4=20channel=20?=
+ =?UTF-8?q?=E5=86=99=E5=85=A5=E4=B8=8E=E5=85=A8=E5=B1=80=E8=AF=B7=E6=B1=82?=
+ =?UTF-8?q?=E6=8E=92=E9=98=9F=EF=BC=8C=E4=B8=8D=E5=86=8D=E4=BB=A5=E5=8D=8F?=
+ =?UTF-8?q?=E8=AE=AE=E9=94=99=E8=AF=AF=E5=A4=B1=E8=B4=A5=EF=BC=88queue=20w?=
+ =?UTF-8?q?rites=20during=20rekey=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+RFC 4253 §7.1：一方发出 KEXINIT 之后、发出 NEWKEYS 之前不得发送密钥交换以外的消息。NIOSSH 的连接状态机
+守着这一条，但 NIOSSHHandler 把这些消息直接交给状态机：重新密钥交换进行中（sentKexInitWhenActive、
+rekeying、rekeyingReceivedNewKeys），任何 channel 数据、窗口调整、EOF、CLOSE 都以
+protocolViolation("Sent unexpected message type") 失败，写入的 promise 失败、数据丢失。对端发起的重新交换也一样
+——OpenSSH 服务端按 RekeyLimit 重新交换时，正在传输的 channel 会在那一刻出错。上游的重新交换测试只在交换完成后
+才开 channel，所以没测到。
+
+连接级的消息有同样的问题：
+- 对端的全局请求（keepalive@openssh.com 等，want reply）在交换中途到达，handler 当场回 REQUEST_FAILURE /
+  REQUEST_SUCCESS，状态机抛同样的错误，整条连接关掉。TCP 转发请求的异步回复在交换中途完成也一样。OpenSSH 的
+  keepalive 与 RekeyLimit 同时开着时就会撞上。
+- 我方的全局请求在交换期间排进 pendingGlobalRequests，但只在 isActive 时、且只在 channelReadComplete 里发：
+  rekeyingSentNewKeys 状态本可以发也不发；交换以我方 NEWKEYS 异步写出（主机密钥验证完成）结束、之后再没有入站
+  数据时，请求就一直卡着，promise 永不完成。
+
+改法（只在 handler 里）：SSHConnectionStateMachine 新增 canSendChannelMessages（.active 与
+.rekeyingSentNewKeysState 为真）；新增 writeOrQueue：不能发、或已有排队时把消息排进 queuedMessages，按原顺序
+保留。child channel 的写入与对全局请求的回复（同步、异步两种）都走它，排队不改变它们写出的先后。
+sendGlobalRequestsIfPossible 改看 canSendChannelMessages，且每发一个再看一次（发的过程中可能开始新一轮交换）。
+每处理完一条入站消息、密钥交换的异步结果写出之后、以及 channelReadComplete 时调 sendQueuedMessagesIfPossible：
+先发排队的消息，再发我方的全局请求。handler 被移除时排队的写入以 ChannelError.eof 失败（全局请求照上游，同样以
+eof 失败）。
+
+测试（RekeyTests）：对端发起重新交换、我方已回 KEXINIT 时写数据，数据在交换完成后送达（修之前即上述错误）；
+我方发起时交换前后的多次写入保持顺序，反方向同样；排队中连接关闭，写入失败、对端什么也没收到。全局请求：对端的
+keepalive 在我方 KEXINIT 之后到达、以及在对端 NEWKEYS 之后我方 NEWKEYS 之前到达，都在交换完成后得到回复；TCP
+转发请求的异步回复在交换中途完成，等交换完成再发；我方在交换中发的 keepalive 与开的 channel 在交换以异步 NEWKEYS
+结束、链路再无入站数据时照样发出；排队的数据夹着全局请求，数据顺序不变。修之前：我方 KEXINIT 之后那条与异步回复那条
+以协议错误断开；对端 NEWKEYS 之后那条被第二个问题掩盖（对端的 keepalive 也卡在对端没发出来），只修第二个问题
+就以协议错误断开；我方 keepalive 那条永不完成；开 channel 那条修之前就过（createPendingChannelsIfPossible 看的
+是 hasActivated，CHANNEL_OPEN 走 child channel 的排队），留着防回退。
+
+上游原有、这里没改：TCP 转发请求的回复要等委托完成，期间到达的下一个未知类型请求会先得到回复（RFC 4254 §4
+要求按请求顺序回复），与重新交换无关。
+
+通用 bug，可以提给上游。也是下一个补丁（自动重新交换）的前提。
+---
+ .../SSHConnectionStateMachine.swift           |  13 +
+ Sources/NIOSSH/NIOSSHHandler.swift            |  68 +++-
+ Tests/NIOSSHTests/RekeyTests.swift            | 317 ++++++++++++++++++
+ 3 files changed, 386 insertions(+), 12 deletions(-)
+ create mode 100644 Tests/NIOSSHTests/RekeyTests.swift
+
+diff --git a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift
+index dc89cff..ce61ef2 100644
+--- a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
++++ b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
+@@ -1264,6 +1264,19 @@ extension SSHConnectionStateMachine {
+         }
+     }
+ 
++    /// Whether channel messages, global requests and their replies may be sent now. During a key exchange they may
++    /// not, from our KEXINIT until our NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
++    var canSendChannelMessages: Bool {
++        switch self.state {
++        case .active, .rekeyingSentNewKeysState:
++            return true
++        case .idle, .sentVersion, .keyExchange, .receivedNewKeys, .sentNewKeys, .userAuthentication,
++            .receivedKexInitWhenActive, .sentKexInitWhenActive, .rekeying, .rekeyingReceivedNewKeysState,
++            .receivedDisconnect, .sentDisconnect:
++            return false
++        }
++    }
++
+     var disconnected: Bool {
+         switch self.state {
+         case .receivedDisconnect, .sentDisconnect:
+diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
+index 44b9014..3b87d57 100644
+--- a/Sources/NIOSSH/NIOSSHHandler.swift
++++ b/Sources/NIOSSH/NIOSSHHandler.swift
+@@ -63,6 +63,10 @@ public final class NIOSSHHandler {
+ 
+     private var pendingGlobalRequestResponses: CircularBuffer<PendingGlobalRequestResponse?>
+ 
++    // Channel messages and replies to the peer's global requests written while a key exchange forbids them; sent in
++    // order afterwards. Our own global requests wait in `pendingGlobalRequests` meanwhile.
++    private var queuedMessages = CircularBuffer<(SSHMessage, EventLoopPromise<Void>?)>(initialCapacity: 4)
++
+     /// Construct a new ``NIOSSHHandler``.
+     ///
+     /// - parameters:
+@@ -155,6 +159,9 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+ 
+         self.dropAllPendingGlobalRequests(ChannelError.eof)
+         self.dropUnsatisfiedGlobalRequests(ChannelError.eof)
++        while let next = self.queuedMessages.popFirst() {
++            next.1?.fail(ChannelError.eof)
++        }
+         while let next = self.pendingChannelInitializations.popFirst() {
+             next.promise?.fail(ChannelError.eof)
+         }
+@@ -194,6 +201,8 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+                 loop: context.eventLoop
+             ) {
+                 try self.processInboundMessageResult(result, context: context)
++                // Our NEWKEYS may just have gone out: release what was held during the key exchange.
++                self.sendQueuedMessagesIfPossible()
+             }
+         } catch {
+             context.fireErrorCaught(error)
+@@ -210,7 +219,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+         }
+ 
+         self.createPendingChannelsIfPossible()
+-        self.sendGlobalRequestsIfPossible()
++        self.sendQueuedMessagesIfPossible()
+     }
+ 
+     private func writeMessage(
+@@ -251,6 +260,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+                         try self.writeMessage(message, context: context)
+                         self.pendingWrite = false
+                         context.flush()
++                        self.sendQueuedMessagesIfPossible()
+                     } catch {
+                         context.fireErrorCaught(error)
+                     }
+@@ -396,7 +406,7 @@ extension NIOSSHHandler {
+             if message.wantReply {
+                 // There's no way to tell what message this is and how to respond from here.
+                 // The only reasonable solution is to reply `SSH_MSG_REQUEST_FAILURE`
+-                try self.writeMessage(.init(.requestFailure), context: context)
++                try self.writeOrQueue(.requestFailure, context: context)
+             }
+             return
+         case .tcpipForward(let host, let port):
+@@ -445,18 +455,16 @@ extension NIOSSHHandler {
+             do {
+                 switch result {
+                 case .success(let tcpForwardingResponse):
+-                    try self.writeMessage(
+-                        .init(
+-                            .requestSuccess(
+-                                .init(.tcpForwarding(tcpForwardingResponse), allocator: context.channel.allocator)
+-                            )
++                    try self.writeOrQueue(
++                        .requestSuccess(
++                            .init(.tcpForwarding(tcpForwardingResponse), allocator: context.channel.allocator)
+                         ),
+                         context: context
+                     )
+                     context.flush()
+                 case .failure:
+                     // We don't care why, we just say no.
+-                    try self.writeMessage(.init(.requestFailure), context: context)
++                    try self.writeOrQueue(.requestFailure, context: context)
+                     context.flush()
+                 }
+             } catch {
+@@ -471,13 +479,13 @@ extension NIOSSHHandler {
+             return
+         }
+ 
+-        guard self.stateMachine.isActive, self.pendingGlobalRequests.count > 0 else {
+-            // No work to do
++        guard self.stateMachine.canSendChannelMessages, self.pendingGlobalRequests.count > 0 else {
++            // No work to do, or a key exchange is in flight: these go out once our NEWKEYS is.
+             return
+         }
+ 
+         var didSend = false
+-        while let next = self.pendingGlobalRequests.popFirst() {
++        while self.stateMachine.canSendChannelMessages, let next = self.pendingGlobalRequests.popFirst() {
+             didSend = true
+             self.sendGlobalRequest(next.0, promise: next.1, context: context)
+         }
+@@ -563,12 +571,48 @@ extension NIOSSHHandler: SSHMultiplexerDelegate {
+         }
+ 
+         do {
+-            try self.writeMessage(SSHMultiMessage(message), context: context, promise: promise)
++            try self.writeOrQueue(message, context: context, promise: promise)
+         } catch {
+             promise?.fail(error)
+         }
+     }
+ 
++    /// Writes a channel message or a reply to a global request, or, while a key exchange is in flight, holds it
++    /// (behind any already held) until our NEWKEYS is out.
++    fileprivate func writeOrQueue(
++        _ message: SSHMessage,
++        context: ChannelHandlerContext,
++        promise: EventLoopPromise<Void>? = nil
++    ) throws {
++        guard self.queuedMessages.isEmpty, self.stateMachine.canSendChannelMessages else {
++            self.queuedMessages.append((message, promise))
++            return
++        }
++        try self.writeMessage(SSHMultiMessage(message), context: context, promise: promise)
++    }
++
++    /// Sends what was held during a key exchange, once that is allowed again: the queued messages, then our own
++    /// global requests.
++    fileprivate func sendQueuedMessagesIfPossible() {
++        guard let context = self.context else {
++            return
++        }
++        defer { self.sendGlobalRequestsIfPossible() }
++        var wrote = false
++        while self.stateMachine.canSendChannelMessages, let next = self.queuedMessages.popFirst() {
++            wrote = true
++            do {
++                try self.writeMessage(SSHMultiMessage(next.0), context: context, promise: next.1)
++            } catch {
++                next.1?.fail(error)
++            }
++        }
++        if wrote, !self.expectingChannelReadComplete {
++            self.pendingWrite = false
++            context.flush()
++        }
++    }
++
+     func flushFromChildChannel() {
+         // If a child channel flushes and we aren't in a channelReadComplete loop, we need to flush. Otherwise
+         // we can just wait.
+diff --git a/Tests/NIOSSHTests/RekeyTests.swift b/Tests/NIOSSHTests/RekeyTests.swift
+new file mode 100644
+index 0000000..fcdacad
+--- /dev/null
++++ b/Tests/NIOSSHTests/RekeyTests.swift
+@@ -0,0 +1,317 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++/// Records the data a child channel receives.
++final class DataRecorder: ChannelInboundHandler {
++    typealias InboundIn = SSHChannelData
++
++    private(set) var bytes = ByteBuffer()
++
++    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
++        guard case .byteBuffer(var buffer) = self.unwrapInboundIn(data).data else {
++            return
++        }
++        self.bytes.writeBuffer(&buffer)
++    }
++}
++
++/// Accepts the first host key at once and holds every later validation (rekeys) until told to complete it.
++final class HoldRekeyHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
++    private var validations = 0
++    private(set) var pending: EventLoopPromise<Void>?
++
++    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
++        self.validations += 1
++        if self.validations == 1 {
++            validationCompletePromise.succeed(())
++        } else {
++            self.pending = validationCompletePromise
++        }
++    }
++
++    func complete() {
++        self.pending?.succeed(())
++        self.pending = nil
++    }
++}
++
++/// A server global request delegate that holds TCP forwarding requests until told to answer them.
++final class HeldForwardingDelegate: GlobalRequestDelegate {
++    private(set) var pending: EventLoopPromise<GlobalRequest.TCPForwardingResponse>?
++
++    func tcpForwardingRequest(
++        _ request: GlobalRequest.TCPForwardingRequest,
++        handler: NIOSSHHandler,
++        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
++    ) {
++        self.pending = promise
++    }
++}
++
++final class RekeyTests: XCTestCase {
++    private var channel: BackToBackEmbeddedChannel!
++    private var serverReceived = DataRecorder()
++    private var serverChild: Channel?
++
++    override func setUp() {
++        super.setUp()
++        self.channel = BackToBackEmbeddedChannel()
++        self.serverReceived = DataRecorder()
++        self.serverChild = nil
++        KeyCheckingTransportProtection.instances = []
++    }
++
++    override func tearDown() {
++        try? self.channel.finish()
++        self.channel = nil
++        KeyCheckingTransportProtection.instances = []
++        super.tearDown()
++    }
++
++    private func connect(
++        client: (inout SSHClientConfiguration) -> Void = { _ in },
++        server: (inout SSHServerConfiguration) -> Void = { _ in }
++    ) throws -> (client: Channel, received: DataRecorder) {
++        var clientConfiguration = SSHClientConfiguration(
++            userAuthDelegate: InfinitePasswordDelegate(),
++            serverAuthDelegate: AcceptAllHostKeysDelegate()
++        )
++        client(&clientConfiguration)
++        var serverConfiguration = SSHServerConfiguration(
++            hostKeys: [.init(ed25519Key: .init())],
++            userAuthDelegate: DenyThenAcceptDelegate(messagesToDeny: 0)
++        )
++        server(&serverConfiguration)
++        let recorder = self.serverReceived
++        try self.channel.client.pipeline.syncOperations.addHandler(
++            NIOSSHHandler(
++                role: .client(clientConfiguration),
++                allocator: self.channel.client.allocator,
++                inboundChildChannelInitializer: nil
++            )
++        )
++        try self.channel.server.pipeline.syncOperations.addHandler(
++            NIOSSHHandler(role: .server(serverConfiguration), allocator: self.channel.server.allocator) { child, _ in
++                self.serverChild = child
++                return child.eventLoop.makeCompletedFuture {
++                    try child.pipeline.syncOperations.addHandler(recorder)
++                }
++            }
++        )
++        try self.channel.activate()
++        try self.channel.interactInMemory()
++
++        let clientReceived = DataRecorder()
++        let promise = self.channel.client.eventLoop.makePromise(of: Channel.self)
++        self.channel.clientSSHHandler!.createChannel(promise) { child, _ in
++            child.eventLoop.makeCompletedFuture {
++                try child.pipeline.syncOperations.addHandler(clientReceived)
++            }
++        }
++        try self.channel.interactInMemory()
++        return (try promise.futureResult.wait(), clientReceived)
++    }
++
++    private func send(_ string: String, on child: Channel) -> EventLoopFuture<Void> {
++        var buffer = child.allocator.buffer(capacity: string.utf8.count)
++        buffer.writeString(string)
++        return child.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)))
++    }
++
++    /// Delivers whatever the server has queued to the client, and nothing the other way.
++    private func deliverServerToClient() throws {
++        self.channel.run()
++        while let data = try self.channel.server.readOutbound(as: IOData.self) {
++            try self.channel.client.writeInbound(data)
++        }
++    }
++
++    // MARK: Writes while a key exchange is in flight
++
++    func testChildWritesDuringAPeerInitiatedRekeyAreQueued() throws {
++        let (client, _) = try self.connect()
++
++        // The server starts a rekey; the client sees its KEXINIT and answers with its own, so it is now mid key
++        // exchange, and must not send channel data until its NEWKEYS is out (RFC 4253 §7.1).
++        XCTAssertNoThrow(try self.channel.serverSSHHandler!._rekey())
++        XCTAssertNoThrow(try self.deliverServerToClient())
++        let write = self.send("during rekey", on: client)
++
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNoThrow(try write.wait())
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), "during rekey")
++    }
++
++    func testChildWritesDuringOurOwnRekeyKeepTheirOrder() throws {
++        let (client, clientReceived) = try self.connect()
++
++        let before = self.send("one ", on: client)
++        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
++        let during = [self.send("two ", on: client), self.send("three", on: client)]
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNoThrow(try before.wait())
++        for write in during {
++            XCTAssertNoThrow(try write.wait())
++        }
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), "one two three")
++
++        // And the other direction, during a rekey the server started.
++        let serverChild = try XCTUnwrap(self.serverChild)
++        XCTAssertNoThrow(try self.channel.serverSSHHandler!._rekey())
++        let reply = self.send("reply", on: serverChild)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNoThrow(try reply.wait())
++        XCTAssertEqual(String(buffer: clientReceived.bytes), "reply")
++    }
++
++    func testQueuedWritesFailWhenTheConnectionGoesAway() throws {
++        let (client, _) = try self.connect()
++        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
++        let write = self.send("never sent", on: client)
++        let failure = NIOLoopBoundBox<Error?>(nil, eventLoop: self.channel.client.eventLoop)
++        write.whenFailure { failure.value = $0 }
++
++        self.channel.client.close(promise: nil)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNotNil(failure.value)
++        XCTAssertEqual(self.serverReceived.bytes.readableBytes, 0)
++    }
++
++    // MARK: Global requests during a key exchange
++
++    /// The result of `future` if it has completed, without blocking (an embedded loop would hang in `wait()`).
++    private func completed<T>(_ future: EventLoopFuture<T>) -> Result<T, Error>? {
++        var result: Result<T, Error>?
++        future.whenComplete { result = $0 }
++        return result
++    }
++
++    private func keepalive(from handler: NIOSSHHandler, on loop: EventLoop) -> NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?> {
++        let box = NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?>(nil, eventLoop: loop)
++        let promise = loop.makePromise(of: GlobalRequest.GenericResponse.self)
++        promise.futureResult.whenComplete { box.value = $0 }
++        handler.sendGlobalRequest(type: "keepalive@openssh.com", payload: nil, wantReply: true, promise: promise)
++        return box
++    }
++
++    func testPeerGlobalRequestAfterOurKEXINITIsAnsweredAfterTheExchange() throws {
++        let (client, _) = try self.connect()
++
++        // We start a rekey; the peer's keepalive (want reply) crossed our KEXINIT on the wire.
++        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
++        let answer = self.keepalive(from: self.channel.serverSSHHandler!, on: self.channel.server.eventLoop)
++        XCTAssertNoThrow(try self.deliverServerToClient())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++
++        XCTAssertEqual(try answer.value?.get(), .failure)
++        let write = self.send("still alive", on: client)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNoThrow(try self.completed(write)?.get())
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), "still alive")
++    }
++
++    func testPeerGlobalRequestAfterThePeersNEWKEYSIsAnsweredAfterOurs() throws {
++        let hostKeys = HoldRekeyHostKeyDelegate()
++        _ = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
++
++        // Rekey; the client holds host key validation, so it has the server's NEWKEYS but has not sent its own.
++        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNotNil(hostKeys.pending)
++        // The server may send again (it sent NEWKEYS); its keepalive reaches a client that may not answer yet.
++        let answer = self.keepalive(from: self.channel.serverSSHHandler!, on: self.channel.server.eventLoop)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNil(answer.value)
++
++        hostKeys.complete()
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(try answer.value?.get(), .failure)
++    }
++
++    func testOurOwnAsyncReplyCompletingMidRekeyWaits() throws {
++        let forwarding = HeldForwardingDelegate()
++        _ = try self.connect(server: { $0.globalRequestDelegate = forwarding })
++
++        let response = self.channel.client.eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
++        self.channel.clientSSHHandler!.sendTCPForwardingRequest(.listen(host: "localhost", port: 0), promise: response)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        let held = try XCTUnwrap(forwarding.pending)
++
++        // The server starts a rekey, then its delegate answers the forwarding request: the reply must wait.
++        XCTAssertNoThrow(try self.channel.serverSSHHandler!._rekey())
++        held.succeed(.init(boundPort: 2222))
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(try self.completed(response.futureResult)?.get(), .init(boundPort: 2222))
++    }
++
++    /// Starts a client rekey that stops with the server's NEWKEYS received and the client's own NEWKEYS held back by
++    /// host key validation.
++    private func rekeyHeldAtHostKeyValidation(_ hostKeys: HoldRekeyHostKeyDelegate) throws {
++        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
++        try self.channel.interactInMemory()
++        XCTAssertNotNil(hostKeys.pending)
++    }
++
++    func testGlobalRequestQueuedDuringARekeyGoesOutWhenItCompletesOnAnIdleLink() throws {
++        let hostKeys = HoldRekeyHostKeyDelegate()
++        _ = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
++        try self.rekeyHeldAtHostKeyValidation(hostKeys)
++
++        let answer = self.keepalive(from: self.channel.clientSSHHandler!, on: self.channel.client.eventLoop)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNil(answer.value)
++
++        // Validation completes outside any read, and nothing else is going on: the keepalive must still go out.
++        hostKeys.complete()
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(try answer.value?.get(), .failure)
++    }
++
++    func testChannelOpenedDuringARekeyGoesOutWhenItCompletes() throws {
++        let hostKeys = HoldRekeyHostKeyDelegate()
++        _ = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
++        try self.rekeyHeldAtHostKeyValidation(hostKeys)
++
++        let opened = self.channel.client.eventLoop.makePromise(of: Channel.self)
++        self.channel.clientSSHHandler!.createChannel(opened) { channel, _ in channel.eventLoop.makeSucceededVoidFuture() }
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNil(self.completed(opened.futureResult))
++
++        hostKeys.complete()
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNotNil(try self.completed(opened.futureResult)?.get())
++    }
++
++    func testDataQueuedAroundAGlobalRequestKeepsItsOrder() throws {
++        let hostKeys = HoldRekeyHostKeyDelegate()
++        let (client, _) = try self.connect(client: { $0.serverAuthDelegate = hostKeys })
++        try self.rekeyHeldAtHostKeyValidation(hostKeys)
++
++        // Data, a keepalive and more data, all queued during the exchange.
++        let first = self.send("first ", on: client)
++        let answer = self.keepalive(from: self.channel.clientSSHHandler!, on: self.channel.client.eventLoop)
++        let second = self.send("second", on: client)
++        hostKeys.complete()
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNotNil(try self.completed(first)?.get())
++        XCTAssertNotNil(try self.completed(second)?.get())
++        XCTAssertEqual(try answer.value?.get(), .failure)
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), "first second")
++    }
++}

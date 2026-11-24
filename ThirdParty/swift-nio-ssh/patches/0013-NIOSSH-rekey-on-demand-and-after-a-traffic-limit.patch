@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
-Date: Tue, 24 Nov 2026 13:25:19 +0800
+Date: Wed, 25 Nov 2026 00:36:37 +0800
 Subject: [PATCH 13/15] =?UTF-8?q?NIOSSH:=20=E6=8C=89=E9=9C=80=E4=B8=8E?=
  =?UTF-8?q?=E6=8C=89=E6=B5=81=E9=87=8F=E8=87=AA=E5=8A=A8=E9=87=8D=E6=96=B0?=
  =?UTF-8?q?=E5=AF=86=E9=92=A5=E4=BA=A4=E6=8D=A2=EF=BC=88rekey=20on=20deman?=
@@ -24,23 +24,24 @@ MAC 计算）会在同一把密钥下回绕；RFC 4253 §9 也建议每 1 GB 或
 
 测试（RekeyTests）：按需交换且交换中重复请求无效；包数上限触发多次交换、两个方向的数据都完整到达；字节上限
 触发交换；双方同时到达上限；双方同时请求只做一次交换；关闭后永不自动交换；每次交换后计数清零（不清零就会
-多交换一次）；默认值。
+多交换一次）；默认值；交换结束时一批排队的全局请求发到一半到达上限、开始下一轮交换，其余的等那一轮完成再发
+（上一个补丁的「每发一个再看一次」，不看的话后面几个以协议错误失败）。
 
 行为变化：默认开启，超过 1 GiB 的连接现在会自动重新交换一次。可以提给上游。
 ---
  .../SSHConnectionStateMachine.swift           |   9 +
  Sources/NIOSSH/NIOSSHHandler.swift            |  38 ++++
- Sources/NIOSSH/RekeyLimits.swift              |  71 +++++++
+ Sources/NIOSSH/RekeyLimits.swift              |  71 ++++++
  Sources/NIOSSH/SSHClientConfiguration.swift   |   5 +
  Sources/NIOSSH/SSHPacketParser.swift          |   6 +
  Sources/NIOSSH/SSHPacketSerializer.swift      |   5 +
  Sources/NIOSSH/SSHServerConfiguration.swift   |   5 +
- Tests/NIOSSHTests/RekeyTests.swift            | 176 ++++++++++++++++++
- 8 files changed, 315 insertions(+)
+ Tests/NIOSSHTests/RekeyTests.swift            | 213 ++++++++++++++++++
+ 8 files changed, 352 insertions(+)
  create mode 100644 Sources/NIOSSH/RekeyLimits.swift
 
 diff --git a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift
-index 12299e1..ed5fe55 100644
+index ce61ef2..92c4f20 100644
 --- a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
 +++ b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
 @@ -1264,6 +1264,15 @@ extension SSHConnectionStateMachine {
@@ -56,17 +57,17 @@ index 12299e1..ed5fe55 100644
 +        return (state.parser.trafficSinceNewKeys, state.serializer.trafficSinceNewKeys)
 +    }
 +
-     /// Whether channel messages may be sent now. During a key exchange they may not, from our KEXINIT until our
-     /// NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
+     /// Whether channel messages, global requests and their replies may be sent now. During a key exchange they may
+     /// not, from our KEXINIT until our NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
      var canSendChannelMessages: Bool {
 diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
-index 89457a6..5b307ae 100644
+index 3b87d57..36eab80 100644
 --- a/Sources/NIOSSH/NIOSSHHandler.swift
 +++ b/Sources/NIOSSH/NIOSSHHandler.swift
-@@ -202,6 +202,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+@@ -203,6 +203,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
                  try self.processInboundMessageResult(result, context: context)
-                 // Our NEWKEYS may just have gone out: release channel messages held during the key exchange.
-                 self.sendQueuedChildMessagesIfPossible()
+                 // Our NEWKEYS may just have gone out: release what was held during the key exchange.
+                 self.sendQueuedMessagesIfPossible()
 +                self.rekeyIfTrafficLimitReached()
              }
          } catch {
@@ -79,7 +80,7 @@ index 89457a6..5b307ae 100644
      }
  
      private func processInboundMessageResult(
-@@ -536,6 +538,42 @@ extension NIOSSHHandler {
+@@ -534,6 +536,42 @@ extension NIOSSHHandler {
  
  // MARK: Initiate rekeying
  
@@ -299,12 +300,12 @@ index d23bace..fff622c 100644
      /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
      /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).
 diff --git a/Tests/NIOSSHTests/RekeyTests.swift b/Tests/NIOSSHTests/RekeyTests.swift
-index fb17550..3df34fc 100644
+index fcdacad..6bf7942 100644
 --- a/Tests/NIOSSHTests/RekeyTests.swift
 +++ b/Tests/NIOSSHTests/RekeyTests.swift
-@@ -159,4 +159,180 @@ final class RekeyTests: XCTestCase {
-         XCTAssertNotNil(failure.value)
-         XCTAssertEqual(self.serverReceived.bytes.readableBytes, 0)
+@@ -314,4 +314,217 @@ final class RekeyTests: XCTestCase {
+         XCTAssertEqual(try answer.value?.get(), .failure)
+         XCTAssertEqual(String(buffer: self.serverReceived.bytes), "first second")
      }
 +
 +    // MARK: Rekeying on demand and after a traffic limit
@@ -481,5 +482,42 @@ index fb17550..3df34fc 100644
 +        XCTAssertTrue(NIOSSHRekeyLimits.default.isReached(by: .init(packets: 1 << 31, bytes: 0)))
 +        XCTAssertTrue(NIOSSHRekeyLimits.default.isReached(by: .init(packets: 0, bytes: 1 << 30)))
 +        XCTAssertFalse(NIOSSHRekeyLimits.default.isReached(by: .init(packets: (1 << 31) - 1, bytes: (1 << 30) - 1)))
++    }
++
++    func testTrafficLimitReachedWhileSendingQueuedGlobalRequestsHoldsTheRest() throws {
++        let hostKeys = HoldRekeyHostKeyDelegate()
++        _ = try self.connect(
++            client: {
++                self.useKeyCheckingProtection(&$0)
++                $0.serverAuthDelegate = hostKeys
++                $0.rekeyLimits = .init(packets: 3, bytes: nil)
++            },
++            server: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .disabled
++            }
++        )
++        // Logging in already crossed the limit: that exchange is under way, held at host key validation.
++        let exchanges = self.keyExchangeCount()
++        if hostKeys.pending == nil {
++            XCTAssertTrue(self.channel.clientSSHHandler!.rekey())
++            XCTAssertNoThrow(try self.channel.interactInMemory())
++        }
++        XCTAssertNotNil(hostKeys.pending)
++        let answers = (0..<8).map { _ in
++            self.keepalive(from: self.channel.clientSSHHandler!, on: self.channel.client.eventLoop)
++        }
++
++        // Our NEWKEYS goes out with the server's already in: the queued requests go out while active, and the third
++        // one reaches the limit and starts the next exchange. The rest wait for that one instead of failing.
++        // (Every exchange after the first holds host key validation; let each through.)
++        for _ in 0..<8 where hostKeys.pending != nil {
++            hostKeys.complete()
++            XCTAssertNoThrow(try self.channel.interactInMemory())
++        }
++        for answer in answers {
++            XCTAssertEqual(try answer.value?.get(), .failure)
++        }
++        XCTAssertGreaterThanOrEqual(self.keyExchangeCount(), exchanges + 2)
 +    }
  }
