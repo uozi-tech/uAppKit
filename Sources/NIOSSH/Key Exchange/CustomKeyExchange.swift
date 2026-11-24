@@ -84,7 +84,8 @@ extension NIOSSHAlgorithms {
     ) {
         for name in KeyExchange.keyExchangeAlgorithmNames {
             precondition(
-                !SSHKeyExchangeStateMachine.supportedKeyExchangeAlgorithms.contains(name),
+                !SSHKeyExchangeStateMachine.supportedKeyExchangeAlgorithms.contains(name)
+                    && !SSHKeyExchangeStateMachine.keyExchangeExtensionMarkerNames.contains(name),
                 "\(name) is a built-in key exchange method"
             )
         }

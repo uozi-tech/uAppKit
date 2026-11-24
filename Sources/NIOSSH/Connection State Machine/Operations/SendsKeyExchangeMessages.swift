@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -48,6 +50,6 @@ extension SendsKeyExchangeMessages {
     mutating func writeNewKeysMessage(into buffer: inout ByteBuffer) throws {
         let result = self.keyExchangeStateMachine.sendNewKeys()
         try self.serializer.serialize(message: .newKeys, to: &buffer)
-        self.serializer.addEncryption(result)
+        self.serializer.addEncryption(result, strictKeyExchange: self.keyExchangeStateMachine.isStrictKeyExchange)
     }
 }

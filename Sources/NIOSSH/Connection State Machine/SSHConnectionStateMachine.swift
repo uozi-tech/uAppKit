@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -171,7 +173,8 @@ struct SSHConnectionStateMachine {
                         self = .receivedDisconnect(state.role)
                         return .disconnect
                     case .ignore, .debug:
-                        // Ignore these
+                        // Ignore these, except during a strict initial key exchange.
+                        try state.validateNonKeyExchangeMessage(message)
                         self = .keyExchange(state)
                         return .noMessage
                     case .unimplemented(let unimplemented):
@@ -230,7 +233,8 @@ struct SSHConnectionStateMachine {
                         self = .receivedDisconnect(state.role)
                         return .disconnect
                     case .ignore, .debug:
-                        // Ignore these
+                        // Ignore these, except during a strict initial key exchange.
+                        try state.validateNonKeyExchangeMessage(message)
                         self = .sentNewKeys(state)
                         return .noMessage
                     case .unimplemented(let unimplemented):

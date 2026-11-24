@@ -95,6 +95,10 @@ struct SSHKeyExchangeStateMachine {
     private var protectionSchemes: [NIOSSHTransportProtection.Type]
     private var previousSessionIdentifier: ByteBuffer?
 
+    /// Whether this is the initial key exchange and both peers announced strict key exchange
+    /// (OpenSSH `PROTOCOL` §1.10, the Terrapin mitigation). Decided when the peer's KEXINIT arrives.
+    private(set) var isStrictKeyExchange = false
+
     init(
         allocator: ByteBufferAllocator,
         loop: EventLoop,
@@ -131,7 +135,7 @@ struct SSHKeyExchangeStateMachine {
 
         return .init(
             cookie: rng.randomCookie(allocator: self.allocator),
-            keyExchangeAlgorithms: self.configuredKeyExchangeAlgorithms,
+            keyExchangeAlgorithms: self.configuredKeyExchangeAlgorithms + self.keyExchangeExtensionMarkers,
             serverHostKeyAlgorithms: self.supportedHostKeyAlgorithms,
             encryptionAlgorithmsClientToServer: encryptionAlgorithms,
             encryptionAlgorithmsServerToClient: encryptionAlgorithms,
@@ -146,6 +150,8 @@ struct SSHKeyExchangeStateMachine {
     }
 
     mutating func handle(keyExchange message: SSHMessage.KeyExchangeMessage) throws -> SSHMultiMessage? {
+        self.isStrictKeyExchange = self.peerAgreesToStrictKeyExchange(message)
+
         switch self.state {
         case .keyExchangeSent(message: let ourMessage):
             switch self.role {
@@ -680,6 +686,45 @@ extension SSHKeyExchangeStateMachine {
             .newKeysSent(_, _, let negotiated):
             return negotiated.negotiatedHostKeyAlgorithm
         }
+    }
+}
+
+// MARK: Strict key exchange (OpenSSH PROTOCOL §1.10, CVE-2023-48795)
+
+extension SSHKeyExchangeStateMachine {
+    static let strictKeyExchangeClientMarker: Substring = "kex-strict-c-v00@openssh.com"
+    static let strictKeyExchangeServerMarker: Substring = "kex-strict-s-v00@openssh.com"
+
+    /// Pseudo-algorithms that announce protocol extensions in the KEXINIT algorithm list. They are never
+    /// negotiated: our own configured list never contains them.
+    static var keyExchangeExtensionMarkerNames: [Substring] {
+        [Self.strictKeyExchangeClientMarker, Self.strictKeyExchangeServerMarker]
+    }
+
+    /// Whether we announce strict key exchange at all (tests turn it off to play an old peer).
+    private var offersStrictKeyExchange: Bool {
+        switch self.role {
+        case .client(let configuration):
+            return configuration.offersStrictKeyExchange
+        case .server(let configuration):
+            return configuration.offersStrictKeyExchange
+        }
+    }
+
+    /// The markers appended to our KEXINIT: only in the first one of the connection.
+    private var keyExchangeExtensionMarkers: [Substring] {
+        guard self.previousSessionIdentifier == nil, self.offersStrictKeyExchange else {
+            return []
+        }
+        return [self.role.isClient ? Self.strictKeyExchangeClientMarker : Self.strictKeyExchangeServerMarker]
+    }
+
+    private func peerAgreesToStrictKeyExchange(_ message: SSHMessage.KeyExchangeMessage) -> Bool {
+        guard self.previousSessionIdentifier == nil, self.offersStrictKeyExchange else {
+            return false
+        }
+        let peerMarker = self.role.isClient ? Self.strictKeyExchangeServerMarker : Self.strictKeyExchangeClientMarker
+        return message.keyExchangeAlgorithms.contains(peerMarker)
     }
 }
 
