@@ -77,7 +77,7 @@ final class SFTPClientHandlerTests: XCTestCase {
 
     private func result(_ request: SFTPInFlightRequest) -> Result<SFTPResponse, Error>? {
         var outcome: Result<SFTPResponse, Error>?
-        request.promise?.futureResult.whenComplete { outcome = $0 }
+        request.promise?.futureResult.assumeIsolated().whenComplete { outcome = $0 }
         return outcome
     }
 
