@@ -5,8 +5,11 @@ import USSHCore
 /// 测试用的 SFTP v3 服务端，挂在一条以 `ByteBuffer` 收发字节流的通道上（与 `SFTPClient` 的对接约定相同：
 /// 可以是 SSH 的 `sftp` 子系统通道，也可以直接是一条本机 TCP 连接或管道）。
 ///
-/// 行为照 OpenSSH 的 sftp-server：SYMLINK 的参数顺序、RENAME 不覆盖、`posix-rename` 覆盖、扩展的格式。
-/// 每个请求开一个任务交给 `SFTPServerFileSystem`，所以回答可以乱序；`faults` 注入延迟、失败、短读、断线。
+/// 行为照 OpenSSH 的 sftp-server：SYMLINK 的参数顺序、RENAME 不覆盖、`posix-rename` 覆盖、扩展的格式、
+/// 句柄编号复用（最近释放的先用，所以「关了以后迟到的请求落进新开的文件」这种客户端错误在这里也测得出来）。
+/// 同一个句柄上的操作按到达顺序串行执行（CLOSE 等它前面的做完），不同句柄、不带句柄的操作并发执行，
+/// 所以不同请求的回答可以乱序；要让同一个句柄上的回答也乱序，用 `faults` 的延迟或 `reverseResponseOrder`。
+/// `faults` 还能注入失败、短读、断线、不回答。
 public final class SFTPServer: Sendable {
     public struct Configuration: Sendable {
         /// SSH_FXP_VERSION 里宣告的扩展（名字 → 数据）。不在这里的扩展请求回 OP_UNSUPPORTED。
@@ -111,8 +114,29 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
     private let faults: SFTPFaultInjector
     private var context: ChannelHandlerContext?
     private var initialized = false
-    private var handles: [UInt32: OpenHandle] = [:]
-    private var nextHandle: UInt32 = 1
+    /// 一个开着的句柄。同一个句柄上的操作**按到达顺序一个一个执行**（和 OpenSSH 一样），
+    /// 不同句柄之间、以及不带句柄的操作照常并发。CLOSE 排在它前面的操作之后，关完才释放编号。
+    private struct Slot {
+        var handle: OpenHandle
+        var busy = false
+        /// CLOSE 已经排上了：之后到的请求按「句柄无效」回。
+        var closing = false
+        var waiting = CircularBuffer<HandleJob>()
+    }
+
+    private struct HandleJob {
+        var id: UInt32
+        var decision: SFTPFaultInjector.Decision
+        var isClose: Bool
+        /// nil = 只关不回答（连接没了之后的清理）。
+        var replies: Bool
+        var body: @Sendable (OpenHandle) async throws -> Outcome
+    }
+
+    private var slots: [UInt32: Slot] = [:]
+    /// 照 OpenSSH 复用编号：最近释放的先用，没有空位才往后加（编号从 0 起）。
+    private var freeNumbers: [UInt32] = []
+    private var nextNumber: UInt32 = 0
     private var reorderBuffer: [SFTPResponse] = []
     private var flushScheduled = false
     private var active = true
@@ -142,20 +166,23 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
         context.close(promise: nil)
     }
 
-    /// 连接没了：关掉客户端没来得及关的句柄。
+    /// 连接没了：客户端没来得及关的句柄排在各自已有的操作之后关掉。
     private func shutDown() {
         guard active else { return }
         active = false
-        let open = handles.values
-        handles = [:]
         reorderBuffer = []
-        for handle in open {
-            Task {
-                switch handle {
-                case .file(let file): try? await file.close()
-                case .directory(let directory): try? await directory.close()
-                }
-            }
+        for number in slots.keys where slots[number]?.closing == false {
+            enqueue(on: number, HandleJob(id: 0, decision: .init(), isClose: true, replies: false) { open in
+                try await Self.close(open)
+                return .response(.status(id: 0, code: .ok, message: "", languageTag: ""))
+            })
+        }
+    }
+
+    private static func close(_ open: OpenHandle) async throws {
+        switch open {
+        case .file(let file): try await file.close()
+        case .directory(let directory): try await directory.close()
         }
     }
 
@@ -212,49 +239,39 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
         case .opendir(_, let path):
             run(id, decision) { .openedDirectory(try await fs.openDirectory(path)) }
         case .close(_, let handle):
-            guard let number = Self.handleNumber(handle), let open = handles.removeValue(forKey: number) else {
-                return finish(Self.invalidHandle(id), id: id, decision: decision)
-            }
-            run(id, decision) {
-                switch open {
-                case .file(let file): try await file.close()
-                case .directory(let directory): try await directory.close()
-                }
+            onHandle(handle, id: id, decision: decision, isClose: true) { open in
+                try await Self.close(open)
                 return Self.ok(id)
             }
         case .read(_, let handle, let offset, let length):
-            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
             var wanted = Int(length)
             if configuration.limits.maximumReadLength > 0 {
                 wanted = min(wanted, Int(clamping: configuration.limits.maximumReadLength))
             }
             if let cap = decision.readLengthCap { wanted = min(wanted, max(1, cap)) }
-            run(id, decision) { [wanted] in
-                guard let data = try await file.read(at: offset, length: wanted) else {
+            onHandle(handle, id: id, decision: decision) { [wanted] open in
+                guard let data = try await Self.file(open).read(at: offset, length: wanted) else {
                     return .response(.status(id: id, code: .eof, message: "End of file", languageTag: "en"))
                 }
                 return .response(.data(id: id, data: data))
             }
         case .write(_, let handle, let offset, let data):
-            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
-            run(id, decision) {
-                try await file.write(data, at: offset)
+            onHandle(handle, id: id, decision: decision) { open in
+                try await Self.file(open).write(data, at: offset)
                 return Self.ok(id)
             }
         case .fstat(_, let handle):
-            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
-            run(id, decision) { .response(.attributes(id: id, attributes: try await file.attributes())) }
+            onHandle(handle, id: id, decision: decision) { open in
+                .response(.attributes(id: id, attributes: try await Self.file(open).attributes()))
+            }
         case .fsetstat(_, let handle, let attributes):
-            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
-            run(id, decision) {
-                try await file.setAttributes(attributes)
+            onHandle(handle, id: id, decision: decision) { open in
+                try await Self.file(open).setAttributes(attributes)
                 return Self.ok(id)
             }
         case .readdir(_, let handle):
-            guard let number = Self.handleNumber(handle), case .directory(let directory)? = handles[number] else {
-                return finish(Self.invalidHandle(id), id: id, decision: decision)
-            }
-            run(id, decision) {
+            onHandle(handle, id: id, decision: decision) { open in
+                guard case .directory(let directory) = open else { throw Self.invalidHandleError }
                 guard let entries = try await directory.nextBatch() else {
                     return .response(.status(id: id, code: .eof, message: "End of file", languageTag: "en"))
                 }
@@ -333,16 +350,14 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
                 return .response(.extendedReply(id: id, data: data))
             }
         case .fstatVFS(let handle):
-            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
-            run(id, decision) {
+            onHandle(handle, id: id, decision: decision) { open in
                 var data = ByteBuffer()
-                try await file.fileSystemStats().encode(into: &data)
+                try await Self.file(open).fileSystemStats().encode(into: &data)
                 return .response(.extendedReply(id: id, data: data))
             }
         case .fsync(let handle):
-            guard let file = file(for: handle) else { return finish(Self.invalidHandle(id), id: id, decision: decision) }
-            run(id, decision) {
-                try await file.sync()
+            onHandle(handle, id: id, decision: decision) { open in
+                try await Self.file(open).sync()
                 return Self.ok(id)
             }
         case .lsetstat(let path, let attributes):
@@ -368,18 +383,75 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
         let bound = NIOLoopBound(self, eventLoop: context.eventLoop)
         let eventLoop = context.eventLoop
         Task {
-            let outcome: Outcome
-            do {
-                outcome = try await body()
-            } catch let status as SFTPServerStatusError {
-                outcome = .response(.status(id: id, code: status.code, message: status.message, languageTag: "en"))
-            } catch {
-                outcome = .response(.status(id: id, code: .failure, message: String(describing: error), languageTag: "en"))
-            }
+            let outcome = await Self.outcome(id: id, body)
             eventLoop.execute {
                 bound.value.finish(outcome, id: id, decision: decision)
             }
         }
+    }
+
+    /// 排进句柄自己的队列。句柄不认识或者已经在关：回「句柄无效」（OpenSSH 回 SSH_FX_FAILURE）。
+    private func onHandle(
+        _ handle: ByteBuffer, id: UInt32, decision: SFTPFaultInjector.Decision, isClose: Bool = false,
+        _ body: @escaping @Sendable (OpenHandle) async throws -> Outcome
+    ) {
+        guard let number = Self.handleNumber(handle), let slot = slots[number], !slot.closing else {
+            return finish(Self.invalidHandle(id), id: id, decision: decision)
+        }
+        enqueue(on: number, HandleJob(id: id, decision: decision, isClose: isClose, replies: true, body: body))
+    }
+
+    private func enqueue(on number: UInt32, _ job: HandleJob) {
+        guard slots[number] != nil else { return }
+        if job.isClose { slots[number]!.closing = true }
+        slots[number]!.waiting.append(job)
+        startNext(on: number)
+    }
+
+    private func startNext(on number: UInt32) {
+        guard let context, var slot = slots[number], !slot.busy, let job = slot.waiting.popFirst() else { return }
+        slot.busy = true
+        slots[number] = slot
+        let handle = slot.handle
+        let bound = NIOLoopBound(self, eventLoop: context.eventLoop)
+        let eventLoop = context.eventLoop
+        let body = job.body
+        let id = job.id
+        Task {
+            let outcome = await Self.outcome(id: id) { try await body(handle) }
+            eventLoop.execute {
+                bound.value.jobFinished(on: number, job, outcome)
+            }
+        }
+    }
+
+    private func jobFinished(on number: UInt32, _ job: HandleJob, _ outcome: Outcome) {
+        if job.isClose {
+            // 关完才释放编号，下一个 OPEN 才可能拿到它（OpenSSH 的行为）。
+            slots[number] = nil
+            freeNumbers.append(number)
+        } else {
+            slots[number]?.busy = false
+        }
+        if job.replies { finish(outcome, id: job.id, decision: job.decision) }
+        startNext(on: number)
+    }
+
+    private static func outcome(id: UInt32, _ body: () async throws -> Outcome) async -> Outcome {
+        do {
+            return try await body()
+        } catch let status as SFTPServerStatusError {
+            return .response(.status(id: id, code: status.code, message: status.message, languageTag: "en"))
+        } catch {
+            return .response(.status(id: id, code: .failure, message: String(describing: error), languageTag: "en"))
+        }
+    }
+
+    private static let invalidHandleError = SFTPServerStatusError.failure("Invalid handle")
+
+    private static func file(_ open: OpenHandle) throws -> any SFTPServerFile {
+        guard case .file(let file) = open else { throw invalidHandleError }
+        return file
     }
 
     private func finish(_ outcome: Outcome, id: UInt32, decision: SFTPFaultInjector.Decision) {
@@ -413,9 +485,14 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
             }
             return .status(id: id, code: .connectionLost, message: "", languageTag: "")
         }
-        let number = nextHandle
-        nextHandle &+= 1
-        handles[number] = handle
+        let number: UInt32
+        if let reused = freeNumbers.popLast() {
+            number = reused
+        } else {
+            number = nextNumber
+            nextNumber &+= 1
+        }
+        slots[number] = Slot(handle: handle)
         var bytes = ByteBuffer()
         bytes.writeInteger(number)
         return .handle(id: id, handle: bytes)
@@ -459,11 +536,6 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
     }
 
     // MARK: 小工具
-
-    private func file(for handle: ByteBuffer) -> (any SFTPServerFile)? {
-        guard let number = Self.handleNumber(handle), case .file(let file)? = handles[number] else { return nil }
-        return file
-    }
 
     private static func handleNumber(_ handle: ByteBuffer) -> UInt32? {
         guard handle.readableBytes == 4 else { return nil }
