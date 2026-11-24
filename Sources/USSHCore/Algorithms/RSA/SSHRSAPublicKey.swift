@@ -14,8 +14,10 @@ public struct SSHRSAPublicKey: Sendable {
     public static let minimumModulusBits = 1024
     /// 不算弱的最小模数位数（NIST SP 800-131A、OpenSSH 的 `RequiredRSASize` 默认值）。
     public static let recommendedMinimumModulusBits = 2048
-    /// 能接受的最大模数位数（与 OpenSSH 的 `SSHBUF_MAX_BIGNUM`、BoringSSL 的上限一致）。
-    public static let maximumModulusBits = 16384
+    /// 能接受的最大模数位数：BoringSSL 的 `OPENSSL_RSA_MAX_MODULUS_BITS`（8192）。签名与校验都走 BoringSSL，
+    /// 更大的钥匙它根本不肯装（OpenSSH 自己的上限是 16384 位，这样的钥匙极少见，连不上的会以
+    /// `.unsupportedModulusSize` 干净地失败）。
+    public static let maximumModulusBits = 8192
 
     /// 模数 n，大端无符号、无前导零。
     public let modulus: [UInt8]

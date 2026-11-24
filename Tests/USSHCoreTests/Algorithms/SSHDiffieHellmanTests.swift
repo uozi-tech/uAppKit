@@ -1,5 +1,6 @@
 import BigInt
 import NIOCore
+import NIOConcurrencyHelpers
 import XCTest
 
 @testable import USSHCore
@@ -63,12 +64,12 @@ final class SSHDiffieHellmanTests: XCTestCase {
     func testFrozenVectorsFromIndependentImplementation() throws {
         for vector in DHFixtures.vectors {
             let algorithm = try XCTUnwrap(SSHDiffieHellmanAlgorithm(name: vector.algorithm))
-            var client = try SSHDiffieHellmanKeyExchange(
+            let client = try SSHDiffieHellmanKeyExchange(
                 algorithm: algorithm,
                 role: .client,
                 privateExponent: [UInt8](hex: vector.clientExponent)
             )
-            var server = try SSHDiffieHellmanKeyExchange(
+            let server = try SSHDiffieHellmanKeyExchange(
                 algorithm: algorithm,
                 role: .server,
                 privateExponent: [UInt8](hex: vector.serverExponent)
@@ -97,8 +98,8 @@ final class SSHDiffieHellmanTests: XCTestCase {
 
     func testClientAndServerAgreeForEveryAlgorithm() throws {
         for algorithm in SSHDiffieHellmanAlgorithm.allCases {
-            var client = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
-            var server = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .server)
+            let client = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
+            let server = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .server)
             XCTAssertNotEqual(client.localPublicValue, server.localPublicValue)
             let a = try client.complete(peerPublicValue: server.localPublicValue, inputs: self.fixtureInputs)
             let b = try server.complete(peerPublicValue: client.localPublicValue, inputs: self.fixtureInputs)
@@ -115,7 +116,7 @@ final class SSHDiffieHellmanTests: XCTestCase {
             // 任何一项输入不同，H 都不同。
             var changed = self.fixtureInputs
             changed.serverHostKey[changed.serverHostKey.count - 1] ^= 1
-            var other = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
+            let other = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
             let c = try other.complete(peerPublicValue: server.localPublicValue, inputs: changed)
             XCTAssertNotEqual(c.exchangeHash, a.exchangeHash)
         }
@@ -127,7 +128,7 @@ final class SSHDiffieHellmanTests: XCTestCase {
         for _ in 0..<5 {
             XCTAssertTrue(seen.insert(SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client).localPublicValue).inserted)
         }
-        var client = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
+        let client = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
         let server = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .server)
         _ = try client.complete(peerPublicValue: server.localPublicValue, inputs: self.fixtureInputs)
         XCTAssertThrowsError(try client.complete(peerPublicValue: server.localPublicValue, inputs: self.fixtureInputs)) {
@@ -141,7 +142,7 @@ final class SSHDiffieHellmanTests: XCTestCase {
         for algorithm in [SSHDiffieHellmanAlgorithm.group14SHA256, .group16SHA512] {
             let p = algorithm.group.prime
             let bad: [BigUInt] = [0, 1, p - 1, p, p + 1, p * 2, BigUInt(1) << (p.bitWidth + 8)]
-            var client = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
+            let client = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
             for value in bad {
                 XCTAssertThrowsError(try client.complete(peerPublicValue: value.sshMagnitudeBytes, inputs: self.fixtureInputs)) {
                     XCTAssertEqual($0 as? SSHDiffieHellmanError, .invalidPeerPublicValue, "\(value)")
@@ -149,10 +150,10 @@ final class SSHDiffieHellmanTests: XCTestCase {
             }
             // 校验失败不消耗私钥；合法的边界值 2 与 p − 2 可以通过。
             XCTAssertNoThrow(try client.complete(peerPublicValue: [2], inputs: self.fixtureInputs))
-            var again = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .server)
+            let again = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .server)
             XCTAssertNoThrow(try again.complete(peerPublicValue: (p - 2).sshMagnitudeBytes, inputs: self.fixtureInputs))
             // 带前导零的合法值也能接受。
-            var padded = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
+            let padded = SSHDiffieHellmanKeyExchange(algorithm: algorithm, role: .client)
             XCTAssertNoThrow(try padded.complete(peerPublicValue: [0, 0, 5], inputs: self.fixtureInputs))
         }
         // 线上的负数 mpint 在读的时候就被拒绝。
@@ -220,5 +221,24 @@ final class SSHDiffieHellmanTests: XCTestCase {
         XCTAssertTrue(SSHDiffieHellmanAlgorithm.group14SHA1.isLegacy)
         XCTAssertEqual(SSHDiffieHellmanAlgorithm.group14SHA1.group, .group14)
         XCTAssertNil(SSHDiffieHellmanAlgorithm(name: "diffie-hellman-group1-sha1"))
+    }
+
+    /// 私钥只有一份：引用被复制到哪里、多少个线程同时来，都只有一次能算出 K。
+    func testSingleUseSurvivesCopiesAndConcurrency() throws {
+        let peer = SSHDiffieHellmanKeyExchange(algorithm: .group14SHA256, role: .server).localPublicValue
+        let core = SSHDiffieHellmanKeyExchange(algorithm: .group14SHA256, role: .client)
+        let alias = core
+        let successes = NIOLockedValueBox(0)
+        DispatchQueue.concurrentPerform(iterations: 8) { index in
+            let side = index.isMultiple(of: 2) ? core : alias
+            if (try? side.sharedSecret(peerPublicValue: peer)) != nil {
+                successes.withLockedValue { $0 += 1 }
+            }
+        }
+        XCTAssertEqual(successes.withLockedValue { $0 }, 1)
+        XCTAssertThrowsError(try alias.complete(peerPublicValue: peer, inputs: SSHExchangeHashInputs(
+            clientVersion: "a", serverVersion: "b", clientKeyExchangeInit: [], serverKeyExchangeInit: [], serverHostKey: []))) { error in
+            XCTAssertEqual(error as? SSHDiffieHellmanError, .alreadyCompleted)
+        }
     }
 }

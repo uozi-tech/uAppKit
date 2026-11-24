@@ -188,6 +188,9 @@ final class SSHConnectionGuard: ChannelInboundHandler {
             return .authenticationFailed(authDelegate.failure)
         case let sshError as NIOSSHError where sshError.type != .tcpShutdown:
             return .handshakeFailed(error)
+        case is any SSHAlgorithmFailure:
+            // 我们自己的算法实现拒绝了对端的东西（越界的 DH 公开值、畸形的 RSA 密钥 / 签名、加密层校验失败）。
+            return .handshakeFailed(error)
         default:
             return nil
         }

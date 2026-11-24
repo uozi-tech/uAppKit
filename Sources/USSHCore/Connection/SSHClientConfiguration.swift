@@ -125,6 +125,10 @@ public struct SSHAuthentication: Sendable {
     public static func privateKey(_ key: NIOSSHPrivateKey, username: String) -> SSHAuthentication {
         SSHAuthentication(username: username, methods: [.privateKey(key)])
     }
+
+    public static func rsaPrivateKey(_ key: SSHRSAPrivateKey, username: String) -> SSHAuthentication {
+        SSHAuthentication(username: username, methods: [.rsaPrivateKey(key)])
+    }
 }
 
 /// 一种认证方式。
@@ -133,6 +137,12 @@ public enum SSHAuthenticationMethod: Sendable {
     case password(String)
     /// 公钥（RFC 4252 §7）：ed25519、ECDSA P-256/384/521，以及以后经 NIOSSH 扩展接口注册的类型。
     case privateKey(NIOSSHPrivateKey)
+    /// RSA 用户私钥（RFC 8332）。依次以 `rsa-sha2-512`、`rsa-sha2-256` 签名尝试，连接允许旧算法时最后再试
+    /// SHA-1 的 `ssh-rsa`；每个算法算服务器的一次认证尝试，第一次成功就停。
+    ///
+    /// 服务器宣告了 `server-sig-algs`（RFC 8308，OpenSSH 7.2 起都发）时只试其中有的、第一次就用最好的那个，
+    /// 一个 RSA 算法都没列就跳过这把钥匙；没宣告时按上面的顺序逐个试（`SSHRSAUserAuthenticationPlan`）。
+    case rsaPrivateKey(SSHRSAPrivateKey)
     /// 带 OpenSSH 证书的公钥。
     case certifiedPrivateKey(NIOSSHPrivateKey, certificate: NIOSSHCertifiedPublicKey)
     /// 原样交给一个 NIOSSH 的认证 delegate：每轮都问它，它给 `nil` 才轮到列表里的下一项。
@@ -143,7 +153,7 @@ public enum SSHAuthenticationMethod: Sendable {
     public var kind: Kind {
         switch self {
         case .password: return .password
-        case .privateKey, .certifiedPrivateKey: return .publicKey
+        case .privateKey, .rsaPrivateKey, .certifiedPrivateKey: return .publicKey
         case .delegate: return .delegate
         }
     }
@@ -201,19 +211,146 @@ public struct SSHUntrustedHostKey: Error, Sendable, Hashable {
     public init(hostKey: NIOSSHPublicKey) { self.hostKey = hostKey }
 }
 
-/// NIOSSH 默认集之外的算法。
+/// 一条连接用哪些算法。现成的组合见 `.builtInOnly`（默认）、`.standard`、`.legacyCompatible`。
 ///
-/// 现在只有加密方式能经 NIOSSH 0.15.2 的公开接口传进去。密钥交换算法与公钥（主机密钥 / 用户私钥 / 签名）
-/// 算法要等 NIOSSH 那条线把扩展接口补上，接好之后各加一个字段放在这里（`keyExchangeAlgorithms`、
-/// `publicKeyAlgorithms`），连接层在 `SSHClient.makeNIOConfiguration` 里一并交给 NIOSSH。
+/// 四个列表都按偏好排序，NIOSSH 按这个顺序报给服务器、取第一个双方都支持的。
+/// `allowsLegacyAlgorithms == false` 时列表里的 SHA-1 旧算法（`hmac-sha1*`、`diffie-hellman-group14-sha1`、
+/// `ssh-rsa` 主机密钥）一律被去掉，RSA 用户密钥也不会以 `ssh-rsa` 尝试——放进列表不等于启用，必须同时打开开关。
+///
+/// 只管「用哪些算法」；什么时候重新交换密钥（`rekeyLimits`）在 `SSHClient.Configuration` 上，不在这里。
 public struct SSHAlgorithms: Sendable {
-    /// 按偏好排序的加密方式（含 MAC）。默认是 NIOSSH 自带的 AES-GCM 两种。
-    public var transportProtectionSchemes: [(NIOSSHTransportProtection & _NIOSSHSendableMetatype).Type]
+    /// 按偏好排序的加密方式（含 MAC）。NIOSSH 自带的是 AES-GCM 两种（`Constants.bundledTransportProtectionSchemes`），
+    /// USSHCore 的在 `SSHTransportProtections`。
+    public var transportProtectionSchemes: [SSHTransportProtections.Scheme]
+
+    /// 按偏好排序的密钥交换算法名。可以是 NIOSSH 自带的（`builtInKeyExchangeAlgorithms`）或 USSHCore 的
+    /// 有限域 DH（`SSHDiffieHellmanAlgorithm.name`）；不认识的名字被 NIOSSH 跳过、不会报出去。
+    public var keyExchangeAlgorithms: [String]
+
+    /// 按偏好排序的主机密钥算法名，原样交给 NIOSSH 的 `SSHClientConfiguration.hostKeyAlgorithms`（补丁 0014 起
+    /// 按连接生效）：报给服务器的、协商的、验主机签名时接受的都只来自它。NIOSSH 自带的在
+    /// `builtInHostKeyAlgorithms`，USSHCore 的 RSA 是 `SSHRSASignatureAlgorithm.name`。
+    ///
+    /// 进程级的登记表只决定 NIOSSH 认识哪些算法；接受与否只看这里。所以别的连接用过 `.legacyCompatible`
+    /// （登记过 `ssh-rsa`）之后，这里没有 `ssh-rsa` 的连接照样不接受 SHA-1 的主机签名。
+    public var hostKeyAlgorithms: [String]
+
+    /// 是否允许 SHA-1 的旧算法。打开后建连接时会调 `SSHAlgorithms.registerLegacyAlgorithms()`（进程级登记，
+    /// 见那里的说明；别的连接不受影响）。
+    public var allowsLegacyAlgorithms: Bool
 
     public init(
-        transportProtectionSchemes: [(NIOSSHTransportProtection & _NIOSSHSendableMetatype).Type] =
-            Constants.bundledTransportProtectionSchemes
+        transportProtectionSchemes: [SSHTransportProtections.Scheme] = Constants.bundledTransportProtectionSchemes,
+        keyExchangeAlgorithms: [String] = SSHAlgorithms.builtInKeyExchangeAlgorithms,
+        hostKeyAlgorithms: [String] = SSHAlgorithms.builtInHostKeyAlgorithms,
+        allowsLegacyAlgorithms: Bool = false
     ) {
         self.transportProtectionSchemes = transportProtectionSchemes
+        self.keyExchangeAlgorithms = keyExchangeAlgorithms
+        self.hostKeyAlgorithms = hostKeyAlgorithms
+        self.allowsLegacyAlgorithms = allowsLegacyAlgorithms
     }
+
+    /// NIOSSH 0.15.2 自带的密钥交换算法，按它的默认顺序（`SSHClientConfiguration.keyExchangeAlgorithms` 的默认值）。
+    public static let builtInKeyExchangeAlgorithms: [String] = [
+        "ecdh-sha2-nistp384", "ecdh-sha2-nistp256", "ecdh-sha2-nistp521",
+        "curve25519-sha256", "curve25519-sha256@libssh.org",
+    ]
+
+    /// NIOSSH 0.15.2 自带的主机密钥算法，按它的默认顺序。
+    public static let builtInHostKeyAlgorithms: [String] = [
+        "ssh-ed25519", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp521",
+    ]
+
+    // MARK: 预设
+
+    /// 只用 NIOSSH 自带的：AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥（今天 app 发出去的就是这一套）。
+    /// RSA 用户密钥照样能用（`rsa-sha2-512` → `rsa-sha2-256`），不报、不接受 RSA 主机密钥。
+    public static let builtInOnly = SSHAlgorithms()
+
+    /// 自带的优先，后面补上 USSHCore 的现代算法：密钥交换 `diffie-hellman-group16-sha512`、
+    /// `diffie-hellman-group14-sha256`，RSA 主机密钥（`rsa-sha2-512`、`rsa-sha2-256`），加密 AES-CTR +
+    /// `hmac-sha2-256` / `hmac-sha2-512`（ETM 在前），排序见 `SSHAlgorithmsPresetSchemes`。
+    public static let standard = SSHAlgorithms(
+        transportProtectionSchemes: Constants.bundledTransportProtectionSchemes
+            + SSHAlgorithmsPresetSchemes.standardAESCTRSchemes,
+        keyExchangeAlgorithms: builtInKeyExchangeAlgorithms + SSHDiffieHellmanAlgorithm.modern.map(\.name),
+        hostKeyAlgorithms: builtInHostKeyAlgorithms + SSHRSASignatureAlgorithm.modern.map(\.name)
+    )
+
+    /// ⚠️ 只为连老设备（旧的网络设备、嵌入式 sshd）：`.standard` 再加 SHA-1 的 `ssh-rsa`（主机密钥与用户认证）、
+    /// `diffie-hellman-group14-sha1`、AES-CTR + `hmac-sha1`（ETM 在前）。要用户明确选用；它会触发进程级的
+    /// `SSHAlgorithms.registerLegacyAlgorithms()`（不影响别的连接，见那里的说明）。
+    public static let legacyCompatible = SSHAlgorithms(
+        transportProtectionSchemes: standard.transportProtectionSchemes
+            + SSHAlgorithmsPresetSchemes.legacyAESCTRSchemes,
+        keyExchangeAlgorithms: standard.keyExchangeAlgorithms + SSHDiffieHellmanAlgorithm.legacy.map(\.name),
+        hostKeyAlgorithms: standard.hostKeyAlgorithms + SSHRSASignatureAlgorithm.legacy.map(\.name),
+        allowsLegacyAlgorithms: true
+    )
+
+    // MARK: 实际交给 NIOSSH 的
+
+    /// 去掉了未经允许的旧算法的加密方式。
+    var effectiveTransportProtectionSchemes: [SSHTransportProtections.Scheme] {
+        guard !allowsLegacyAlgorithms else { return transportProtectionSchemes }
+        let legacy = Set(SSHTransportProtections.legacy.map { ObjectIdentifier($0) })
+        return transportProtectionSchemes.filter { !legacy.contains(ObjectIdentifier($0)) }
+    }
+
+    /// 去掉了未经允许的旧算法的密钥交换算法名。
+    var effectiveKeyExchangeAlgorithms: [String] {
+        guard !allowsLegacyAlgorithms else { return keyExchangeAlgorithms }
+        let legacy = Set(SSHDiffieHellmanAlgorithm.legacy.map(\.name))
+        return keyExchangeAlgorithms.filter { !legacy.contains($0) }
+    }
+
+    /// 去掉了未经允许的旧算法的主机密钥算法名。
+    var effectiveHostKeyAlgorithms: [String] {
+        guard !allowsLegacyAlgorithms else { return hostKeyAlgorithms }
+        let legacy = Set(SSHRSASignatureAlgorithm.legacy.map(\.name))
+        return hostKeyAlgorithms.filter { !legacy.contains($0) }
+    }
+
+    /// 这条连接要不要先登记旧算法（进程级）：只有真的会用到 SHA-1 主机签名或 group14-sha1 时。
+    /// 用户认证的 `ssh-rsa` 签名是本端写出的，不需要登记。
+    var requiresLegacyRegistration: Bool {
+        allowsLegacyAlgorithms
+            && (hostKeyAlgorithms.contains { SSHRSASignatureAlgorithm(name: $0)?.isLegacy == true }
+                || keyExchangeAlgorithms.contains(where: { SSHDiffieHellmanAlgorithm(name: $0)?.isLegacy == true }))
+    }
+}
+
+/// 预设里 USSHCore 的 AES-CTR 组合——要调整预设的加密方式就改这里（`SSHAlgorithmPresetTests` 钉着确切内容）。
+///
+/// 排序：NIOSSH 自带的 AES-GCM 永远在最前（AEAD，不受 Terrapin 影响），然后是 AES-CTR + ETM 的 MAC，最后
+/// AES-CTR + 普通（encrypt-and-MAC）MAC。NIOSSH 按数组里第一次出现的顺序得出加密名与 MAC 名的偏好列表，
+/// 所以 MAC 的偏好是 `hmac-sha2-256-etm` > `hmac-sha2-512-etm` > `hmac-sha2-256` > `hmac-sha2-512`，和 OpenSSH 一样。
+///
+/// 为什么现在能放 ETM 与 `hmac-sha2-512`：
+/// - **strict KEX**（NIOSSH 补丁 0007，Terrapin / CVE-2023-48795 的对策）：受影响的正是 `-etm` 的 MAC 与
+///   chacha20-poly1305。strict KEX 只在对端也支持时生效（OpenSSH 9.6+），对付不支持的老服务器，靠的是 AES-GCM
+///   排在 ETM 前面——双方都有 AES-GCM 时根本协商不到 ETM。
+/// - **RFC 4253 §7.2 的密钥加长**（补丁 0003）：自带的 curve25519 / ECDH 推导会话密钥也会加长了，
+///   要 64 字节 MAC 密钥的 `hmac-sha2-512` 不再握手失败。
+enum SSHAlgorithmsPresetSchemes {
+    private typealias CTR<Cipher: SSHAESCTRCipher, MAC: SSHHMACAlgorithm> = SSHAESCTRTransportProtection<Cipher, MAC>
+
+    /// `.standard`：AES-CTR（256 > 192 > 128）× ETM（SHA2-256 > SHA2-512），再 × 普通 MAC（同序）。
+    static let standardAESCTRSchemes: [SSHTransportProtections.Scheme] = [
+        CTR<SSHAES256CTR, SSHHMACSHA256ETM>.self, CTR<SSHAES256CTR, SSHHMACSHA512ETM>.self,
+        CTR<SSHAES192CTR, SSHHMACSHA256ETM>.self, CTR<SSHAES192CTR, SSHHMACSHA512ETM>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA256ETM>.self, CTR<SSHAES128CTR, SSHHMACSHA512ETM>.self,
+        CTR<SSHAES256CTR, SSHHMACSHA256>.self, CTR<SSHAES256CTR, SSHHMACSHA512>.self,
+        CTR<SSHAES192CTR, SSHHMACSHA256>.self, CTR<SSHAES192CTR, SSHHMACSHA512>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA256>.self, CTR<SSHAES128CTR, SSHHMACSHA512>.self,
+    ]
+
+    /// `.legacyCompatible` 额外加的：AES-CTR × `hmac-sha1-etm@openssh.com`，再 × `hmac-sha1`。
+    static let legacyAESCTRSchemes: [SSHTransportProtections.Scheme] = [
+        CTR<SSHAES256CTR, SSHHMACSHA1ETM>.self, CTR<SSHAES192CTR, SSHHMACSHA1ETM>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA1ETM>.self,
+        CTR<SSHAES256CTR, SSHHMACSHA1>.self, CTR<SSHAES192CTR, SSHHMACSHA1>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA1>.self,
+    ]
 }

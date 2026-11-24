@@ -237,6 +237,11 @@ final class SSHConnectionSetup: Sendable {
     private let installed = NIOLockedValueBox<Installed?>(nil)
 
     init(host: String, port: Int, configuration: SSHClient.Configuration) {
+        // NIOSSH 在建 KEXINIT 时读登记表，所以在装 handler 之前登记（幂等、很快）。
+        SSHAlgorithms.registerStandardAlgorithms()
+        if configuration.algorithms.requiresLegacyRegistration {
+            SSHAlgorithms.registerLegacyAlgorithms()
+        }
         self.host = host
         self.port = port
         self.configuration = configuration
@@ -246,15 +251,19 @@ final class SSHConnectionSetup: Sendable {
     func install(on channel: any Channel) throws {
         let eventLoop = channel.eventLoop
         let clock = SSHHandshakeClock(eventLoop: eventLoop, budget: TimeAmount(configuration.handshakeTimeout))
+        let algorithms = configuration.algorithms
         let hostKeyDelegate = SSHHostKeyDelegate(
             eventLoop: eventLoop, validation: configuration.hostKeyValidation, host: host, port: port,
             timeout: configuration.hostKeyValidationTimeout, clock: clock)
-        let authDelegate = SSHClientAuthDelegate(authentication: configuration.authentication)
+        let authDelegate = SSHClientAuthDelegate(
+            authentication: configuration.authentication, allowsLegacyAlgorithms: algorithms.allowsLegacyAlgorithms)
         var nioConfiguration = SSHClientConfiguration(
             userAuthDelegate: authDelegate,
             serverAuthDelegate: hostKeyDelegate,
             globalRequestDelegate: nil,
-            transportProtectionSchemes: configuration.algorithms.transportProtectionSchemes)
+            transportProtectionSchemes: algorithms.effectiveTransportProtectionSchemes)
+        nioConfiguration.keyExchangeAlgorithms = algorithms.effectiveKeyExchangeAlgorithms
+        nioConfiguration.hostKeyAlgorithms = algorithms.effectiveHostKeyAlgorithms
         nioConfiguration.maximumPacketSize = configuration.effectiveMaximumPacketSize
         nioConfiguration.rekeyLimits = configuration.rekeyLimits
         let remoteForwards = self.remoteForwards

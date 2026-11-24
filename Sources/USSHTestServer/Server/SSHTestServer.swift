@@ -33,6 +33,11 @@ public final class SSHTestServer: Sendable {
                              group: (any EventLoopGroup)? = nil,
                              bindHost: String = "127.0.0.1",
                              port: Int = 0) async throws -> SSHTestServer {
+        // NIOSSH 的算法登记是进程级的：服务端要认 RSA 用户签名、提供 RSA 主机密钥或 DH，同样先登记。
+        SSHAlgorithms.registerStandardAlgorithms()
+        if configuration.requiresLegacyRegistration {
+            SSHAlgorithms.registerLegacyAlgorithms()
+        }
         let state = SSHTestServerState(configuration: configuration)
         let bootstrap = ServerBootstrap(group: group ?? MultiThreadedEventLoopGroup.singleton)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
@@ -47,7 +52,7 @@ public final class SSHTestServer: Sendable {
             try? await listener.close()
             throw ChannelError.unknownLocalAddress
         }
-        return SSHTestServer(host: bindHost, port: boundPort, hostPublicKey: configuration.hostKey.publicKey,
+        return SSHTestServer(host: bindHost, port: boundPort, hostPublicKey: configuration.effectiveHostKeys[0].publicKey,
                              state: state, listener: listener)
     }
 
@@ -200,11 +205,18 @@ final class SSHTestServerState: Sendable {
 
         let forwarding = SSHTestRemoteForwarding(state: self, eventLoop: channel.eventLoop)
         var serverConfiguration = SSHServerConfiguration(
-            hostKeys: [configuration.hostKey],
+            hostKeys: configuration.effectiveHostKeys,
             userAuthDelegate: SSHTestAuthDelegate(state: self, eventLoop: channel.eventLoop),
             globalRequestDelegate: forwarding)
         serverConfiguration.maximumPacketSize = configuration.maximumPacketSize
         serverConfiguration.rekeyLimits = configuration.rekeyLimits
+        if let keyExchangeAlgorithms = configuration.keyExchangeAlgorithms {
+            serverConfiguration.keyExchangeAlgorithms = keyExchangeAlgorithms
+        }
+        serverConfiguration.serverSignatureAlgorithms = configuration.serverSignatureAlgorithms
+        if let schemes = configuration.transportProtectionSchemes {
+            serverConfiguration.transportProtectionSchemes = schemes
+        }
         let handler = NIOSSHHandler(
             role: .server(serverConfiguration),
             allocator: channel.allocator,
@@ -299,18 +311,28 @@ final class SSHTestAuthDelegate: NIOSSHServerUserAuthenticationDelegate {
     func requestReceived(request: NIOSSHUserAuthenticationRequest,
                          responsePromise: EventLoopPromise<NIOSSHUserAuthenticationOutcome>) {
         let method: SSHTestAuthAttempt.Method
+        var rsaAlgorithm: SSHRSASignatureAlgorithm?
         switch request.request {
         case .password(let password): method = .password(password.password)
-        case .publicKey(let key): method = .publicKey(key.publicKey)
+        case .publicKey(let key):
+            method = .publicKey(key.publicKey)
+            // NIOSSH 刚在同一个调用栈里验过签名，记录还在本线程上（见 `SSHRSAVerificationRecord`）。
+            if key.publicKey.rsaPublicKey != nil {
+                var blob = ByteBuffer()
+                key.publicKey.write(to: &blob)
+                rsaAlgorithm = SSHRSAVerificationRecord.take(keyBlob: Array(blob.readableBytesView))
+            }
         case .none, .hostBased: method = .none
         }
         let state = self.state
         let username = request.username
+        let rsaSignatureAlgorithm = rsaAlgorithm
         Task {
             if let delay = state.configuration.faults.authenticationDelay {
                 try? await Task.sleep(for: delay)
             }
-            var attempt = SSHTestAuthAttempt(username: username, method: method, accepted: false)
+            var attempt = SSHTestAuthAttempt(
+                username: username, method: method, rsaSignatureAlgorithm: rsaSignatureAlgorithm, accepted: false)
             let supported = state.configuration.authentication.supportedMethods
             let methodSupported: Bool
             switch method {
