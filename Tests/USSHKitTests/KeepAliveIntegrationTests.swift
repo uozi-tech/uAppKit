@@ -49,6 +49,32 @@ final class KeepAliveIntegrationTests: XCTestCase {
         return limit
     }
 
+    /// 本机端口还被占着（绑不上）。
+    private func portIsReserved(_ port: Int) async -> Bool {
+        do {
+            // SO_REUSEADDR：已经关掉的连接留下的 TIME_WAIT 不算「占着」，还在监听的才算。
+            let channel = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+                .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+                .bind(host: "127.0.0.1", port: port).get()
+            try? await channel.close()
+            return false
+        } catch {
+            return true
+        }
+    }
+
+    /// 隧道死了之后连本地端口：要么连不上，要么连上就被关掉、读不到任何东西（不会在死连接上开通道）。
+    private func assertLateConnectionGoesNowhere(_ port: Int, file: StaticString = #filePath, line: UInt = #line) async {
+        do {
+            let late = try await connectLocal(port: port)
+            let got = try? await late.executeThenClose { inbound, _ -> ByteBuffer? in
+                var iterator = inbound.makeAsyncIterator()
+                return try await iterator.next()
+            }
+            XCTAssertNil(got ?? nil, "隧道死了，本地端口还在转发", file: file, line: line)
+        } catch {}
+    }
+
     // MARK: - 隧道
 
     func testTunnelKeepAliveDetectsAFrozenLinkAndTearsTheTunnelDown() async throws {
@@ -86,12 +112,13 @@ final class KeepAliveIntegrationTests: XCTestCase {
         XCTAssertEqual(reasons.all.count, 1)
         let reason = await tunnel.disconnectReason
         guard case .keepAliveTimeout = reason else { return XCTFail("disconnectReason：\(String(describing: reason))") }
-        // 监听已经收掉：本机端口不再接连接（不会再在死连接上开通道）。
-        do {
-            let late = try await connectLocal(port: local.port)
-            try? await late.channel.close()
-            XCTFail("隧道死了，本地端口还在接连接")
-        } catch {}
+        // 不再转发，但端口留着（不还给系统，免得被别的进程绑上、收到 app 连接池发来的东西），close() 才释放。
+        await assertLateConnectionGoesNowhere(local.port)
+        let reserved = await portIsReserved(local.port)
+        XCTAssertTrue(reserved, "SSH 断了之后本地端口不该还给系统")
+        await tunnel.close()
+        let released = await portIsReserved(local.port)
+        XCTAssertFalse(released, "close() 之后端口要释放")
     }
 
     func testTunnelWithoutKeepAliveDoesNotNoticeAFrozenLink() async throws {
@@ -120,11 +147,9 @@ final class KeepAliveIntegrationTests: XCTestCase {
         let isUp = await tunnel.isConnected
         XCTAssertFalse(isUp)
         guard case .remoteClosed = reasons.all.first else { return XCTFail("\(reasons.all)") }
-        do {
-            let late = try await connectLocal(port: local.port)
-            try? await late.channel.close()
-            XCTFail("隧道死了，本地端口还在接连接")
-        } catch {}
+        await assertLateConnectionGoesNowhere(local.port)
+        let reserved = await portIsReserved(local.port)
+        XCTAssertTrue(reserved)
     }
 
     func testLocalCloseIsNotReportedAsADisconnect() async throws {
