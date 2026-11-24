@@ -29,6 +29,12 @@ public struct SSHServerConfiguration {
     /// Supported data encryption algorithms
     public var transportProtectionSchemes: [NIOSSHTransportProtection.Type]
 
+    /// The key exchange methods to offer, in order of preference. Defaults to NIOSSH's built-in methods.
+    ///
+    /// Names of methods registered with `NIOSSHAlgorithms.register(keyExchangeAlgorithm:)` may be added; names
+    /// that are neither built in nor registered are not offered.
+    public var keyExchangeAlgorithms: [String] = SSHKeyExchangeStateMachine.defaultKeyExchangeAlgorithms
+
     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).

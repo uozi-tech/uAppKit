@@ -129,7 +129,7 @@ struct SSHKeyExchangeStateMachine {
 
         return .init(
             cookie: rng.randomCookie(allocator: self.allocator),
-            keyExchangeAlgorithms: Self.supportedKeyExchangeAlgorithms,
+            keyExchangeAlgorithms: self.configuredKeyExchangeAlgorithms,
             serverHostKeyAlgorithms: self.supportedHostKeyAlgorithms,
             encryptionAlgorithmsClientToServer: encryptionAlgorithms,
             encryptionAlgorithmsServerToClient: encryptionAlgorithms,
@@ -458,13 +458,13 @@ struct SSHKeyExchangeStateMachine {
 
         switch self.role {
         case .client:
-            clientAlgorithms = Self.supportedKeyExchangeAlgorithms
+            clientAlgorithms = self.configuredKeyExchangeAlgorithms
             serverAlgorithms = peerKeyExchangeAlgorithms
             clientHostKeyAlgorithms = self.supportedHostKeyAlgorithms
             serverHostKeyAlgorithms = peerHostKeyAlgorithms
         case .server:
             clientAlgorithms = peerKeyExchangeAlgorithms
-            serverAlgorithms = Self.supportedKeyExchangeAlgorithms
+            serverAlgorithms = self.configuredKeyExchangeAlgorithms
             clientHostKeyAlgorithms = peerHostKeyAlgorithms
             serverHostKeyAlgorithms = self.supportedHostKeyAlgorithms
         }
@@ -553,14 +553,31 @@ struct SSHKeyExchangeStateMachine {
             }
         }
 
+        // A registered custom method (see `CustomKeyExchange.swift`)?
+        if let exchanger = Self.customExchanger(
+            for: algorithm,
+            role: self.role,
+            previousSessionIdentifier: self.previousSessionIdentifier
+        ) {
+            return exchanger
+        }
+
         // Huh, we didn't find it. Weird error.
         throw NIOSSHError.keyExchangeNegotiationFailure
+    }
+
+    /// The key exchange methods from the configuration, in order of preference, keeping only those we can run:
+    /// built-in ones and registered custom ones.
+    private var configuredKeyExchangeAlgorithms: [Substring] {
+        self.role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
+            Self.supportedKeyExchangeAlgorithms.contains(name) || NIOSSHAlgorithms.keyExchangeType(named: name) != nil
+        }
     }
 
     private func expectingIncorrectGuess(_ kexMessage: SSHMessage.KeyExchangeMessage) -> Bool {
         // A guess is wrong if the key exchange algorithm and/or the host key algorithm differ from our preference.
         kexMessage.firstKexPacketFollows
-            && (kexMessage.keyExchangeAlgorithms.first != Self.supportedKeyExchangeAlgorithms.first
+            && (kexMessage.keyExchangeAlgorithms.first != self.configuredKeyExchangeAlgorithms.first
                 || kexMessage.serverHostKeyAlgorithms.first != self.supportedHostKeyAlgorithms.first)
     }
 
