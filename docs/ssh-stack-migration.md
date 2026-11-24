@@ -237,6 +237,16 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 | `.authenticationFailed`、`.authenticationDelegateFailed` | `.authenticationFailed` | 否 |
 | `.hostKeyRejected`、`.hostKeyValidationTimeout` | `.hostKeyRejected` | 否 |
 
+**经跳板机时**两跳的失败都包成 `SSHConnectionError.jumpHostFailed(String, cause: SSHConnectionError?)`（签名从
+`jumpHostFailed(String)` 改成这样，`cause` 有默认值 `nil`，`.jumpHostFailed("…")` 的构造照常编译）。`String` 是给用户看的整句，
+和以前一字不差；`cause` 是那一跳的失败按上表归的类：`.authenticationFailed` / `.hostKeyRejected` / `.handshakeFailed` 是配置
+问题、别自动重试（反复认证会触发锁号、反复弹信任框），`.connectFailed` 是网络问题（跳板机连不上目标、拒绝开 direct-tcpip、
+开通道超时也归这里）。目标那一跳私钥导入失败时 `cause` 是 `.authenticationFailed`。app 要改的：
+- 模式匹配改成 `case .jumpHostFailed(let message, _)` / `case .jumpHostFailed(_, let cause)`。旧写法 `case .jumpHostFailed(let message)`
+  还能编译（只报弃用警告），但 `message` 会变成 `(String, cause: SSHConnectionError?)` 元组——拿去当 `String` 用会编译失败，
+  插值进字符串则**悄悄变成元组的样子**，务必全改；
+- uTerm 的断线分类（`SSHTransportFailure` 一类）对 `jumpHostFailed` 改看 `cause`，按上表决定重不重试。
+
 ### 7.2 开通道被拒（`SSHChannelOpenFailure.reason`）
 
 | 原因 | 用户看到（`SSHChannelError.errorDescription`） | `SSHForwardingChannelFailure.Kind`（转发场景的文案） |

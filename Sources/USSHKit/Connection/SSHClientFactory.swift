@@ -239,8 +239,10 @@ nonisolated enum SSHClientFactory {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // `connectDirect` 抛的已经是归好类的 `SSHConnectionError`。
             throw SSHConnectionError.jumpHostFailed(
-                String(localized: "无法连接 \(bastionHop.host):\(String(bastionHop.port)) —— \(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
+                String(localized: "无法连接 \(bastionHop.host):\(String(bastionHop.port)) —— \(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle),
+                cause: (try? connectionError(for: error)) ?? .connectFailed(SSHErrorText.describe(error))
             )
         }
 
@@ -252,14 +254,23 @@ nonisolated enum SSHClientFactory {
         } catch let error as SSHConnectionError {
             // 组配置时的失败（私钥导入等）。
             await bastion.close()
-            throw SSHConnectionError.jumpHostFailed(SSHErrorText.describe(error))
+            throw SSHConnectionError.jumpHostFailed(SSHErrorText.describe(error), cause: error)
         } catch {
             await bastion.close()
             if error is CancellationError { throw error }
             throw SSHConnectionError.jumpHostFailed(
-                String(localized: "经跳板机连接 \(target.host):\(String(target.port)) 失败 —— \(jumpFailureDetail(error, target: target))", bundle: ModuleBundle.bundle)
+                String(localized: "经跳板机连接 \(target.host):\(String(target.port)) 失败 —— \(jumpFailureDetail(error, target: target))", bundle: ModuleBundle.bundle),
+                cause: jumpFailureCause(error)
             )
         }
+    }
+
+    /// 内层那一跳的失败按直连归类；跳板机拒绝开 direct-tcpip（RFC 4254 的原因码）与开通道超时归 `.connectFailed`。
+    private static func jumpFailureCause(_ error: any Error) -> SSHConnectionError {
+        if case SSHChannelError.openRejected(let failure) = error {
+            return .connectFailed(SSHErrorText.describe(failure))
+        }
+        return (try? connectionError(for: error)) ?? .connectFailed(SSHErrorText.describe(error))
     }
 
     /// 内层那一跳的失败：跳板机拒绝开 direct-tcpip 时按 RFC 4254 的原因码说人话
