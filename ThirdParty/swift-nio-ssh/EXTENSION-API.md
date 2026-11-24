@@ -3,7 +3,7 @@
 补丁 0005 / 0006（见 [PATCHES.md](PATCHES.md)）给 NIOSSH 开的两个口子：NIOSSH 自己不带的公钥算法与密钥交换算法，
 在 NIOSSH 之外实现、登记进来（第一、二节）。补丁 0007 / 0008 加的 strict KEX 与 `server-sig-algs`（第三、四节）
 不需要登记，但改变了线上行为、多了两个公开入口。补丁 0009–0011 的三处小 API（全局请求、OPEN_FAILURE 原因码、
-认证用完的错误）在第五节。这里是**全部新增的公开 API**（以 `Sources/NIOSSH` 里的源码为准，
+认证用完的错误）在第五节，0012 / 0013 的重新密钥交换在第六节。这里是**全部新增的公开 API**（以 `Sources/NIOSSH` 里的源码为准，
 文档注释更细）。下面的代码都在 `import NIOSSH` 之后；测试里的玩具实现见
 `Tests/NIOSSHTests/CustomKeyTests.swift`、`CustomKeyExchangeTests.swift`、`StrictKeyExchangeTests.swift`、
 `ExtensionInfoTests.swift`。
@@ -11,9 +11,10 @@
 ## 通用规则
 
 - 注册表**进程级**、加锁、线程安全，只增不减（测试用的复位函数是 `internal` 的）。在建任何连接之前登记完；
-  连接协商时才读注册表。
-- 重复登记同一个类型（或同一对类型）什么都不做。名字和内置算法重名、或同一个名字登记给两个不同的类型，是编程
-  错误（`precondition`）。
+  每次密钥交换开始时（状态机创建时）读一次、取快照，这次交换的 KEXINIT 与协商都用这份快照。
+- 重复登记同一个类型（或同一对类型）什么都不做。名字和内置名字重名（内置密钥类型、4 个
+  `*-cert-v01@openssh.com` 证书类型、内置密钥交换算法、`kex-strict-*` / `ext-info-*` 标记）、或同一个名字登记给
+  两个不同的类型，是编程错误（`precondition`）。
 - 所有协议都是 `Sendable` 的（密钥交换协议只要求元类型 `SendableMetatype`，实例只在一个 event loop 上用）。
 
 ## 一、公钥 / 私钥 / 签名（`Keys And Signatures/CustomKeys.swift`）
@@ -99,8 +100,9 @@ extension NIOSSHPrivateKey {
   签名都能解析；没登记的照旧抛 `NIOSSHError` 的 `.unknownPublicKey` / `.unknownSignature`。写出不需要登记。
 - 相等与哈希：自定义公钥 / 签名按（格式名或算法名, `rawRepresentation`）比较，永远不等于内置密钥。
   `String(openSSHPublicKey:)` 以密钥格式名开头。
-- 客户端：KEXINIT 的 `server_host_key_algorithms` = 内置算法（原顺序）+ 已登记算法名（登记顺序）。**登记即启用**，
-  没有按连接关掉的开关。主机回复里要求：(主机密钥类型, 协商的算法) 已登记，且签名的 `signaturePrefix` 就是协商的
+- 客户端：KEXINIT 的 `server_host_key_algorithms` 默认 = 内置算法（原顺序）+ 已登记算法名（登记顺序），即
+  **登记即启用**；`SSHClientConfiguration.hostKeyAlgorithms: [String]?` 可以按连接挑选、排序（nil = 默认，未知名字
+  丢弃），报出的、协商的、验签时接受的都只来自它。主机回复里要求：(主机密钥类型, 协商的算法) 已登记，且签名的 `signaturePrefix` 就是协商的
   算法，否则 `.invalidHostKeyForKeyExchange`；然后用 `isValidSignature` 验 H。
 - 客户端 userauth：`.privateKey(.init(privateKey: NIOSSHPrivateKey(custom: k)))` 时，请求与待签数据里的算法名取
   `K.keyPrefix`，公钥 blob 用公钥的格式名。用哪个 RSA 算法，按服务端的 `server-sig-algs` 挑（第四节）；服务端没发
@@ -110,7 +112,20 @@ extension NIOSSHPrivateKey {
   只来自 `hostKeys`：同一把密钥要以几个算法提供，就放几个 `NIOSSHPrivateKey(custom:)`（每个算法一个私钥类型），
   协商到哪个算法就用排在前面、支持它的那个签名。
 - 证书：自定义密钥不能当被证书认证的公钥（`NIOSSHCertifiedPublicKey` 构造时抛 `.invalidCertificate`）；
-  可以当签发证书的 CA 密钥。
+  可以当签发证书的 CA 密钥。`validate(principal:type:allowedAuthoritySigningKeys:acceptableCriticalOptions:
+  allowedSignatureAlgorithms: [String]? = nil)`：CA 签名的算法必须属于 CA 密钥（自定义密钥要对其类型登记过），
+  给了 `allowedSignatureAlgorithms` 还必须在其中（通常传连接的 `hostKeyAlgorithms`），否则 `.invalidCertificate`。
+
+```swift
+extension SSHClientConfiguration {
+    /// 要报出和接受的主机密钥算法，按偏好排列。nil（默认）= 内置算法 + 全部已登记算法（登记顺序）。
+    public var hostKeyAlgorithms: [String]?
+}
+// 只为这一台老主机接受 SHA-1 的 ssh-rsa：
+configuration.hostKeyAlgorithms = ["ssh-ed25519", "ecdsa-sha2-nistp256", "rsa-sha2-512", "rsa-sha2-256", "ssh-rsa"]
+// 其他连接：
+configuration.hostKeyAlgorithms = ["ssh-ed25519", "ecdsa-sha2-nistp256", "rsa-sha2-512", "rsa-sha2-256"]
+```
 
 ### 例子（RSA 的形状；签名算法本身省略）
 
@@ -203,8 +218,9 @@ public protocol NIOSSHKeyExchangeAlgorithmProtocol: _NIOSSHSendableMetatype {
     /// 每次交换会读不止一次：在 init() 里算好存起来。
     var publicValue: [UInt8] { get }
     /// 由对端公开值（编码规则同上；.mpint 时已去掉前导 0）算共享秘密 K，返回无符号大端数值。
-    /// 每次交换调一次。在这里校验对端值（DH：1 < f < p-1），不合格就抛错，交换随之失败。K 为 0 时 NIOSSH 拒绝
-    /// （`.weakSharedSecret`）。
+    /// 每次交换调一次。在这里校验对端值（DH：1 < f < p-1），不合格就抛错，交换随之失败。兜底：NIOSSH 在调用前
+    /// 拒绝空的对端值（.mpint 还拒绝 0 与 1，`.invalidSSHMessage`），之后拒绝 K = 0 或 1（`.weakSharedSecret`）；
+    /// 上界 p-1 只有实现知道。
     mutating func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8]
 }
 
@@ -398,6 +414,34 @@ extension NIOSSHError.ErrorType {
 - **半关闭**（补丁 0004）：对端先发 EOF 之后，我方照常写数据、再 `close(mode: .output)` 发 EOF 是合法的，channel
   不再被拆掉；之后 `close()` 干净关闭。
 - **closeFuture**（补丁 0002）：child channel 的 `closeFuture` 永不失败，出错的原因看 `errorCaught`。
+
+## 六、重新密钥交换（补丁 0012 / 0013）
+
+```swift
+extension NIOSSHHandler {
+    /// 连接已建立且没有进行中的交换（不论谁发起）时发起一次重新密钥交换并返回 true，否则什么也不做、返回 false。
+    /// 只能在 channel 的 event loop 上调用。
+    @discardableResult public func rekey() -> Bool
+}
+
+public struct NIOSSHRekeyLimits: Hashable, Sendable {
+    public var packets: UInt64?   // 任一方向在当前密钥下的加密包数；nil = 不按包数
+    public var bytes: UInt64?     // 任一方向在当前密钥下的加密字节数；nil = 不按字节
+    public init(packets: UInt64?, bytes: UInt64?)
+    public static let `default`: NIOSSHRekeyLimits   // 2^31 个包或 1 GiB
+    public static let disabled: NIOSSHRekeyLimits    // 从不自动交换
+}
+
+extension SSHClientConfiguration { public var rekeyLimits: NIOSSHRekeyLimits }   // 默认 .default
+extension SSHServerConfiguration { public var rekeyLimits: NIOSSHRekeyLimits }   // 默认 .default
+```
+
+- 到达上限就由 NIOSSH 自己发起，计数每次换密钥清零；交换进行中不会再发起，双方同时发起合成一次交换。
+- 重新交换期间（我方 KEXINIT 之后、NEWKEYS 之前）child channel 的写入由 handler 按顺序排队，交换完成后发出，
+  写入的 promise 到那时才完成；连接断开时以 `ChannelError.eof` 失败。对端发起的交换也一样（以前这些写入直接以
+  `protocolViolation` 失败）。
+- 客户端层：用序号算 MAC 的自定义传输保护（AES-CTR + `hmac-*` / `*-etm`）保持默认上限即可；想按时间换密钥（RFC 4253
+  §9 建议每小时一次），自己定时调 `rekey()`。
 
 ## 给实现方的提醒
 
