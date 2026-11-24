@@ -242,11 +242,14 @@ extension SSHMessage.UserAuthRequestMessage {
 
         switch request.offer {
         case .privateKey(let privateKeyRequest):
+            // A custom key names the algorithm it signs with, which need not be its key prefix.
+            self.publicKeyAlgorithm = privateKeyRequest.privateKey.customAlgorithmName
             let dataToSign = UserAuthSignablePayload(
                 sessionIdentifier: sessionID,
                 userName: self.username,
                 serviceName: self.service,
-                publicKey: privateKeyRequest.publicKey
+                publicKey: privateKeyRequest.publicKey,
+                publicKeyAlgorithm: self.publicKeyAlgorithm
             )
             let signature = try privateKeyRequest.privateKey.sign(dataToSign)
             self.method = .publicKey(.known(key: privateKeyRequest.publicKey, signature: signature))

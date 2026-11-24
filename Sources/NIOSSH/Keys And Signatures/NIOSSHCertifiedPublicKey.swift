@@ -361,6 +361,8 @@ extension NIOSSHCertifiedPublicKey {
             return Self.p521KeyPrefix
         case .certified:
             preconditionFailure("base key cannot be certified")
+        case .custom:
+            preconditionFailure("custom keys cannot be certified")
         }
     }
 
@@ -474,6 +476,9 @@ extension NIOSSHCertifiedPublicKey {
                 if case .certified = newValue.backingKey {
                     preconditionFailure("Certificate may not use certified key as public key")
                 }
+                if case .custom = newValue.backingKey {
+                    preconditionFailure("Certificate may not use a custom key as public key")
+                }
             }
         }
 
@@ -511,6 +516,11 @@ extension NIOSSHCertifiedPublicKey {
             // recursive.
             if case .certified = key.backingKey {
                 throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not use certified key as public key")
+            }
+            // Certifying custom keys would need certificate key types for them (`*-cert-v01@openssh.com`), which
+            // the custom key extension point does not provide. A custom key may still sign certificates.
+            if case .custom = key.backingKey {
+                throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not use a custom key as public key")
             }
             if case .certified = signatureKey.backingKey {
                 throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not be signed by certified key")

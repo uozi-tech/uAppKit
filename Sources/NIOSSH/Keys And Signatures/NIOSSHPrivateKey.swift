@@ -73,6 +73,8 @@ public struct NIOSSHPrivateKey: Sendable {
         case .secureEnclaveP256:
             return ["ecdsa-sha2-nistp256"]
         #endif
+        case .custom(let key):
+            return [Substring(type(of: key).keyPrefix)]
         }
     }
 }
@@ -88,6 +90,8 @@ extension NIOSSHPrivateKey {
         #if canImport(Darwin)
         case secureEnclaveP256(SecureEnclave.P256.Signing.PrivateKey)
         #endif
+
+        case custom(any NIOSSHPrivateKeyProtocol)  // See `CustomKeys.swift`.
     }
 }
 
@@ -122,6 +126,11 @@ extension NIOSSHPrivateKey {
             }
             return NIOSSHSignature(backingSignature: .ecdsaP256(signature))
         #endif
+        case .custom(let key):
+            let signature = try digest.withUnsafeBytes { ptr in
+                try key.signature(for: ptr)
+            }
+            return NIOSSHSignature(backingSignature: .custom(signature))
         }
     }
 
@@ -144,6 +153,9 @@ extension NIOSSHPrivateKey {
             let signature = try key.signature(for: payload.bytes.readableBytesView)
             return NIOSSHSignature(backingSignature: .ecdsaP256(signature))
         #endif
+        case .custom(let key):
+            let signature = try key.signature(for: payload.bytes.readableBytesView)
+            return NIOSSHSignature(backingSignature: .custom(signature))
         }
     }
 }
@@ -164,6 +176,8 @@ extension NIOSSHPrivateKey {
         case .secureEnclaveP256(let privateKey):
             return NIOSSHPublicKey(backingKey: .ecdsaP256(privateKey.publicKey))
         #endif
+        case .custom(let privateKey):
+            return NIOSSHPublicKey(backingKey: .custom(privateKey.publicKey))
         }
     }
 }

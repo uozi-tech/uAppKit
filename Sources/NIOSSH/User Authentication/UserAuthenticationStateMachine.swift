@@ -505,7 +505,8 @@ extension UserAuthenticationStateMachine {
                 sessionIdentifier: sessionID,
                 userName: request.username,
                 serviceName: request.service,
-                publicKey: key
+                publicKey: key,
+                publicKeyAlgorithm: request.publicKeyAlgorithm
             )
             let supportedMethods = delegate.supportedAuthenticationMethods
 
@@ -532,7 +533,9 @@ extension UserAuthenticationStateMachine {
         case .publicKey(.known(key: let key, signature: .none)):
             // This is a weird wrinkle in public key auth: it's a request to ask whether a given key is valid, but not to validate that key itself.
             // For now we do a shortcut: we just say that all keys are acceptable, rather than ask the delegate.
-            return self.loop.makeSucceededFuture(.publicKeyOK(.init(key: key)))
+            return self.loop.makeSucceededFuture(
+                .publicKeyOK(.init(key: key, publicKeyAlgorithm: request.publicKeyAlgorithm))
+            )
 
         case .publicKey(.unknown):
             // We don't known the algorithm, the auth attempt has failed.

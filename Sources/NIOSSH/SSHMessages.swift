@@ -156,6 +156,10 @@ extension SSHMessage {
         var username: String
         var service: String
         var method: Method
+
+        /// The public key algorithm name of a `.publicKey` request whose key is custom (see `CustomKeys.swift`),
+        /// where it need not equal the key's prefix. `nil` means the key prefix, as for every built-in key.
+        var publicKeyAlgorithm: String? = nil
     }
 
     struct UserAuthFailureMessage: Equatable {
@@ -186,6 +190,9 @@ extension SSHMessage {
         static let id: UInt8 = 60
 
         var key: NIOSSHPublicKey
+
+        /// As `UserAuthRequestMessage.publicKeyAlgorithm`: echoed from the request, `nil` means the key prefix.
+        var publicKeyAlgorithm: String? = nil
     }
 
     struct GlobalRequestMessage: Equatable {
@@ -666,6 +673,7 @@ extension ByteBuffer {
             }
 
             let method: SSHMessage.UserAuthRequestMessage.Method
+            var publicKeyAlgorithm: String? = nil
             switch methodRawValue {
             case "none":
                 method = .none
@@ -694,8 +702,11 @@ extension ByteBuffer {
                         return nil
                     }
 
-                    guard algorithmName.readableBytesView.elementsEqual(publicKey.keyPrefix) else {
+                    guard publicKey.isUsable(withAlgorithm: algorithmName.readableBytesView, signature: nil) else {
                         throw NIOSSHError.invalidSSHMessage(reason: "algorithm and key mismatch in user auth request")
+                    }
+                    if case .custom = publicKey.backingKey {
+                        publicKeyAlgorithm = String(buffer: algorithmName)
                     }
 
                     if expectSignature {
@@ -703,6 +714,10 @@ extension ByteBuffer {
                             let signature = try signatureBytes.readSSHSignature()
                         else {
                             return nil
+                        }
+                        guard publicKey.isUsable(withAlgorithm: algorithmName.readableBytesView, signature: signature)
+                        else {
+                            throw NIOSSHError.invalidSSHMessage(reason: "algorithm and signature mismatch in user auth request")
                         }
 
                         method = .publicKey(.known(key: publicKey, signature: signature))
@@ -723,7 +738,12 @@ extension ByteBuffer {
                 return nil
             }
 
-            return SSHMessage.UserAuthRequestMessage(username: username, service: service, method: method)
+            return SSHMessage.UserAuthRequestMessage(
+                username: username,
+                service: service,
+                method: method,
+                publicKeyAlgorithm: publicKeyAlgorithm
+            )
         }
     }
 
@@ -771,8 +791,11 @@ extension ByteBuffer {
             }
 
             // Validate consistency here.
-            guard publicKeyType.readableBytesView.elementsEqual(publicKey.keyPrefix) else {
+            guard publicKey.isUsable(withAlgorithm: publicKeyType.readableBytesView, signature: nil) else {
                 throw NIOSSHError.invalidSSHMessage(reason: "inconsistent key type")
+            }
+            if case .custom = publicKey.backingKey {
+                return .init(key: publicKey, publicKeyAlgorithm: String(buffer: publicKeyType))
             }
 
             return .init(key: publicKey)
@@ -1373,7 +1396,7 @@ extension ByteBuffer {
         case .publicKey(.known(key: let key, signature: let signature)):
             writtenBytes += self.writeSSHString("publickey".utf8)
             writtenBytes += self.writeSSHBoolean(signature != nil)
-            writtenBytes += self.writeSSHString(key.keyPrefix)
+            writtenBytes += self.writeSSHString(message.publicKeyAlgorithm?.utf8 ?? key.keyPrefix)
             writtenBytes += self.writeCompositeSSHString { buffer in
                 buffer.writeSSHHostKey(key)
             }
@@ -1407,7 +1430,7 @@ extension ByteBuffer {
 
     mutating func writeUserAuthPKOKMessage(_ message: SSHMessage.UserAuthPKOKMessage) -> Int {
         var writtenBytes = 0
-        writtenBytes += self.writeSSHString(message.key.keyPrefix)
+        writtenBytes += self.writeSSHString(message.publicKeyAlgorithm?.utf8 ?? message.key.keyPrefix)
         writtenBytes += self.writeCompositeSSHString { buffer in
             buffer.writeSSHHostKey(message.key)
         }

@@ -289,7 +289,14 @@ struct SSHKeyExchangeStateMachine {
         case .keyExchangeInitSent(exchange: var exchanger, let negotiated):
             switch self.role {
             case .client:
-                guard message.hostKey.keyPrefix.elementsEqual(negotiated.negotiatedHostKeyAlgorithm.utf8) else {
+                // A custom host key may be used with an algorithm other than its key prefix (an `ssh-rsa` key
+                // negotiated as `rsa-sha2-512`); its signature must then be of that algorithm.
+                guard
+                    message.hostKey.isUsable(
+                        withAlgorithm: negotiated.negotiatedHostKeyAlgorithm.utf8,
+                        signature: message.signature
+                    )
+                else {
                     throw NIOSSHError.invalidHostKeyForKeyExchange(
                         expected: negotiated.negotiatedHostKeyAlgorithm,
                         got: message.hostKey.keyPrefix
@@ -561,7 +568,9 @@ struct SSHKeyExchangeStateMachine {
     private var supportedHostKeyAlgorithms: [Substring] {
         switch self.role {
         case .client:
+            // Registered custom algorithms follow the built-in ones.
             return Self.supportedServerHostKeyAlgorithms
+                + NIOSSHAlgorithms.registeredPublicKeyAlgorithms.map { Substring($0) }
         case .server(let configuration):
             return configuration.hostKeys.flatMap { $0.hostKeyAlgorithms }
         }
