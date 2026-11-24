@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -24,8 +26,16 @@ struct SSHPacketSerializer {
     private var state: State = .initialized
     private(set) var sequenceNumber: UInt32 = 0
 
+    /// Set once strict key exchange was negotiated: from then on every new set of keys restarts the sequence
+    /// number at zero (OpenSSH PROTOCOL §1.10).
+    private var resetsSequenceNumberWithNewKeys = false
+
     /// Encryption schemes can be added to a packet serializer whenever encryption is negotiated.
-    mutating func addEncryption(_ protection: NIOSSHTransportProtection) {
+    mutating func addEncryption(_ protection: NIOSSHTransportProtection, strictKeyExchange: Bool = false) {
+        self.resetsSequenceNumberWithNewKeys = self.resetsSequenceNumberWithNewKeys || strictKeyExchange
+        if self.resetsSequenceNumberWithNewKeys {
+            self.sequenceNumber = 0
+        }
         switch self.state {
         case .cleartext:
             self.state = .encrypted(protection)

@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 protocol AcceptsKeyExchangeMessages {
@@ -23,6 +25,14 @@ extension AcceptsKeyExchangeMessages {
         _ message: SSHMessage.KeyExchangeMessage
     ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
         let message = try self.keyExchangeStateMachine.handle(keyExchange: message)
+
+        // Strict key exchange: the peer's KEXINIT must have been its first packet.
+        if self.keyExchangeStateMachine.isStrictKeyExchange, self.parser.sequenceNumber != 1 {
+            throw NIOSSHError.protocolViolation(
+                protocolName: "key exchange",
+                violation: "strict KEX violation: KEXINIT was not the first packet"
+            )
+        }
 
         if let message = message {
             return .emitMessage(message)
@@ -53,6 +63,17 @@ extension AcceptsKeyExchangeMessages {
     mutating func receiveNewKeysMessage() throws {
         // Received a new keys message. Apply the encryption keys to the parser.
         let result = try self.keyExchangeStateMachine.handleNewKeys()
-        self.parser.addEncryption(result)
+        self.parser.addEncryption(result, strictKeyExchange: self.keyExchangeStateMachine.isStrictKeyExchange)
+    }
+
+    /// Strict key exchange: during the initial key exchange only key exchange messages are allowed, not even
+    /// SSH_MSG_IGNORE or SSH_MSG_DEBUG.
+    func validateNonKeyExchangeMessage(_ message: SSHMessage) throws {
+        if self.keyExchangeStateMachine.isStrictKeyExchange {
+            throw NIOSSHError.protocolViolation(
+                protocolName: "key exchange",
+                violation: "strict KEX violation: unexpected message during initial key exchange: \(message)"
+            )
+        }
     }
 }

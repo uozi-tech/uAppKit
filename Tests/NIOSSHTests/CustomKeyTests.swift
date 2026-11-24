@@ -522,8 +522,10 @@ final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
         XCTAssertNoThrow(try self.channel.client.pipeline.syncOperations.addHandler(successes))
         XCTAssertNoThrow(try self.channel.activate())
         // The server does not know the algorithm: it answers with a failure without consulting its delegate, the
-        // client has nothing else to offer, and the connection never authenticates. Nothing traps.
-        XCTAssertNoThrow(try self.channel.interactInMemory())
+        // client has nothing else to offer, and authentication fails cleanly. Nothing traps.
+        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .noFurtherAuthenticationOffers)
+        }
         XCTAssertEqual(serverAuth.requests, 0)
         XCTAssertEqual(successes.successes, 0)
     }

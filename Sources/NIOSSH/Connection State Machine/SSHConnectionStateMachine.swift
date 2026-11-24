@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -171,7 +173,8 @@ struct SSHConnectionStateMachine {
                         self = .receivedDisconnect(state.role)
                         return .disconnect
                     case .ignore, .debug:
-                        // Ignore these
+                        // Ignore these, except during a strict initial key exchange.
+                        try state.validateNonKeyExchangeMessage(message)
                         self = .keyExchange(state)
                         return .noMessage
                     case .unimplemented(let unimplemented):
@@ -230,7 +233,8 @@ struct SSHConnectionStateMachine {
                         self = .receivedDisconnect(state.role)
                         return .disconnect
                     case .ignore, .debug:
-                        // Ignore these
+                        // Ignore these, except during a strict initial key exchange.
+                        try state.validateNonKeyExchangeMessage(message)
                         self = .sentNewKeys(state)
                         return .noMessage
                     case .unimplemented(let unimplemented):
@@ -277,6 +281,12 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveServiceRequest(message)
                         self = .receivedNewKeys(state)
                         return result
+
+                    case .extensionInfo(let message):
+                        // RFC 8308: the server's first message under the new keys.
+                        state.userAuthStateMachine.receiveExtensionInfo(message)
+                        self = .receivedNewKeys(state)
+                        return .noMessage
 
                     case .disconnect:
                         self = .receivedDisconnect(state.role)
@@ -325,6 +335,12 @@ struct SSHConnectionStateMachine {
                         let result = try state.receiveServiceAccept(message)
                         self = .userAuthentication(state)
                         return result
+
+                    case .extensionInfo(let message):
+                        // RFC 8308: right after the server's NEWKEYS, or right before USERAUTH_SUCCESS.
+                        state.userAuthStateMachine.receiveExtensionInfo(message)
+                        self = .userAuthentication(state)
+                        return .noMessage
 
                     case .userAuthRequest(let message):
                         let result = try state.receiveUserAuthRequest(message)
