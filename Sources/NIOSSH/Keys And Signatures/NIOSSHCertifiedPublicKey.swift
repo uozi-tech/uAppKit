@@ -289,13 +289,16 @@ extension NIOSSHCertifiedPublicKey {
     ///         implementation.
     ///     - acceptableCriticalOptions: The critical options understood by this implementation that will be validated
     ///         separately from this function.
+    ///     - allowedSignatureAlgorithms: The public key algorithms the certificate authority's signature may use
+    ///         (e.g. the connection's host key algorithms). `nil` allows any algorithm valid for the authority's key.
     /// - returns: The values of the supported critical options.
     /// - throws: If the certifiate fails to validate.
     public func validate(
         principal: String,
         type: CertificateType,
         allowedAuthoritySigningKeys: [NIOSSHPublicKey],
-        acceptableCriticalOptions: [String] = []
+        acceptableCriticalOptions: [String] = [],
+        allowedSignatureAlgorithms: [String]? = nil
     ) throws -> [String: String] {
         // Before we do any computation on values in this certificate, we first need to do the cryptographic
         // validation, to avoid the cryptographic doom principle. First, check if the signing key is in our allowed
@@ -304,6 +307,15 @@ extension NIOSSHCertifiedPublicKey {
             throw NIOSSHError.invalidCertificate(
                 diagnostics: "Certificate was not signed by one of the allowed principals"
             )
+        }
+
+        // The signature's algorithm must belong to the authority's key (a custom key: registered for its type) and
+        // be one the caller allows, so that e.g. a SHA-1 `ssh-rsa` signature is not accepted by accident.
+        let signatureAlgorithm = self.signature.customAlgorithmName ?? String(self.signatureKey.keyPrefix)
+        guard self.signatureKey.isUsable(withAlgorithm: signatureAlgorithm.utf8, signature: self.signature),
+            allowedSignatureAlgorithms?.contains(signatureAlgorithm) ?? true
+        else {
+            throw NIOSSHError.invalidCertificate(diagnostics: "Signature algorithm \(signatureAlgorithm) is not allowed")
         }
 
         guard self.signatureKey.isValidSignature(self.signature, for: self.signableBytes) else {

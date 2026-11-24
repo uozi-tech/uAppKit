@@ -30,12 +30,16 @@ struct SSHPacketSerializer {
     /// number at zero (OpenSSH PROTOCOL §1.10).
     private var resetsSequenceNumberWithNewKeys = false
 
+    /// Encrypted packets and bytes sent under the current keys (for automatic rekeying).
+    private(set) var trafficSinceNewKeys = SSHTrafficCounter()
+
     /// Encryption schemes can be added to a packet serializer whenever encryption is negotiated.
     mutating func addEncryption(_ protection: NIOSSHTransportProtection, strictKeyExchange: Bool = false) {
         self.resetsSequenceNumberWithNewKeys = self.resetsSequenceNumberWithNewKeys || strictKeyExchange
         if self.resetsSequenceNumberWithNewKeys {
             self.sequenceNumber = 0
         }
+        self.trafficSinceNewKeys = SSHTrafficCounter()
         switch self.state {
         case .cleartext:
             self.state = .encrypted(protection)
@@ -68,6 +72,7 @@ struct SSHPacketSerializer {
                 blockSize: protection.cipherBlockSize
             )
             try protection.encryptPacket(&buffer, sequenceNumber: self.sequenceNumber)
+            self.trafficSinceNewKeys.record(bytes: buffer.readableBytes)
             buffer.moveReaderIndex(to: index)
             self.sequenceNumber &+= 1
         }

@@ -5,7 +5,7 @@ USSHKit 依赖的 SSH 栈带着补丁，没法作为普通依赖引用（SwiftPM
 
 | target | 上游 | 基线 | 许可证 | 补丁 |
 |---|---|---|---|---|
-| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 12 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
+| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 14 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
 | `Citadel`、`CCitadelBcrypt` | [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) | `0.12.1`（`ae8562f8`） | MIT（bcrypt 部分为 OpenBSD 的 BSD 许可） | 1 个，见 [Citadel/PATCHES.md](Citadel/PATCHES.md) |
 
 每个组件一个目录：`UPSTREAM`（来源与基线）、`patches/`（按序重放的补丁，`git format-patch` 格式）、
@@ -71,4 +71,5 @@ bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 2026-11-24 起 NIOSSH 的基线从 Wellz26 fork 0.3.6 换成 apple/swift-nio-ssh 0.15.2（连同它的测试），旧的 4 个补丁
 在新基线上重做或去掉，另加两个扩展接口；同月又补上会话密钥续长、`sendChannelEOF` 状态写反、strict KEX
 （Terrapin 对策）、RFC 8308 `server-sig-algs`、公开的通用全局请求（keepalive）、CHANNEL_OPEN_FAILURE 原因码、认证委托用完
-即报错，共 12 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
+即报错，又按安全审查加固了两个扩展接口、修了重新交换期间 channel 写入失败、加上按需与按流量的自动重新交换，
+共 14 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。

@@ -28,6 +28,13 @@ public struct SSHClientConfiguration {
     /// Supported data encryption algorithms
     public var transportProtectionSchemes: [NIOSSHTransportProtection.Type]
 
+    /// The host key algorithms to offer and accept, in order of preference. `nil` (the default) means NIOSSH's
+    /// built-in algorithms followed by every algorithm registered with `NIOSSHAlgorithms`, in registration order.
+    ///
+    /// Names that are neither built in nor registered are dropped. Use it to keep a registered legacy algorithm
+    /// (say SHA-1 `ssh-rsa`) for the one connection that needs it.
+    public var hostKeyAlgorithms: [String]? = nil
+
     /// The key exchange methods to offer, in order of preference. Defaults to NIOSSH's built-in methods.
     ///
     /// Names of methods registered with `NIOSSHAlgorithms.register(keyExchangeAlgorithm:)` may be added; names
@@ -37,6 +44,11 @@ public struct SSHClientConfiguration {
     /// Whether to announce strict key exchange (`kex-strict-*-v00@openssh.com`) in the first KEXINIT. Always on;
     /// tests turn it off to play a peer that predates it.
     internal var offersStrictKeyExchange = true
+
+    /// When to start a key re-exchange automatically: once either direction has carried this many packets or
+    /// bytes under the current keys. Defaults to 2^31 packets or 1 GiB; `.disabled` never rekeys on its own.
+    /// `NIOSSHHandler.rekey()` starts one on demand.
+    public var rekeyLimits: NIOSSHRekeyLimits = .default
 
     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer

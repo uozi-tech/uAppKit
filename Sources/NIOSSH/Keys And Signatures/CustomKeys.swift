@@ -118,14 +118,8 @@ public enum NIOSSHAlgorithms {
     ) {
         let keyName = PublicKey.publicKeyPrefix
         let algorithm = Signature.signaturePrefix
-        precondition(
-            !NIOSSHPublicKey.builtInKeyAlgorithms.contains { $0.elementsEqual(keyName.utf8) },
-            "\(keyName) is a built-in key type"
-        )
-        precondition(
-            !NIOSSHPublicKey.builtInKeyAlgorithms.contains { $0.elementsEqual(algorithm.utf8) },
-            "\(algorithm) is a built-in algorithm"
-        )
+        precondition(!Self.isReservedPublicKeyName(keyName), "\(keyName) is a built-in key type")
+        precondition(!Self.isReservedPublicKeyName(algorithm), "\(algorithm) is a built-in algorithm")
         self.registry.withLockedValue { registry in
             if let other = registry.first(where: { $0.publicKey.publicKeyPrefix == keyName }) {
                 precondition(ObjectIdentifier(other.publicKey) == ObjectIdentifier(publicKey), "\(keyName) is already registered for another type")
@@ -140,6 +134,16 @@ public enum NIOSSHAlgorithms {
                 registry.append((publicKey, signature))
             }
         }
+    }
+
+    /// Names NIOSSH implements itself: the plain key types and their OpenSSH certificate types. Custom types are
+    /// looked up before certificates are parsed, so registering one of these would replace NIOSSH's own parser.
+    internal static func isReservedPublicKeyName(_ name: String) -> Bool {
+        let reserved = NIOSSHPublicKey.builtInKeyAlgorithms + [
+            NIOSSHCertifiedPublicKey.ed25519KeyPrefix, NIOSSHCertifiedPublicKey.p256KeyPrefix,
+            NIOSSHCertifiedPublicKey.p384KeyPrefix, NIOSSHCertifiedPublicKey.p521KeyPrefix,
+        ]
+        return reserved.contains { $0.elementsEqual(name.utf8) }
     }
 
     private static let registry = NIOLockedValueBox<
@@ -236,6 +240,17 @@ extension NIOSSHPublicKey {
             Self.ed25519PublicKeyPrefix, Self.ecdsaP384PublicKeyPrefix, Self.ecdsaP256PublicKeyPrefix,
             Self.ecdsaP521PublicKeyPrefix,
         ]
+    }
+}
+
+extension NIOSSHSignature {
+    /// The public key algorithm of a custom signature; `nil` for built-in signatures, whose algorithm is the
+    /// prefix of the key that made them.
+    internal var customAlgorithmName: String? {
+        guard case .custom(let signature) = self.backingSignature else {
+            return nil
+        }
+        return type(of: signature).signaturePrefix
     }
 }
 
