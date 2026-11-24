@@ -119,4 +119,74 @@ final class HostKeyTrustIntegrationTests: XCTestCase {
         XCTAssertEqual(probe.challenges.map(\.hostKey), [TestSSH.hostKey(of: bastion), TestSSH.hostKey(of: target)])
         XCTAssertEqual(Set(store.remembered.map(\.port)), [bastion.port, target.port])
     }
+
+    // MARK: - 主机密钥库按类型拒绝（HostKeyStoreRejection）
+
+    private struct ChangedKey: HostKeyStoreRejection, Equatable {
+        let host: String
+        let offered: String
+    }
+
+    /// verify 里抛的、遵守 `HostKeyStoreRejection` 的错原样交给调用方：直连、SFTP 会话、隧道。
+    func testStoreRejectionPassesThroughUnwrapped() async throws {
+        let server = try await TestSSH.startServer()
+        defer { Task { await server.stop() } }
+        let rejection = ChangedKey(host: server.host, offered: TestSSH.hostKey(of: server).fingerprint)
+        let store = MemoryHostKeyStore(verifyError: rejection)
+        do {
+            _ = try await TestSSH.connect(server, store: store, policy: .acceptNew)
+            XCTFail("库拒绝了，不该连上")
+        } catch let error as ChangedKey {
+            XCTAssertEqual(error, rejection)
+        }
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: store, hostKeyPolicy: .acceptNew)
+        do {
+            _ = try await tunnel.open()
+            XCTFail("库拒绝了，隧道不该建起来")
+        } catch let error as ChangedKey {
+            XCTAssertEqual(error, rejection)
+        }
+        XCTAssertTrue(server.events.authAttempts.isEmpty, "主机密钥没过就不该认证")
+    }
+
+    /// 经跳板机：跳板机那一跳、目标那一跳的库拒绝都不包成 jumpHostFailed。
+    func testStoreRejectionPassesThroughBothJumpHops() async throws {
+        let target = try await TestSSH.startServer()
+        let bastion = try await TestSSH.startServer()
+        defer { Task { await target.stop(); await bastion.stop() } }
+        let jump = SSHJumpHost(host: bastion.host, port: bastion.port, username: TestSSH.username,
+                               credential: .password(TestSSH.password))
+
+        final class RejectingOne: HostKeyStore, @unchecked Sendable {
+            let port: Int
+            init(port: Int) { self.port = port }
+            func verify(_ hostKey: SSHHostKey) async throws -> SSHHostKeyVerification {
+                if hostKey.port == port { throw ChangedKey(host: hostKey.host, offered: hostKey.fingerprint) }
+                return .trusted
+            }
+            func remember(_ hostKey: SSHHostKey) async throws {}
+        }
+        for rejected in [bastion.port, target.port] {
+            do {
+                _ = try await TestSSH.connect(target, store: MemoryHostKeyStore(), policy: .acceptNew, jumpHost: jump)
+            } catch {
+                XCTFail("对照组（库都放行）应当连得上：\(error)")
+            }
+            do {
+                _ = try await SSHClientFactory.connect(
+                    endpoint: TestSSH.endpoint(target, jumpHost: jump), credential: .password(TestSSH.password),
+                    hostKeyStore: RejectingOne(port: rejected), hostKeyPolicy: .acceptNew,
+                    connectTimeout: .seconds(10), approvalTimeout: .seconds(10), approver: { _ in true },
+                    legacyMemory: SSHLegacyEndpointMemory())
+                XCTFail("端口 \(rejected) 被库拒绝了，不该连上")
+            } catch let error as ChangedKey {
+                XCTAssertEqual(error.host, "127.0.0.1")
+            } catch {
+                XCTFail("端口 \(rejected)：应当原样拿到库的错，实际 \(error)")
+            }
+        }
+    }
 }
