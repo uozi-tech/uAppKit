@@ -3,4 +3,4 @@
 URL=https://github.com/apple/swift-nio-ssh.git
 TAG=0.15.2
 REV=e8de09a26d3d0a6ecf509fe0554bd27a6f9ee3d0
-PATHS="Sources/NIOSSH"
+PATHS="Sources/NIOSSH Tests/NIOSSHTests"

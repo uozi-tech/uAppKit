@@ -204,6 +204,18 @@ let package = Package(
         //     ],
         //     swiftSettings: [.swiftLanguageMode(.v5)]
         // ),
+        // apple/swift-nio-ssh 自己的测试，和 Sources/NIOSSH 一起由 sync.sh 生成（别直接改），
+        // 我们补丁带的回归测试也写在这里。升级上游后先跑它：`swift test --filter NIOSSHTests`。
+        // 依赖照抄上游 manifest。
+        .testTarget(
+            name: "NIOSSHTests",
+            dependencies: [
+                "NIOSSH",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+            ]
+        ),
         .testTarget(
             name: "USSHCoreTests",
             dependencies: [
