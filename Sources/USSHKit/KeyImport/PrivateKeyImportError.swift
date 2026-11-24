@@ -11,8 +11,21 @@ public nonisolated enum PrivateKeyImportError: Error, LocalizedError, Equatable 
     case unsupportedKDF(name: String)
     case malformedKey(reason: String)
 
-    public var errorDescription: String? {
+    /// 关联文字过了 `SSHPeerText.sanitize` 的副本。
+    private var sanitized: PrivateKeyImportError {
         switch self {
+        case .malformedPEM(let reason): return .malformedPEM(reason: SSHPeerText.sanitize(reason))
+        case .unsupportedFormat(let label): return .unsupportedFormat(label: SSHPeerText.sanitize(label))
+        case .unsupportedCipher(let name): return .unsupportedCipher(name: SSHPeerText.sanitize(name))
+        case .unsupportedKDF(let name): return .unsupportedKDF(name: SSHPeerText.sanitize(name))
+        case .malformedKey(let reason): return .malformedKey(reason: SSHPeerText.sanitize(reason))
+        case .dsaUnsupported, .encryptedKeyNeedsPassphrase, .incorrectPassphrase: return self
+        }
+    }
+
+    public var errorDescription: String? {
+        // 类型名、算法名、损坏的原因都可能直接取自私钥文件（不可信），过一遍 `SSHPeerText`。
+        switch self.sanitized {
         case .malformedPEM(let reason):
             return String(localized: "私钥内容无法识别：\(reason)", bundle: ModuleBundle.bundle)
         case .unsupportedFormat(let label):
@@ -33,7 +46,7 @@ public nonisolated enum PrivateKeyImportError: Error, LocalizedError, Equatable 
     }
 
     public var failureReason: String? {
-        switch self {
+        switch self.sanitized {
         case .malformedPEM:
             return String(localized: "文件不是可识别的 PEM 私钥，或 BEGIN/END 标记不完整。", bundle: ModuleBundle.bundle)
         case .unsupportedFormat(let label):
