@@ -62,9 +62,11 @@ public final class SFTPClient: Sendable {
     public let extensions: [String: String]
     /// `limits@openssh.com` 的回答；服务端没宣告或 `queriesLimits == false` 时为 nil。
     public let limits: SFTPServerLimits?
-    /// 单次 READ 最多要多少字节（服务端的上限与本端收帧上限取小）。多要服务端也只会短给。
+    /// 单次 READ 最多要多少字节（服务端的上限与本端收帧上限取小，不超过 `UInt32.max`）。多要服务端也只会短给。
+    /// 自己做窗口化传输的调用方按它切段，别写死某个数（OpenSSH 是 255 KiB，有的服务端只有 32 KiB）。
     public let maximumReadLength: Int
-    /// 单次 WRITE 最多写多少字节；超过的 `SFTPFile.write(_:at:)` 抛 `requestTooLarge`。
+    /// 单次 WRITE 最多写多少字节（不超过 `UInt32.max`）；超过的 `SFTPFile.write(_:at:)` 抛 `requestTooLarge`。
+    /// 自己做窗口化传输的调用方按它切片。
     public let maximumWriteLength: Int
     /// 发出的单帧最大长度。
     public let maximumPacketLength: Int
@@ -93,8 +95,9 @@ public final class SFTPClient: Sendable {
         let read = positive(limits?.maximumReadLength) ?? configuration.fallbackMaximumReadLength
         let write = positive(limits?.maximumWriteLength) ?? configuration.fallbackMaximumWriteLength
         self.maximumPacketLength = packet
-        self.maximumReadLength = max(1, min(read, configuration.maximumInboundPacketLength - 1024))
-        self.maximumWriteLength = max(1, min(write, packet - 1024))
+        // 线上的 READ 长度与 WRITE 数据长度都是 uint32：再大的宣告值与配置也封顶在 UInt32.max。
+        self.maximumReadLength = max(1, min(read, configuration.maximumInboundPacketLength - 1024, Int(UInt32.max)))
+        self.maximumWriteLength = max(1, min(write, packet - 1024, Int(UInt32.max)))
     }
 
     // MARK: - 建立

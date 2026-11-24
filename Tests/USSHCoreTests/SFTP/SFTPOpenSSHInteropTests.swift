@@ -337,6 +337,43 @@ final class SFTPOpenSSHInteropTests: XCTestCase {
         XCTAssertTrue(sawReuse, "sftp-server reuses handle slots, which is what makes this dangerous")
     }
 
+    /// 长度为 0（或负数）的读：OpenSSH 对 0 字节的 READ 回 EOF，那会被当成文件到头。客户端直接回空、不发请求。
+    func testZeroLengthReadIsNotEOF() async throws {
+        put("z", Data("abc".utf8))
+        let file = try await client.openFile(path("z"), flags: .read)
+        let empty = try await file.read(from: 0, length: 0)
+        XCTAssertEqual(empty, ByteBuffer())
+        let negative = try await file.read(from: 1, length: -5)
+        XCTAssertEqual(negative, ByteBuffer())
+        let data = try await file.read(from: 0, length: 10)
+        XCTAssertEqual(data.map { String(buffer: $0) }, "abc")
+        try await file.close()
+    }
+
+    /// 4 GiB 以上的 offset（稀疏文件）：写、读、stat、readAll 都对，加法不会溢出。
+    func testOffsetsBeyondFourGiB() async throws {
+        let far: UInt64 = (1 << 32) + 12_345
+        let file = try await client.openFile(path("sparse"), flags: [.read, .write, .create, .truncate])
+        try await file.write(ByteBuffer(string: "tail"), at: far)
+        let size = try await file.stat().size
+        XCTAssertEqual(size, far + 4)
+        let back = try await file.read(from: far, length: 100)
+        XCTAssertEqual(back.map { String(buffer: $0) }, "tail")
+        let all = try await file.readAll(from: far - 6)
+        XCTAssertEqual(Array(all.readableBytesView), [0, 0, 0, 0, 0, 0] + Array("tail".utf8))
+        try await file.write(contentsOf: SFTPTestData.bytes(count: 100_000), at: far + 4)
+        let grown = try await file.stat().size
+        XCTAssertEqual(grown, far + 4 + 100_000)
+        // 越过 UInt64 上限的区间：本地就抛错，不 trap。
+        await XCTAssertSFTPError(.offsetOutOfRange) {
+            try await file.write(contentsOf: SFTPTestData.bytes(count: 10), at: .max - 5)
+        }
+        await XCTAssertSFTPError(.offsetOutOfRange) {
+            _ = try await file.readAll(from: .max - 5)
+        }
+        try await file.close()
+    }
+
     func testServerExitFailsPendingRequests() async throws {
         process?.terminate()
         let exited = await exit.wait(timeout: .seconds(10))
