@@ -294,6 +294,13 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
   换行变空格，截断到 300 个字符加「…」。app 自己把服务器原话（`SFTPError.status` 的 `message`、`SSHChannelOpenFailure.description`）
   直接拿去显示或写日志的地方，也应该这样处理。
+- **多步认证**（RFC 4252 §5.1 的部分成功，例如 sshd 的 `AuthenticationMethods publickey,password`）：部分通过的方式不再提交
+  （RSA 私钥不再换签名算法重递，通过的算法记进 `SSHClient.rsaUserAuthenticationAlgorithm`，是 `ssh-rsa` 时
+  `legacyAlgorithmsInUse` 照样报出）；下一个从配置的方式里从头挑服务器还要的（上一阶段被拒或跳过的方式还有一次机会）。
+  `.delegate` 方式会收到四参数的 `nextAuthenticationType(…, partialSuccess:, …)`。配置里没有服务器还要的方式时，
+  `SSHAuthenticationFailure.partiallyAcceptedMethods`（新字段，`init` 里默认 `[]`）不为空，文案是「服务器已接受私钥，但还要求
+  另一种认证（服务器支持：password），没有配置可用的方式」，而不是「服务器拒绝了私钥」；仍归 `.authenticationFailed`，别重试。
+  USSHKit 的 `SSHCredential` 一次只有一种凭据，要口令 + 私钥两步的主机目前只能走 `.delegate` 或自己组 `SSHAuthentication`。
 - **认证失败的文案**按实际发出过的方式说（「服务器拒绝了密码」「服务器拒绝了私钥」「服务器不接受所提供的认证方式（服务器支持：…）」）。
 
 ## 9. 在 app 的测试里用 `USSHTestServer`（替代 Citadel 的 `SSHServer`）

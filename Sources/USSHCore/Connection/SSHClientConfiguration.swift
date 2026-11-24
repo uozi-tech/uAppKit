@@ -183,11 +183,17 @@ public struct SSHAuthenticationFailure: Error, Sendable, Hashable {
     public var remainingMethods: NIOSSHAvailableUserAuthenticationMethods
     /// 我们实际发出过的方式，按顺序。
     public var attemptedMethods: [SSHAuthenticationMethod.Kind]
+    /// 其中得到「部分成功」（RFC 4252 §5.1：这一步通过了，但服务器还要别的）的方式，按顺序。非空时失败的原因是
+    /// 服务器还要求 `remainingMethods` 里的方式、而配置里没有能用的（例如私钥通过了，服务器还要口令或一次性验证码），
+    /// 不是凭据被拒。
+    public var partiallyAcceptedMethods: [SSHAuthenticationMethod.Kind]
 
     public init(remainingMethods: NIOSSHAvailableUserAuthenticationMethods,
-                attemptedMethods: [SSHAuthenticationMethod.Kind]) {
+                attemptedMethods: [SSHAuthenticationMethod.Kind],
+                partiallyAcceptedMethods: [SSHAuthenticationMethod.Kind] = []) {
         self.remainingMethods = remainingMethods
         self.attemptedMethods = attemptedMethods
+        self.partiallyAcceptedMethods = partiallyAcceptedMethods
     }
 }
 

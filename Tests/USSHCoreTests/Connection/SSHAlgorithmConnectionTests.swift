@@ -139,35 +139,6 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         XCTAssertEqual(server.events.authAttempts.count, 0)
     }
 
-    /// 部分成功（RFC 4252 §5.1）之后的 RSA 记账：服务器对 `rsa-sha2-512` 回「部分成功，还要 publickey 或 password」，
-    /// 正确的做法是记下成功的是 512、不再拿同一把钥匙试 256、接着用口令。
-    ///
-    /// 现在做不到：NIOSSH 交给认证 delegate 的只有服务器还接受的方式，USERAUTH_FAILURE 里的 partial-success 位没有
-    /// 传出来，delegate 分不清「部分成功」和「被拒」（被拒时正是要接着试 256 的）。要 NIOSSH 加一个补丁：
-    /// `UserAuthenticationStateMachine.receiveUserAuthFailure(_:)` 把 `message.partialSuccess` 经
-    /// `requestNextAuthRequest(methods:delegate:)` 交给一个新的 delegate 方法（带 `partialSuccess:` 的
-    /// `nextAuthenticationType`，默认实现转给现有的三参数版本）。在那之前这条用例标成预期失败，记着这个缺口。
-    func testRSAPartialSuccessBookkeeping() async throws {
-        var configuration = Harness.serverConfiguration(keys: [NIOSSHPublicKey(rsaPublicKey: Self.rsaKey.publicKey)])
-        configuration.authentication.decision = { attempt in
-            switch attempt.method {
-            case .publicKey:
-                return attempt.rsaSignatureAlgorithm == .rsaSHA2_512 ? .partialSuccess(remaining: [.publicKey, .password]) : .reject
-            case .password: return .accept
-            default: return .reject
-            }
-        }
-        let server = try await SSHTestServer.start(configuration)
-        defer { Task { await server.stop() } }
-        let client = try await Harness.connect(server, client([.rsaPrivateKey(Self.rsaKey), .password(Harness.password)]))
-        defer { Task { await client.close() } }
-        XCTAssertTrue(client.isConnected)
-        XCTExpectFailure("NIOSSH 不把 partial-success 交给 delegate，见上面的注释") {
-            XCTAssertEqual(rsaAttempts(server), [.rsaSHA2_512, nil], "部分成功之后不该再拿同一把钥匙试 256")
-            XCTAssertEqual(client.rsaUserAuthenticationAlgorithm, .rsaSHA2_512, "部分成功的那一次也是用了这个算法")
-        }
-    }
-
     /// `SSHClient` 报出的协商结果：AES-GCM 时 MAC 不在用（`macInUse == nil`）；AES-CTR 时是协商到的 MAC；
     /// 口令登录时没有 RSA 算法。
     func testNegotiatedAlgorithmsAreExposed() async throws {

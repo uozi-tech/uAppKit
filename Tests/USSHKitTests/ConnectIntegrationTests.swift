@@ -391,3 +391,29 @@ final class JumpHostFailureClassTests: XCTestCase {
         XCTAssertEqual(onTarget, .network)
     }
 }
+
+/// 多步认证：钥匙通过了，服务器还要口令（或一次性验证码），凭据里没有——报的是「还要另一种认证」，不是
+/// 「服务器拒绝了私钥」；归 `.authenticationFailed`（重试不会好）。
+final class PartialAuthenticationTests: XCTestCase {
+    func testKeyAcceptedButAnotherStepRequired() async throws {
+        let generated = SSHKeyGenerator.generateEd25519(comment: "t")
+        let publicKey = try TestSSH.publicKey(ofPrivateKey: generated.privateKeyText)
+        var authentication = SSHTestAuthentication(authorizedKeys: [TestSSH.username: [publicKey]])
+        authentication.decision = { attempt in
+            if case .publicKey = attempt.method { return .partialSuccess(remaining: .password) }
+            return .reject
+        }
+        let server = try await TestSSH.startServer(authentication: authentication)
+        defer { Task { await server.stop() } }
+        let message = await assertConnectionError({
+            _ = try await TestSSH.connect(server, credential: .privateKey(pem: generated.privateKeyText, passphrase: nil))
+        }) { if case .authenticationFailed(let message) = $0 { return message } else { return nil } }
+        let expected = SSHErrorText.describe(SSHAuthenticationFailure(
+            remainingMethods: .password, attemptedMethods: [.publicKey], partiallyAcceptedMethods: [.publicKey]))
+        XCTAssertEqual(message, SSHClientError.authenticationFailed(SSHAuthenticationFailure(
+            remainingMethods: .password, attemptedMethods: [.publicKey], partiallyAcceptedMethods: [.publicKey])).errorDescription)
+        XCTAssertTrue(message?.contains(expected) == true, message ?? "")
+        XCTAssertNotEqual(expected, String(localized: "服务器拒绝了私钥", bundle: ModuleBundle.bundle))
+        XCTAssertEqual(server.events.authAttempts.count, 1)
+    }
+}
