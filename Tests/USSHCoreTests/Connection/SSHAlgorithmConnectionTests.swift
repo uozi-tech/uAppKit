@@ -158,6 +158,7 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         }
     }
 
+    /// 登记表是进程级的，但 `.builtInOnly` 的主机密钥列表里没有 RSA：协商不到，回调都不会被问。
     func testBuiltInOnlyRefusesRSAHostKeyEvenThoughRegistered() async throws {
         let server = try await rsaHostServer()
         defer { Task { await server.stop() } }
@@ -166,23 +167,30 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
             asked.withLockedValue { $0 = true }
         }))) { error in
             guard case SSHClientError.handshakeFailed(let underlying) = error,
-                  let refused = underlying as? SSHHostKeyAlgorithmRefused else { return XCTFail("\(error)") }
-            XCTAssertEqual(refused.algorithm, .rsaSHA2_512)
+                  (underlying as? NIOSSHError)?.type == .keyExchangeNegotiationFailure else { return XCTFail("\(error)") }
         }
-        XCTAssertFalse(asked.withLockedValue { $0 }, "拒绝算法时不该问主机密钥回调")
+        XCTAssertFalse(asked.withLockedValue { $0 })
     }
 
-    func testSHA1HostKeyRefusedUnlessLegacyAllowed() async throws {
+    /// 同一个进程里先有连接用过 `.legacyCompatible`（`ssh-rsa` 已登记），`.standard` 的连接照样不接受只提供
+    /// `ssh-rsa` 主机密钥的服务器；之后 `.legacyCompatible` 仍然能连。
+    func testSHA1HostKeyRefusedUnlessLegacyAllowedEvenAfterAnotherConnectionUsedIt() async throws {
         let server = try await rsaHostServer(algorithms: [.sshRSA])
         defer { Task { await server.stop() } }
-        XCTAssertTrue(SSHAlgorithms.legacyAlgorithmsRegistered, "服务端提供 ssh-rsa 时已登记旧算法")
-        await XCTAssertThrowsAsync(try await Harness.connect(server, client())) { error in
-            guard case SSHClientError.handshakeFailed(let underlying) = error,
-                  let refused = underlying as? SSHHostKeyAlgorithmRefused else { return XCTFail("\(error)") }
-            XCTAssertEqual(refused.algorithm, .sshRSA)
+        let first = try await Harness.connect(server, client(algorithms: .legacyCompatible))
+        await first.close()
+        XCTAssertTrue(SSHAlgorithms.legacyAlgorithmsRegistered)
+        // 把 ssh-rsa 写进 .standard 的列表也不行：开关没开就滤掉。
+        var sneaky = SSHAlgorithms.standard
+        sneaky.hostKeyAlgorithms.append("ssh-rsa")
+        for algorithms in [SSHAlgorithms.standard, sneaky] {
+            await XCTAssertThrowsAsync(try await Harness.connect(server, client(algorithms: algorithms))) { error in
+                guard case SSHClientError.handshakeFailed(let underlying) = error,
+                      (underlying as? NIOSSHError)?.type == .keyExchangeNegotiationFailure else { return XCTFail("\(error)") }
+            }
         }
-        let client = try await Harness.connect(server, client(algorithms: .legacyCompatible))
-        await client.close()
+        let again = try await Harness.connect(server, client(algorithms: .legacyCompatible))
+        await again.close()
     }
 
     func testTamperedRSAHostSignatureIsRejected() async throws {
@@ -273,7 +281,7 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         return try await SSHTestServer.start(configuration)
     }
 
-    /// 每种 DH 都能握手、跑命令，客户端发起换钥（NIOSSH 内部的 `_rekey`）之后照样能用，换钥时又核对了一次主机密钥。
+    /// 每种 DH 都能握手、跑命令，客户端发起换钥（`NIOSSHHandler.rekey()`）之后照样能用，换钥时又核对了一次主机密钥。
     func testEachDiffieHellmanAlgorithmIncludingRekey() async throws {
         for algorithm in SSHDiffieHellmanAlgorithm.allCases {
             let server = try await dhServer([algorithm.name])
@@ -286,7 +294,8 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
             let handshake = ContinuousClock.now - started
             let outputX = String(buffer: try await client.executeCommand("x"))
             XCTAssertEqual(outputX, "ok\n", algorithm.name)
-            try await client.eventLoop.submit { try client.sshHandler.value._rekey() }.get()
+            let rekeyStarted = try await client.eventLoop.submit { client.sshHandler.value.rekey() }.get()
+            XCTAssertTrue(rekeyStarted)
             let rekeyed = await Harness.eventually(timeout: Self.slowHandshake) { validations.value == 2 }
             XCTAssertTrue(rekeyed, "\(algorithm.name) 换钥没有完成")
             let outputY = String(buffer: try await client.executeCommand("y"))
@@ -342,13 +351,14 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         }
     }
 
-    /// 恶意服务器发越界的 f：0、1、p − 1、p（DH 适配层自己拒绝）、负数（NIOSSH 解析时拒绝）。
+    /// 恶意服务器发越界的 f：0、1、负数（NIOSSH 解析时拒绝）、p − 1、p（DH 适配层拒绝）。
     func testOutOfRangeServerPublicValuesAreRejected() async throws {
         let prime = SSHDiffieHellmanGroup.group14.primeBytes
         let pMinus1 = (BigUInt(Data(prime)) - 1).sshMagnitudeBytes
         func mpint(_ magnitude: [UInt8]) -> [UInt8] { SSHWireFormatCoding.mpintContent(magnitude) }
         let cases: [(String, [UInt8], Bool)] = [
-            ("0", [], true), ("1", [1], true), ("p-1", mpint(pMinus1), true), ("p", mpint(prime), true),
+            // 0、1 与负数 NIOSSH 自己在读 mpint 时就拒绝（补丁 0006 的兜底）；p − 1、p 只有适配层知道。
+            ("0", [], false), ("1", [1], false), ("p-1", mpint(pMinus1), true), ("p", mpint(prime), true),
             ("-1", [0xFF], false),
         ]
         let server = try await dhServer([SSHDiffieHellmanAlgorithm.group14SHA256.name])
@@ -375,13 +385,14 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
     func testAlgorithmErrorDuringHandshakeIsHandshakeFailed() async throws {
         let server = try await dhServer([SSHDiffieHellmanAlgorithm.group14SHA256.name])
         defer { Task { await server.stop() } }
+        let prime = SSHWireFormatCoding.mpintContent(SSHDiffieHellmanGroup.group14.primeBytes)
         let proxy = try await KeyExchangeReplyTamperer.start(targetPort: server.port) { reply in
-            reply.publicValue = [1]
+            reply.publicValue = prime
         }
         defer { Task { await proxy.stop() } }
         do {
             _ = try await connect(port: proxy.port, client())
-            XCTFail("f = 1 应该被拒绝")
+            XCTFail("f = p 应该被拒绝")
         } catch SSHClientError.handshakeFailed(let underlying) {
             XCTAssertEqual(underlying as? SSHDiffieHellmanError, .invalidPeerPublicValue)
         } catch SSHClientError.connectionClosed(.transportError(let underlying))

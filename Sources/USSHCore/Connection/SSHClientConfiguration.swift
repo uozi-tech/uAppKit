@@ -184,19 +184,6 @@ public enum SSHHostKeyValidation: Sendable {
     case custom(@Sendable (SSHHostKeyContext) async throws -> Void)
 }
 
-/// 服务器的主机密钥签名算法不在这条连接允许的范围内（`SSHAlgorithms.rsaHostKeyAlgorithms`，SHA-1 的
-/// `ssh-rsa` 还要 `allowsLegacyAlgorithms`）。放在 `SSHClientError.handshakeFailed` 里；这时还没问主机密钥回调。
-public struct SSHHostKeyAlgorithmRefused: Error, Sendable, Hashable {
-    /// 协商出的签名算法；`nil` 表示没能确定（按拒绝处理，见 `SSHRSAVerificationRecord`）。
-    public var algorithm: SSHRSASignatureAlgorithm?
-    public var hostKey: NIOSSHPublicKey
-
-    public init(algorithm: SSHRSASignatureAlgorithm?, hostKey: NIOSSHPublicKey) {
-        self.algorithm = algorithm
-        self.hostKey = hostKey
-    }
-}
-
 /// 主机密钥不在 `trustedKeys` 里时抛的错误（放在 `SSHClientError.hostKeyRejected` 里）。
 public struct SSHUntrustedHostKey: Error, Sendable, Hashable {
     public var hostKey: NIOSSHPublicKey
@@ -205,9 +192,9 @@ public struct SSHUntrustedHostKey: Error, Sendable, Hashable {
 
 /// 一条连接用哪些算法。现成的组合见 `.builtInOnly`（默认）、`.standard`、`.legacyCompatible`。
 ///
-/// 三个列表都按偏好排序，NIOSSH 按这个顺序报给服务器、取第一个双方都支持的。
+/// 四个列表都按偏好排序，NIOSSH 按这个顺序报给服务器、取第一个双方都支持的。
 /// `allowsLegacyAlgorithms == false` 时列表里的 SHA-1 旧算法（`hmac-sha1*`、`diffie-hellman-group14-sha1`、
-/// `ssh-rsa` 签名）一律被去掉，RSA 用户密钥也不会以 `ssh-rsa` 尝试——放进列表不等于启用，必须同时打开开关。
+/// `ssh-rsa` 主机密钥）一律被去掉，RSA 用户密钥也不会以 `ssh-rsa` 尝试——放进列表不等于启用，必须同时打开开关。
 public struct SSHAlgorithms: Sendable {
     /// 按偏好排序的加密方式（含 MAC）。NIOSSH 自带的是 AES-GCM 两种（`Constants.bundledTransportProtectionSchemes`），
     /// USSHCore 的在 `SSHTransportProtections`。
@@ -217,12 +204,13 @@ public struct SSHAlgorithms: Sendable {
     /// 有限域 DH（`SSHDiffieHellmanAlgorithm.name`）；不认识的名字被 NIOSSH 跳过、不会报出去。
     public var keyExchangeAlgorithms: [String]
 
-    /// 接受哪些 RSA 主机密钥签名算法；空表示不接受 RSA 主机密钥。
+    /// 按偏好排序的主机密钥算法名，原样交给 NIOSSH 的 `SSHClientConfiguration.hostKeyAlgorithms`（补丁 0014 起
+    /// 按连接生效）：报给服务器的、协商的、验主机签名时接受的都只来自它。NIOSSH 自带的在
+    /// `builtInHostKeyAlgorithms`，USSHCore 的 RSA 是 `SSHRSASignatureAlgorithm.name`。
     ///
-    /// 只决定接受与否：报给服务器的主机密钥算法列表是进程级的（NIOSSH 的登记表：自带的在前，之后是
-    /// `rsa-sha2-512`、`rsa-sha2-256`，登记过旧算法的话再加 `ssh-rsa`），按连接改不了顺序。协商到这里没有的
-    /// 算法时，连接以 `SSHClientError.handshakeFailed(SSHHostKeyAlgorithmRefused)` 失败，不会问主机密钥回调。
-    public var rsaHostKeyAlgorithms: [SSHRSASignatureAlgorithm]
+    /// 进程级的登记表只决定 NIOSSH 认识哪些算法；接受与否只看这里。所以别的连接用过 `.legacyCompatible`
+    /// （登记过 `ssh-rsa`）之后，这里没有 `ssh-rsa` 的连接照样不接受 SHA-1 的主机签名。
+    public var hostKeyAlgorithms: [String]
 
     /// 是否允许 SHA-1 的旧算法。打开后建连接时会调 `SSHAlgorithms.registerLegacyAlgorithms()`（进程级登记，
     /// 见那里的说明；别的连接不受影响）。
@@ -231,12 +219,12 @@ public struct SSHAlgorithms: Sendable {
     public init(
         transportProtectionSchemes: [SSHTransportProtections.Scheme] = Constants.bundledTransportProtectionSchemes,
         keyExchangeAlgorithms: [String] = SSHAlgorithms.builtInKeyExchangeAlgorithms,
-        rsaHostKeyAlgorithms: [SSHRSASignatureAlgorithm] = [],
+        hostKeyAlgorithms: [String] = SSHAlgorithms.builtInHostKeyAlgorithms,
         allowsLegacyAlgorithms: Bool = false
     ) {
         self.transportProtectionSchemes = transportProtectionSchemes
         self.keyExchangeAlgorithms = keyExchangeAlgorithms
-        self.rsaHostKeyAlgorithms = rsaHostKeyAlgorithms
+        self.hostKeyAlgorithms = hostKeyAlgorithms
         self.allowsLegacyAlgorithms = allowsLegacyAlgorithms
     }
 
@@ -246,10 +234,15 @@ public struct SSHAlgorithms: Sendable {
         "curve25519-sha256", "curve25519-sha256@libssh.org",
     ]
 
+    /// NIOSSH 0.15.2 自带的主机密钥算法，按它的默认顺序。
+    public static let builtInHostKeyAlgorithms: [String] = [
+        "ssh-ed25519", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp521",
+    ]
+
     // MARK: 预设
 
     /// 只用 NIOSSH 自带的：AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥（今天 app 发出去的就是这一套）。
-    /// RSA 用户密钥照样能用（`rsa-sha2-512` → `rsa-sha2-256`），不接受 RSA 主机密钥。
+    /// RSA 用户密钥照样能用（`rsa-sha2-512` → `rsa-sha2-256`），不报、不接受 RSA 主机密钥。
     public static let builtInOnly = SSHAlgorithms()
 
     /// 自带的优先，后面补上 USSHCore 的现代算法：密钥交换 `diffie-hellman-group16-sha512`、
@@ -259,7 +252,7 @@ public struct SSHAlgorithms: Sendable {
         transportProtectionSchemes: Constants.bundledTransportProtectionSchemes
             + SSHAlgorithmsPresetSchemes.standardAESCTRSchemes,
         keyExchangeAlgorithms: builtInKeyExchangeAlgorithms + SSHDiffieHellmanAlgorithm.modern.map(\.name),
-        rsaHostKeyAlgorithms: SSHRSASignatureAlgorithm.modern
+        hostKeyAlgorithms: builtInHostKeyAlgorithms + SSHRSASignatureAlgorithm.modern.map(\.name)
     )
 
     /// ⚠️ 只为连老设备（旧的网络设备、嵌入式 sshd）：`.standard` 再加 SHA-1 的 `ssh-rsa`（主机密钥与用户认证）、
@@ -269,7 +262,7 @@ public struct SSHAlgorithms: Sendable {
         transportProtectionSchemes: standard.transportProtectionSchemes
             + SSHAlgorithmsPresetSchemes.legacyAESCTRSchemes,
         keyExchangeAlgorithms: standard.keyExchangeAlgorithms + SSHDiffieHellmanAlgorithm.legacy.map(\.name),
-        rsaHostKeyAlgorithms: SSHRSASignatureAlgorithm.modern + SSHRSASignatureAlgorithm.legacy,
+        hostKeyAlgorithms: standard.hostKeyAlgorithms + SSHRSASignatureAlgorithm.legacy.map(\.name),
         allowsLegacyAlgorithms: true
     )
 
@@ -289,16 +282,18 @@ public struct SSHAlgorithms: Sendable {
         return keyExchangeAlgorithms.filter { !legacy.contains($0) }
     }
 
-    /// 去掉了未经允许的旧算法的 RSA 主机密钥算法。
-    var effectiveRSAHostKeyAlgorithms: Set<SSHRSASignatureAlgorithm> {
-        Set(rsaHostKeyAlgorithms.filter { allowsLegacyAlgorithms || !$0.isLegacy })
+    /// 去掉了未经允许的旧算法的主机密钥算法名。
+    var effectiveHostKeyAlgorithms: [String] {
+        guard !allowsLegacyAlgorithms else { return hostKeyAlgorithms }
+        let legacy = Set(SSHRSASignatureAlgorithm.legacy.map(\.name))
+        return hostKeyAlgorithms.filter { !legacy.contains($0) }
     }
 
     /// 这条连接要不要先登记旧算法（进程级）：只有真的会用到 SHA-1 主机签名或 group14-sha1 时。
     /// 用户认证的 `ssh-rsa` 签名是本端写出的，不需要登记。
     var requiresLegacyRegistration: Bool {
         allowsLegacyAlgorithms
-            && (rsaHostKeyAlgorithms.contains(where: \.isLegacy)
+            && (hostKeyAlgorithms.contains { SSHRSASignatureAlgorithm(name: $0)?.isLegacy == true }
                 || keyExchangeAlgorithms.contains(where: { SSHDiffieHellmanAlgorithm(name: $0)?.isLegacy == true }))
     }
 }

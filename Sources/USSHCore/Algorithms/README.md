@@ -83,10 +83,13 @@ RFC 6668 要 64 字节的 MAC 密钥。NIOSSH 0.15.2 原本推导会话密钥时
 | `SSHRSAExtensionKeys.swift` | `SSHRSAExtensionPublicKey`（一个类型，格式名 `ssh-rsa`，原样存收到的字节写回）、按算法特化的 `SSHRSAExtensionSignature<A>` / `SSHRSAExtensionPrivateKey<A>`；公开包装 `NIOSSHPublicKey(rsaPublicKey:)`、`.rsaPublicKey`、`NIOSSHPrivateKey(rsaPrivateKey:algorithm:)` |
 | `SSHDiffieHellmanExtension.swift` | `SSHDiffieHellmanExtensionKeyExchange<V>`：`init()` 算好公开值，`sharedSecret` 校验 1 < f < p − 1 后算 K；H 与密钥推导由 NIOSSH 做 |
 | `SSHAlgorithmRegistration.swift` | 唯一调 `NIOSSHAlgorithms.register` 的地方：`SSHAlgorithms.registerStandardAlgorithms()`（建连接时自动）与 ⚠️ `registerLegacyAlgorithms()`（SHA-1，只由允许旧算法的连接或明确调用触发） |
-| `SSHRSAVerificationRecord.swift` | 验签时记下 RSA 算法，主机密钥回调按**这条连接**的 `SSHAlgorithms` 决定接不接受（登记是进程级的，接受是按连接的） |
+| `SSHRSAVerificationRecord.swift` | 验签时记下 RSA 算法，测试服务端借此知道客户端用的 userauth 算法 |
+
+登记是进程级的，接受是按连接的：`SSHAlgorithms.hostKeyAlgorithms` 交给 NIOSSH 的 `hostKeyAlgorithms`（补丁 0014），
+报出、协商、验签都只认它。
 
 适配层没法知道 NIOSSH「期望」哪个算法（接口不传），它按签名自己的类型验；期望算法与签名算法一致由 NIOSSH 保证
-（主机密钥：`isUsable`；userauth：服务端状态机），连接层再按策略拒绝不允许的算法。这几条都有恶意对端的测试
+（主机密钥：`isUsable` 加上按连接的 `hostKeyAlgorithms`；userauth：服务端状态机）。这几条都有恶意对端的测试
 （`SSHAlgorithmConnectionTests` 经 `KeyExchangeReplyTamperer` 改写 KEX 回复）。
 
 ## 有限域 DH 内核

@@ -119,8 +119,6 @@ final class SSHConnectionGuard: ChannelInboundHandler {
                 return .hostKeyRejected(rejection.underlying)
             case let timeout as HostKeyValidationTimedOut:
                 return .hostKeyValidationTimeout(timeout.timeout)
-            case let refused as SSHHostKeyAlgorithmRefused:
-                return .handshakeFailed(refused)
             case let sshError as NIOSSHError where sshError.type != .tcpShutdown:
                 return .handshakeFailed(firstError)
             default:

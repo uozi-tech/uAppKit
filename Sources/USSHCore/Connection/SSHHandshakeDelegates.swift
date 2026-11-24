@@ -80,16 +80,13 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     private let port: Int
     private let timeout: Duration?
     private let clock: SSHHandshakeClock
-    /// 这条连接接受的 RSA 主机密钥签名算法（已去掉未经允许的旧算法）。
-    private let rsaHostKeyAlgorithms: Set<SSHRSASignatureAlgorithm>
     /// 正在跑的回调，连接关掉时取消。
     private var pending: [Int: Task<Void, Never>] = [:]
     private var nextID = 0
     private var cancelled = false
 
     init(eventLoop: any EventLoop, validation: SSHHostKeyValidation, host: String, port: Int,
-         timeout: Duration?, clock: SSHHandshakeClock, rsaHostKeyAlgorithms: Set<SSHRSASignatureAlgorithm>) {
-        self.rsaHostKeyAlgorithms = rsaHostKeyAlgorithms
+         timeout: Duration?, clock: SSHHandshakeClock) {
         self.eventLoop = eventLoop
         self.validation = validation
         self.host = host
@@ -99,11 +96,6 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
-        // 先核对签名算法（首次交换与每次换钥都会走到这里），不允许的算法不必再问回调。
-        if let refused = refusedAlgorithm(of: hostKey) {
-            validationCompletePromise.fail(refused)
-            return
-        }
         switch validation {
         case .acceptAnything:
             validationCompletePromise.succeed(())
@@ -120,18 +112,6 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
             }
             startCustom(callback, hostKey: hostKey, promise: validationCompletePromise)
         }
-    }
-
-    /// RSA 主机密钥：取出刚才验签时记下的算法（同一个调用栈里，见 `SSHRSAVerificationRecord`），
-    /// 不在 `rsaHostKeyAlgorithms` 里（或取不到）就拒绝。别的密钥类型的算法就是它的格式，NIOSSH 已按配置协商。
-    private func refusedAlgorithm(of hostKey: NIOSSHPublicKey) -> SSHHostKeyAlgorithmRefused? {
-        var buffer = ByteBuffer()
-        hostKey.write(to: &buffer)
-        let blob = Array(buffer.readableBytesView)
-        guard (try? buffer.readSSHWireIdentifier()) == SSHRSAPublicKey.keyType else { return nil }
-        let algorithm = SSHRSAVerificationRecord.take(keyBlob: blob)
-        if let algorithm, rsaHostKeyAlgorithms.contains(algorithm) { return nil }
-        return SSHHostKeyAlgorithmRefused(algorithm: algorithm, hostKey: hostKey)
     }
 
     private func startCustom(_ callback: @escaping @Sendable (SSHHostKeyContext) async throws -> Void,

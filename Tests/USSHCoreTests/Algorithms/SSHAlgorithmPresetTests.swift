@@ -1,6 +1,6 @@
 import NIOCore
 import NIOEmbedded
-import NIOSSH
+@testable import NIOSSH
 import XCTest
 
 @testable import USSHCore
@@ -15,7 +15,7 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         let preset = SSHAlgorithms.builtInOnly
         XCTAssertEqual(names(preset.transportProtectionSchemes), names(Constants.bundledTransportProtectionSchemes))
         XCTAssertEqual(preset.keyExchangeAlgorithms, Self.nioDefaultKeyExchangeAlgorithms())
-        XCTAssertEqual(preset.rsaHostKeyAlgorithms, [])
+        XCTAssertEqual(preset.hostKeyAlgorithms, ["ssh-ed25519", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp521"])
         XCTAssertFalse(preset.allowsLegacyAlgorithms)
         // 默认构造的就是它（`SSHClient.Configuration` 的默认值）。
         XCTAssertEqual(names(SSHAlgorithms().transportProtectionSchemes), names(preset.transportProtectionSchemes))
@@ -38,7 +38,7 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         XCTAssertEqual(preset.keyExchangeAlgorithms, Self.nioDefaultKeyExchangeAlgorithms() + [
             "diffie-hellman-group16-sha512", "diffie-hellman-group14-sha256",
         ])
-        XCTAssertEqual(preset.rsaHostKeyAlgorithms, [.rsaSHA2_512, .rsaSHA2_256])
+        XCTAssertEqual(preset.hostKeyAlgorithms, SSHAlgorithms.builtInHostKeyAlgorithms + ["rsa-sha2-512", "rsa-sha2-256"])
         XCTAssertFalse(preset.allowsLegacyAlgorithms)
         XCTAssertFalse(preset.requiresLegacyRegistration)
         // AEAD 永远在最前：对端不支持 strict KEX 时，双方都有 AES-GCM 就协商不到 ETM。
@@ -54,7 +54,7 @@ final class SSHAlgorithmPresetTests: XCTestCase {
                 + Self.ctr(["hmac-sha1-etm@openssh.com"]) + Self.ctr(["hmac-sha1"]))
         XCTAssertEqual(preset.keyExchangeAlgorithms,
                        SSHAlgorithms.standard.keyExchangeAlgorithms + ["diffie-hellman-group14-sha1"])
-        XCTAssertEqual(preset.rsaHostKeyAlgorithms, [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
+        XCTAssertEqual(preset.hostKeyAlgorithms, SSHAlgorithms.standard.hostKeyAlgorithms + ["ssh-rsa"])
         XCTAssertTrue(preset.allowsLegacyAlgorithms)
         XCTAssertTrue(preset.requiresLegacyRegistration)
     }
@@ -74,7 +74,7 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         XCTAssertEqual(names(algorithms.effectiveTransportProtectionSchemes),
                        names(SSHAlgorithms.standard.transportProtectionSchemes))
         XCTAssertEqual(algorithms.effectiveKeyExchangeAlgorithms, SSHAlgorithms.standard.keyExchangeAlgorithms)
-        XCTAssertEqual(algorithms.effectiveRSAHostKeyAlgorithms, [.rsaSHA2_512, .rsaSHA2_256])
+        XCTAssertEqual(algorithms.effectiveHostKeyAlgorithms, SSHAlgorithms.standard.hostKeyAlgorithms)
         XCTAssertFalse(algorithms.requiresLegacyRegistration)
 
         // ETM 形式的 SHA-1 同样被去掉。
@@ -84,7 +84,7 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         let allowed = SSHAlgorithms.legacyCompatible
         XCTAssertEqual(names(allowed.effectiveTransportProtectionSchemes), names(allowed.transportProtectionSchemes))
         XCTAssertEqual(allowed.effectiveKeyExchangeAlgorithms, allowed.keyExchangeAlgorithms)
-        XCTAssertEqual(allowed.effectiveRSAHostKeyAlgorithms, [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
+        XCTAssertEqual(allowed.effectiveHostKeyAlgorithms, allowed.hostKeyAlgorithms)
     }
 
     // MARK: RSA 用户认证的尝试顺序
@@ -146,6 +146,12 @@ final class SSHAlgorithmPresetTests: XCTestCase {
     }
 
     // MARK: 辅助
+
+    /// 内置主机密钥算法与 NIOSSH 自己的一致（`builtInOnly` 必须恰好是它们）。
+    func testBuiltInHostKeyAlgorithmsMatchNIOSSH() {
+        XCTAssertEqual(SSHAlgorithms.builtInHostKeyAlgorithms,
+                       SSHKeyExchangeStateMachine.supportedServerHostKeyAlgorithms.map(String.init))
+    }
 
     /// NIOSSH 客户端配置里 `keyExchangeAlgorithms` 的默认值。
     private static func nioDefaultKeyExchangeAlgorithms() -> [String] {

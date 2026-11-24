@@ -208,8 +208,7 @@ final class SSHConnectionSetup: Sendable {
         let algorithms = configuration.algorithms
         let hostKeyDelegate = SSHHostKeyDelegate(
             eventLoop: eventLoop, validation: configuration.hostKeyValidation, host: host, port: port,
-            timeout: configuration.hostKeyValidationTimeout, clock: clock,
-            rsaHostKeyAlgorithms: algorithms.effectiveRSAHostKeyAlgorithms)
+            timeout: configuration.hostKeyValidationTimeout, clock: clock)
         let authDelegate = SSHClientAuthDelegate(
             authentication: configuration.authentication, allowsLegacyAlgorithms: algorithms.allowsLegacyAlgorithms)
         var nioConfiguration = SSHClientConfiguration(
@@ -218,6 +217,7 @@ final class SSHConnectionSetup: Sendable {
             globalRequestDelegate: nil,
             transportProtectionSchemes: algorithms.effectiveTransportProtectionSchemes)
         nioConfiguration.keyExchangeAlgorithms = algorithms.effectiveKeyExchangeAlgorithms
+        nioConfiguration.hostKeyAlgorithms = algorithms.effectiveHostKeyAlgorithms
         nioConfiguration.maximumPacketSize = configuration.effectiveMaximumPacketSize
         let remoteForwards = self.remoteForwards
         let handler = NIOSSHHandler(
