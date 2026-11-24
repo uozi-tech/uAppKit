@@ -67,6 +67,10 @@ public actor SSHFileTransferSession {
 
     /// Connect to `endpoint` and open an SFTP subsystem channel.
     ///
+    /// `logger` receives the connection-level events (e.g. the warning logged when
+    /// the server only supports SHA-1-era algorithms and the automatic fallback
+    /// used them).
+    ///
     /// On any failure after the SSH transport is established the transport is
     /// closed before the error propagates, so a caller that only receives the
     /// thrown error never leaks a live connection.
@@ -78,7 +82,8 @@ public actor SSHFileTransferSession {
         connectTimeout: Duration = .seconds(30),
         approvalTimeout: Duration = .seconds(180),
         channelWindowBytes: Int = SSHFileTransferSession.defaultChannelWindowBytes,
-        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in false }
+        approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in false },
+        logger: any SSHLogger = NoOpSSHLogger()
     ) async throws -> SSHFileTransferSession {
         let connected = try await SSHClientFactory.connect(
             endpoint: endpoint,
@@ -88,7 +93,8 @@ public actor SSHFileTransferSession {
             connectTimeout: connectTimeout,
             approvalTimeout: approvalTimeout,
             approver: approver,
-            maximumPacketSize: maximumPacketSize(forWindow: channelWindowBytes)
+            maximumPacketSize: maximumPacketSize(forWindow: channelWindowBytes),
+            logger: logger
         )
         do {
             let sftp = try await connected.target.openSFTP()

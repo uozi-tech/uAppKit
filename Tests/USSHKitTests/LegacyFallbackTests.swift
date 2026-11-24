@@ -332,6 +332,42 @@ final class LegacyFallbackTests: XCTestCase {
         XCTAssertEqual(bastion.events.directTCPIPTargets.count, 2)
     }
 
+    // MARK: - 产品层入口把警告交给调用方的 logger
+
+    /// `SSHLocalForwardingTunnel` 建连那一段的日志也走它的 `logger`：用上旧算法的那条警告 app 看得见。
+    func testForwardingTunnelReportsLegacyAlgorithmsToItsLogger() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let log = LogProbe()
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll, logger: log)
+        _ = try await tunnel.open()
+        await tunnel.close()
+        XCTAssertEqual(log.warnings.count, 1)
+        XCTAssertEqual(log.warnings.first?.metadata["algorithms"], "hostkey=ssh-rsa")
+    }
+
+    /// `SSHFileTransferSession.open(logger:)` 同上。
+    func testFileTransferSessionReportsLegacyAlgorithmsToItsLogger() async throws {
+        let fileSystem = try SFTPLocalFileSystem.makeTemporary(prefix: "usshkit-legacy-sftp")
+        defer { try? fileSystem.removeRoot() }
+        let server = try await TestSSH.startServer {
+            $0.useRSAHostKey(Self.rsaHostKey, algorithms: [.sshRSA])
+            $0.serveSFTP(fileSystem: fileSystem)
+        }
+        defer { Task { await server.stop() } }
+        let log = LogProbe()
+        let session = try await SSHFileTransferSession.open(
+            endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll, approver: { _ in true },
+            logger: log)
+        await session.close()
+        XCTAssertEqual(log.warnings.count, 1)
+        XCTAssertEqual(log.warnings.first?.metadata["algorithms"], "hostkey=ssh-rsa")
+    }
+
     // MARK: - 规则（不经网络）
 
     func testFallbackSetForStandardMatchesLegacyCompatible() throws {

@@ -54,7 +54,9 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
             hostKeyPolicy: hostKeyPolicy,
             connectTimeout: connectTimeout,
             approvalTimeout: approvalTimeout,
-            approver: approver
+            approver: approver,
+            // 建连这一段的日志（用上了 SHA-1 旧算法的那条警告）也交给 app 的 logger。
+            logger: logger
         )
 
         let onChannelFailure = self.onChannelFailure

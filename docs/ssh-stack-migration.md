@@ -98,7 +98,8 @@ public struct SSHLegacyAlgorithm: Sendable, Hashable {
 |---|---|
 | `struct SSHPrivateKey: @unchecked Sendable` | `struct SSHPrivateKey: Sendable` |
 | `SSHConnectionError` | **新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
-| `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
+| `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变（`SSHFileTransferSession.open` 末尾多一个可选的 `logger:`）；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
+| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口**没有** `algorithms:` / `keepAliveInterval:` / `legacyFallback:`：一律 `.standard`、自动退级、不保活（隧道或 SFTP 会话闲置时链路死了没人发现，要保活得经 SPI 自己 `connect`） |
 | USSHCore 的错误类型没有文案 | USSHKit 给 `SSHClientError`、`SSHChannelError`、`SFTPError`、`SSHCommandError`、`SSHRSAError` 补上 `LocalizedError`（四种语言），`error.localizedDescription` 直接可用。判断一律看类型与 case，不看文案 |
 
 ## 3. 直接用 `connected.target` 的地方（Citadel → USSHCore）
