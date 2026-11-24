@@ -199,7 +199,7 @@ public protocol SSHForwardingTunnel: Sendable {
     func close() async
 }
 
-public enum SSHConnectionError: Error, LocalizedError, Sendable {
+public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
     case alreadyOpen
     case closed
     case unsupportedAgentAuthentication
@@ -208,7 +208,11 @@ public enum SSHConnectionError: Error, LocalizedError, Sendable {
     /// 握手没成（协议错误、算法协商不成）：服务器配置问题，**不是**网络断了，重试不会好。
     /// 与 `connectFailed` 分开是为了让 app 的重连逻辑不在这种错误上打转；给用户看的文案与 `connectFailed` 相同。
     case handshakeFailed(String)
-    case jumpHostFailed(String)
+    /// 经跳板机时某一跳失败了。`String` 是给用户看的整句（说明是哪一跳），`cause` 是那一跳的失败按直连归的类
+    /// （`.authenticationFailed` / `.hostKeyRejected` / `.handshakeFailed` 是配置问题、重试不会好；`.connectFailed`
+    /// 是网络问题；跳板机拒绝开到目标的通道、或开通道超时也归 `.connectFailed`）。app 判断要不要重连看 `cause`，
+    /// 不看文字。只有本端以外的极少数情形 `cause` 为 nil。
+    case jumpHostFailed(String, cause: SSHConnectionError? = nil)
     case hostKeyRejected(String)
     case bindFailed(String)
 
@@ -224,7 +228,7 @@ public enum SSHConnectionError: Error, LocalizedError, Sendable {
             return String(localized: "SSH 认证失败：\(message)", bundle: ModuleBundle.bundle)
         case .connectFailed(let message), .handshakeFailed(let message):
             return String(localized: "SSH 连接失败：\(message)", bundle: ModuleBundle.bundle)
-        case .jumpHostFailed(let message):
+        case .jumpHostFailed(let message, _):
             return String(localized: "SSH 跳板机连接失败：\(message)", bundle: ModuleBundle.bundle)
         case .hostKeyRejected(let message):
             return String(localized: "SSH 主机密钥被拒绝：\(message)", bundle: ModuleBundle.bundle)

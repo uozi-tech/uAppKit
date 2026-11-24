@@ -19,7 +19,8 @@ public final class SSHClient: Sendable {
     public let transport: any Channel
 
     /// 第一次密钥交换选中的算法（USSHCore 由双方的 KEXINIT 按 NIOSSH 的规则算出，见 `SSHNegotiatedAlgorithms`）。
-    /// 读不出对端的 KEXINIT 时为 nil（实际不会发生：读不出时 NIOSSH 也协商不下去）。
+    /// 读不出 KEXINIT 时为 nil：嗅探器的解析和 NIOSSH 一样宽松、也跳过它之前的 IGNORE / DEBUG，剩下的情形
+    /// （包超过 256 KiB 之类）NIOSSH 多半也连不上；万一连上了，nil 的意思是「不知道」，不是「没用旧算法」。
     public let negotiatedAlgorithms: SSHNegotiatedAlgorithms?
     /// 用 RSA 用户私钥（`SSHAuthenticationMethod.rsaPrivateKey`）认证成功时用的签名算法；别的方式成功时为 nil。
     public let rsaUserAuthenticationAlgorithm: SSHRSASignatureAlgorithm?
@@ -287,8 +288,9 @@ final class SSHConnectionSetup: Sendable {
             SSHConnectionGuard.KeepAlive(interval: $0, maximumUnanswered: max(configuration.keepAliveMaximumUnanswered, 0))
         }
         let authenticated = eventLoop.makePromise(of: SSHSessionFacts.self)
-        let sniffer = SSHKeyExchangeInitSniffer(aeadCiphers: Set(
-            algorithms.effectiveTransportProtectionSchemes.filter { $0.macName == nil }.map { $0.cipherName }))
+        let sniffer = SSHKeyExchangeInitSniffer(schemes: algorithms.effectiveTransportProtectionSchemes.map {
+            SSHKeyExchangeInitSniffer.Scheme(cipher: $0.cipherName, mac: $0.macName)
+        })
         let guardHandler = SSHConnectionGuard(
             lifecycle: lifecycle, authenticated: authenticated, clock: clock,
             hostKeyDelegate: hostKeyDelegate, authDelegate: authDelegate, sshHandler: handler, sniffer: sniffer,

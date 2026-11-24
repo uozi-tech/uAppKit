@@ -27,6 +27,8 @@ public struct ConnectedClient: Sendable {
     public var isConnected: Bool            // 两跳都还连着
     public var legacyAlgorithmsInUse: [SSHLegacyAlgorithm]         // 目标那一跳用上的 SHA-1 旧算法（第 5 节）
     public var bastionLegacyAlgorithmsInUse: [SSHLegacyAlgorithm]  // 跳板机那一跳的
+    public var legacyAlgorithmStatusKnown: Bool          // 目标那一跳的协商结果读得出来（false = 不知道，不是「没用」）
+    public var bastionLegacyAlgorithmStatusKnown: Bool   // 跳板机那一跳的（没有跳板机时 true）
     public func close() async               // 先目标、再跳板机；幂等
     public func exec(_ command: String) async throws -> String   // stdout+stderr，≤ 64 000 字节
     public func openDirectTCPIP(host: String, port: Int) async throws -> NIOAsyncChannel<ByteBuffer, ByteBuffer>
@@ -154,9 +156,13 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     （下一条）。它会触发进程级的旧算法登记，但不影响别的连接（接受与否按连接判断）。
   - USSHCore 自己的 `SSHClient.Configuration.algorithms` 默认仍是 `.builtInOnly`：协议层不替产品做选择，产品默认在 USSHKit。
 - **自动退到旧算法**（`legacyFallback: true`，默认；跳板机与目标各自判断，不按主机设置、不落盘、不同步）：
-  - 只在 `SSHClientError.noCommonAlgorithm` 时同一跳**再连一次**，这次在原来的算法后面补上 SHA-1 的旧算法（对 `.standard` 就是
-    `.legacyCompatible`）。知道卡在哪一类、服务器报了什么时，只在补上的旧算法对得上服务器的报价时才再试（服务器只有 CBC、
-    `hmac-md5` 之类我们根本不支持的就不试）；不知道时盲试一次。第二次也没有共同算法就报第二次的错。
+  - 只在 `SSHClientError.noCommonAlgorithm` 时同一跳**再连一次**。知道卡在哪一类、服务器报了什么时，只在服务器在这一类里报了
+    SHA-1 的旧算法（`ssh-rsa` 主机密钥、`diffie-hellman-group14-sha1`、`hmac-sha1*`）时才再试——再试是为了退到旧算法，不是为了
+    放宽调用方选的算法集，所以明确选了 `.builtInOnly` 的连接遇到只有 `rsa-sha2-*` 的服务器照样不试；加密这一类没有旧算法，不试；
+    服务器只有 CBC、`hmac-md5` 之类我们根本不支持的也不试。不知道卡在哪时盲试一次。第二次也没有共同算法就报第二次的错。
+  - 再试用的算法：配置里的现代算法（原顺序）→ `.standard` 里有、配置里没有的现代算法 → 旧算法（配置里本来就列着的旧算法也挪到
+    这里，不再原地打开、排在现代算法前面）。所以服务器同时有 SHA-2 与 SHA-1 的选项时（比如 group14-sha256 与 group14-sha1），
+    再试协商到的是 SHA-2 的那个。对 `.standard` 再试的算法就是 `.legacyCompatible`。
   - 超时、没有协商结论就断开、主机密钥被拒、认证失败、取消**都不再试**。第一次在密钥交换里就失败了，还没到主机密钥那一步，
     所以**只会问一次信任**（另有守卫：第一次问过就不再试）。
   - **RSA 用户私钥**在服务器没宣告 `server-sig-algs`、`rsa-sha2-512` 与 `rsa-sha2-256` 都被拒时，**同一条连接里**最后试 `ssh-rsa`
@@ -168,6 +174,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   - 用上了哪些：`ConnectedClient.legacyAlgorithmsInUse` / `bastionLegacyAlgorithmsInUse`（协商到的密钥交换 / 主机密钥 / 在用的 MAC
     是旧算法时各一项，RSA 用户私钥以 `ssh-rsa` 认证成功时一项），并经 `logger` 记一条 `.warning`（metadata 里有 host、port、
     `algorithms`，如 `hostkey=ssh-rsa`）。app 可以据此在连接信息里提示「这台主机只支持旧算法」。
+    `legacyAlgorithmStatusKnown == false` 表示 USSHCore 没读懂服务器的 KEXINIT（嗅探器的解析与 NIOSSH 一样宽松、也跳过它之前的
+    IGNORE / DEBUG，剩下的只有超过 256 KiB 之类 NIOSSH 多半也连不上的情形）：这时空的 `legacyAlgorithmsInUse` 只说明 RSA 用户认证
+    没用 `ssh-rsa`，传输层**不知道**；日志里另有一条「无法确定」的警告，进程内的记录不动。
   - **为什么不削弱能连现代服务器的安全性**：协商取的是客户端最偏好、服务器也支持的那个，补上的旧算法一律排在全部现代算法之后；
     双方报的算法列表算进交换哈希、由主机密钥签名，中间人删掉服务器报的现代算法签名就对不上，所以对主机密钥已被信任的服务器，攻击者
     没法把连接逼到旧算法上。于是退级只会发生在真的什么更好的都不支持的服务器上。SHA-1 原理上仍然更弱，所以结果要报出来、记日志。
@@ -192,10 +201,22 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **单次读写的上限**跟服务器的 `limits@openssh.com` 走（OpenSSH 是 255 KiB），没宣告时按 32 KiB：`client.maximumReadLength` /
   `client.maximumWriteLength`。`write(_:at:)` 超过上限抛 `requestTooLarge`，不会切块；`read(from:length:)` 超过上限按上限要。
   **app 自己的流水线（uTerm 的 `SFTPPipeline` 写死的 32 000）要按这两个值切块**，USSHKit 的 `SSHFileTransferSession` 已经这样做。
+  两个值都封顶在 `SFTPClient.maximumTransferLength`（256 KiB）：服务端宣告得再大（`limits@openssh.com` 能报到 2^64）也只按这么多切，
+  所以按它们从本地文件读、往内存里拼都有上限。app 自己按它们 `read(upToCount:)` 的代码不用再额外封顶，但别绕过它们直接用
+  `client.limits` 里的原始宣告值。
 - **完整性**：知道大小时用 `file.readAll(from:expectedLength:maximumBytes:window:)`：读不满就抛 `SFTPError.shortRead(expected:actual:)`，
   不会把被截短的数据当成功；0 字节的 DATA、EOF 后面又冒出数据都是 `invalidResponse`。区间越过 `UInt64` 抛 `offsetOutOfRange`。
   `SSHFileTransferSession.download` 现在按 stat 的大小分段（每段 8 MiB）`readAll(expectedLength:)`：**下载过程中文件变短 →
   报 `shortRead`**（以前按成功返回、只拿到前一部分）；变长照旧读到 EOF。
+- **`SSHFileTransferSession` 失败时不丢数据**：
+  - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`）、
+    独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而目标还完好时删掉它。
+  - 没有 `posix-rename` 时，只在第一次改名回 `SSH_FX_FAILURE` / `FILE_ALREADY_EXISTS`、**且目标确实存在**时才先删目标再改名；
+    别的失败（权限不足……）原样报出、不碰目标。删了目标之后最后的改名又失败：**留着临时文件**，抛新的
+    `SSHFileTransferError.uploadNotMovedIntoPlace(temporaryPath:destination:reason:)`（app 对 `SSHFileTransferError` 的 `switch`
+    要补这个 case）。以前这一步会把临时文件也删掉，两份都没了。
+  - 下载先写同目录的隐藏临时文件（`.<名字>.usshkit-download-<随机>`），读完才原子地换到目标；远程打不开、读到一半失败、
+    被取消时，本地原来的文件不动（以前一开始就删掉了本地文件，失败时还会在目标位置留下半截）。
 - `SFTPFile` 是 `Sendable` 的值，可以从多个任务并发 `read` / `write`；`close()` 等在途的请求都回来再关，关之后不会再往旧句柄发请求。
 
 ## 7. 错误怎么分类
@@ -229,6 +250,16 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 | `.authenticationFailed`、`.authenticationDelegateFailed` | `.authenticationFailed` | 否 |
 | `.hostKeyRejected`、`.hostKeyValidationTimeout` | `.hostKeyRejected` | 否 |
 
+**经跳板机时**两跳的失败都包成 `SSHConnectionError.jumpHostFailed(String, cause: SSHConnectionError?)`（签名从
+`jumpHostFailed(String)` 改成这样，`cause` 有默认值 `nil`，`.jumpHostFailed("…")` 的构造照常编译）。`String` 是给用户看的整句，
+和以前一字不差；`cause` 是那一跳的失败按上表归的类：`.authenticationFailed` / `.hostKeyRejected` / `.handshakeFailed` 是配置
+问题、别自动重试（反复认证会触发锁号、反复弹信任框），`.connectFailed` 是网络问题（跳板机连不上目标、拒绝开 direct-tcpip、
+开通道超时也归这里）。目标那一跳私钥导入失败时 `cause` 是 `.authenticationFailed`。app 要改的：
+- 模式匹配改成 `case .jumpHostFailed(let message, _)` / `case .jumpHostFailed(_, let cause)`。旧写法 `case .jumpHostFailed(let message)`
+  还能编译（只报弃用警告），但 `message` 会变成 `(String, cause: SSHConnectionError?)` 元组——拿去当 `String` 用会编译失败，
+  插值进字符串则**悄悄变成元组的样子**，务必全改；
+- uTerm 的断线分类（`SSHTransportFailure` 一类）对 `jumpHostFailed` 改看 `cause`，按上表决定重不重试。
+
 ### 7.2 开通道被拒（`SSHChannelOpenFailure.reason`）
 
 | 原因 | 用户看到（`SSHChannelError.errorDescription`） | `SSHForwardingChannelFailure.Kind`（转发场景的文案） |
@@ -253,6 +284,16 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **协商不成有自己的错误**：`SSHClientError.noCommonAlgorithm`（以前是 `.handshakeFailed`，或者在对端先关连接时变成「服务器关闭了
   连接」，两种随机出现）。现在无论先处理对端的关闭还是先处理 KEXINIT，结果都一样：USSHCore 在 NIOSSH 前面读双方的第一个 KEXINIT，
   按同样的规则自己算一遍，协商不出来就立刻报。
+- **私钥导入的上限**：带口令的 OpenSSH 容器 bcrypt 轮数最多 128（`ssh-keygen -a` 默认 16；一轮约 20 ms，每次连接都要解一遍），
+  更高的报新的 `PrivateKeyImportError.unsupportedKDFCost(rounds:maximum:)`（app 对这个 enum 的 `switch` 要补；建议文案让用户
+  `ssh-keygen -p -a 128` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对
+  尺寸（n 1024–8192 位、e ≤ 33 位、d < n、p·q = n），线格式的 string ≤ 64 KiB、整数 ≤ 1024 字节；缺素因子的容器改用确定性的
+  还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟）。
+- **服务器给的文字先消毒再进文案**：SFTP 状态消息、开通道失败的说明、服务器报的算法列表、NIOSSH 错误里夹带的对端文本、
+  退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
+  `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
+  换行变空格，截断到 300 个字符加「…」。app 自己把服务器原话（`SFTPError.status` 的 `message`、`SSHChannelOpenFailure.description`）
+  直接拿去显示或写日志的地方，也应该这样处理。
 - **认证失败的文案**按实际发出过的方式说（「服务器拒绝了密码」「服务器拒绝了私钥」「服务器不接受所提供的认证方式（服务器支持：…）」）。
 
 ## 9. 在 app 的测试里用 `USSHTestServer`（替代 Citadel 的 `SSHServer`）

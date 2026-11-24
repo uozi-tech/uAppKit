@@ -32,6 +32,14 @@ public nonisolated struct ConnectedClient: Sendable {
         bastion.map(SSHLegacyFallback.legacyAlgorithms(of:)) ?? []
     }
 
+    /// 目标那一跳的传输层算法读得出来（`legacyAlgorithmsInUse` 里的密钥交换 / 主机密钥 / MAC 可信）。
+    /// 为 false 时 USSHCore 没读懂服务器的 KEXINIT：空的 `legacyAlgorithmsInUse` 只说明 RSA 用户认证没用 `ssh-rsa`，
+    /// 传输层用没用旧算法**不知道**（日志里另有一条警告）。
+    public var legacyAlgorithmStatusKnown: Bool { target.negotiatedAlgorithms != nil }
+
+    /// 跳板机那一跳的同上（没有跳板机时为 true）。
+    public var bastionLegacyAlgorithmStatusKnown: Bool { bastion.map { $0.negotiatedAlgorithms != nil } ?? true }
+
     /// 两条连接（有跳板机时）都还连着。
     public var isConnected: Bool {
         target.isConnected && (bastion?.isConnected ?? true)
@@ -172,7 +180,7 @@ nonisolated enum SSHClientFactory {
     private static func firstAttemptAlgorithms(_ hop: Hop, options: Options) -> SSHAlgorithms {
         guard options.legacyFallback,
               options.legacyMemory.needsLegacy(host: hop.host, port: hop.port),
-              let fallback = SSHLegacyFallback.algorithms(addingLegacyTo: options.algorithms) else {
+              let fallback = SSHLegacyFallback.retryAlgorithms(for: options.algorithms) else {
             return options.algorithms
         }
         return fallback
@@ -187,7 +195,7 @@ nonisolated enum SSHClientFactory {
     ) async throws -> SSHClient {
         let first = firstAttemptAlgorithms(hop, options: options)
         let fallback = options.legacyFallback && !first.allowsLegacyAlgorithms
-            ? SSHLegacyFallback.algorithms(addingLegacyTo: first) : nil
+            ? SSHLegacyFallback.retryAlgorithms(for: first) : nil
         let watch = SSHApproverWatch()
         var firstOptions = options
         firstOptions.approver = watch.wrap(options.approver)
@@ -195,7 +203,7 @@ nonisolated enum SSHClientFactory {
         do {
             client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first))
         } catch SSHClientError.noCommonAlgorithm(let failure) {
-            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure, with: fallback), !watch.wasCalled else {
+            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure), !watch.wasCalled else {
                 throw SSHClientError.noCommonAlgorithm(failure)
             }
             // 第二次的错误（含又一次没有共同算法）原样交出去。
@@ -205,22 +213,12 @@ nonisolated enum SSHClientFactory {
         return client
     }
 
-    /// 连上之后：记下这一跳要不要旧算法（用上了才记，没用上就忘掉），用上了旧算法时记一条警告。
+    /// 连上之后：记下这一跳要不要旧算法、记警告（见 `SSHLegacyFallback.outcome`）。
     private static func note(_ client: SSHClient, hop: Hop, options: Options) {
-        if options.legacyFallback {
-            options.legacyMemory.record(host: hop.host, port: hop.port,
-                                        needsLegacy: SSHLegacyFallback.negotiationNeededLegacy(client))
-        }
-        let legacy = SSHLegacyFallback.legacyAlgorithms(of: client)
-        guard !legacy.isEmpty else { return }
-        options.logger.log(SSHLogEvent(
-            level: .warning,
-            message: "SSH 连接用上了 SHA-1 时代的旧算法（服务器不支持更好的）",
-            metadata: [
-                "host": hop.host,
-                "port": String(hop.port),
-                "algorithms": legacy.map(\.description).joined(separator: ","),
-            ]))
+        let events = SSHLegacyFallback.outcome(
+            negotiated: client.negotiatedAlgorithms, rsaUserAuthentication: client.rsaUserAuthenticationAlgorithm,
+            host: hop.host, port: hop.port, legacyFallback: options.legacyFallback, memory: options.legacyMemory)
+        for event in events { options.logger.log(event) }
     }
 
     private static func connectDirect(_ hop: Hop, options: Options) async throws -> SSHClient {
@@ -241,8 +239,10 @@ nonisolated enum SSHClientFactory {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // `connectDirect` 抛的已经是归好类的 `SSHConnectionError`。
             throw SSHConnectionError.jumpHostFailed(
-                String(localized: "无法连接 \(bastionHop.host):\(String(bastionHop.port)) —— \(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
+                String(localized: "无法连接 \(bastionHop.host):\(String(bastionHop.port)) —— \(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle),
+                cause: (try? connectionError(for: error)) ?? .connectFailed(SSHErrorText.describe(error))
             )
         }
 
@@ -254,14 +254,23 @@ nonisolated enum SSHClientFactory {
         } catch let error as SSHConnectionError {
             // 组配置时的失败（私钥导入等）。
             await bastion.close()
-            throw SSHConnectionError.jumpHostFailed(SSHErrorText.describe(error))
+            throw SSHConnectionError.jumpHostFailed(SSHErrorText.describe(error), cause: error)
         } catch {
             await bastion.close()
             if error is CancellationError { throw error }
             throw SSHConnectionError.jumpHostFailed(
-                String(localized: "经跳板机连接 \(target.host):\(String(target.port)) 失败 —— \(jumpFailureDetail(error, target: target))", bundle: ModuleBundle.bundle)
+                String(localized: "经跳板机连接 \(target.host):\(String(target.port)) 失败 —— \(jumpFailureDetail(error, target: target))", bundle: ModuleBundle.bundle),
+                cause: jumpFailureCause(error)
             )
         }
+    }
+
+    /// 内层那一跳的失败按直连归类；跳板机拒绝开 direct-tcpip（RFC 4254 的原因码）与开通道超时归 `.connectFailed`。
+    private static func jumpFailureCause(_ error: any Error) -> SSHConnectionError {
+        if case SSHChannelError.openRejected(let failure) = error {
+            return .connectFailed(SSHErrorText.describe(failure))
+        }
+        return (try? connectionError(for: error)) ?? .connectFailed(SSHErrorText.describe(error))
     }
 
     /// 内层那一跳的失败：跳板机拒绝开 direct-tcpip 时按 RFC 4254 的原因码说人话

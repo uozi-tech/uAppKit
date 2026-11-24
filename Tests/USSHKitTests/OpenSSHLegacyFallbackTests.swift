@@ -74,4 +74,20 @@ final class OpenSSHLegacyFallbackTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertEqual(sshd.connections, 1)
     }
+
+    /// 补上旧算法也协商不出来：第一次卡在密钥交换（只有 group14-sha1，再试），第二次卡在加密（只有 CBC，我们不支持）。
+    /// 恰好两次连接，报的是第二次的错。
+    func testNoCommonAlgorithmEvenWithLegacyFailsAfterExactlyTwoAttempts() async throws {
+        let sshd = try await start(["KexAlgorithms diffie-hellman-group14-sha1", "Ciphers aes128-cbc"])
+        let probe = ApproverProbe(.approve)
+        let message = await assertConnectionError({
+            _ = try await self.connect(sshd, probe: probe)
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
+        XCTAssertEqual(message, SSHErrorText.describe(SSHClientError.noCommonAlgorithm(
+            .init(category: .encryption, clientOffer: [], serverOffer: ["aes128-cbc"]))))
+        await sshd.waitForConnections(2)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(sshd.connections, 2)
+        XCTAssertTrue(probe.challenges.isEmpty)
+    }
 }

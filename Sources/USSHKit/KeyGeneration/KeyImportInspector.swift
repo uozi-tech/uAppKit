@@ -4,11 +4,9 @@ import Crypto
 /// 把一段已被 `PrivateKeyImporter` 校验通过的私钥文本，提炼成密钥库要展示的
 /// 元数据（类型 / 位数 / 公钥串 / 指纹）。
 ///
-/// 取公钥的两条路径：
-///  - **OpenSSH 容器**（`-----BEGIN OPENSSH PRIVATE KEY-----`）：公钥 blob 以明文
-///    嵌在文件里，直接抽出来即可——对任何算法（含加口令的）都成立，无需私钥分量。
-///  - **PEM**：无内嵌公钥，从 `ParsedPrivateKey` 反推（ed25519 用公钥原始字节，
-///    RSA 用公钥的 e/n，ECDSA 用 X9.63 公钥点）。
+/// 公钥一律从 `ParsedPrivateKey`（真正用来认证的那把）反推：ed25519 用公钥原始字节，RSA 用公钥的 e/n，
+/// ECDSA 用 X9.63 公钥点。不取 OpenSSH 容器里明文的公钥段——那是文件自己说的，可以和私钥段不是同一把
+/// （导入时 `OpenSSHContainer.requireMatchingPublicKey` 已经拒绝这种文件，这里再不依赖它）。
 ///
 /// 密钥库模型表达 ed25519 / rsa / ecdsa；DSA 等旧算法抛 `unsupportedAlgorithm`，
 /// 由调用方提示用户。
@@ -44,10 +42,6 @@ public nonisolated enum KeyImportInspector {
         parsed: ParsedPrivateKey,
         comment: String
     ) throws -> Material {
-        if let blob = openSSHEmbeddedPublicBlob(rawText) {
-            return try material(fromBlob: blob, comment: comment)
-        }
-        // PEM：从解析结果反推。
         switch parsed {
         case .ed25519(let key):
             let blob = SSHPublicMaterial.ed25519Blob(pub: [UInt8](key.publicKey.rawRepresentation))
@@ -94,63 +88,6 @@ public nonisolated enum KeyImportInspector {
         case .ecdsaP256: return "ecdsa-sha2-nistp256"
         case .ecdsaP384: return "ecdsa-sha2-nistp384"
         case .ecdsaP521: return "ecdsa-sha2-nistp521"
-        }
-    }
-
-    /// 从公钥 blob 的算法标识判定类型与位数。
-    private static func material(fromBlob blob: [UInt8], comment: String) throws -> Material {
-        var reader = SSHWireReader(blob)
-        let algo = String(decoding: (try? reader.readString()) ?? [], as: UTF8.self)
-        switch algo {
-        case "ssh-ed25519":
-            return material(type: .ed25519, bits: 256, blob: blob, comment: comment)
-        case "ssh-rsa":
-            _ = try? reader.readMPInt()                 // e
-            let n = (try? reader.readMPInt()) ?? []     // n（已去前导零的幅值）
-            return material(type: .rsa, bits: max(n.count * 8, 0), blob: blob, comment: comment)
-        case "ecdsa-sha2-nistp256":
-            return try ecdsaMaterial(blob: blob, reader: &reader, expectedCurve: "nistp256",
-                                     type: .ecdsaP256, bits: 256, comment: comment)
-        case "ecdsa-sha2-nistp384":
-            return try ecdsaMaterial(blob: blob, reader: &reader, expectedCurve: "nistp384",
-                                     type: .ecdsaP384, bits: 384, comment: comment)
-        case "ecdsa-sha2-nistp521":
-            return try ecdsaMaterial(blob: blob, reader: &reader, expectedCurve: "nistp521",
-                                     type: .ecdsaP521, bits: 521, comment: comment)
-        default:
-            throw InspectError.unsupportedAlgorithm
-        }
-    }
-
-    private static func ecdsaMaterial(blob: [UInt8], reader: inout SSHWireReader,
-                                      expectedCurve: String, type: SSHPrivateKeyKind,
-                                      bits: Int, comment: String) throws -> Material {
-        let curve = String(decoding: try reader.readString(), as: UTF8.self)
-        guard curve == expectedCurve else { throw InspectError.malformed }
-        _ = try reader.readString() // Q: SEC1/X9.63 public point
-        return material(type: type, bits: bits, blob: blob, comment: comment)
-    }
-
-    /// 解析 `openssh-key-v1` 容器，抽出明文公钥 blob。失败（非 OpenSSH 格式）返回 nil。
-    private static func openSSHEmbeddedPublicBlob(_ text: String) -> [UInt8]? {
-        guard text.contains("OPENSSH PRIVATE KEY") else { return nil }
-        let b64 = text
-            .split(separator: "\n")
-            .filter { !$0.hasPrefix("-----") }
-            .joined()
-        guard let data = Data(base64Encoded: b64) else { return nil }
-        let bytes = [UInt8](data)
-        let magic = Array("openssh-key-v1\0".utf8)
-        guard bytes.count > magic.count, Array(bytes[0..<magic.count]) == magic else { return nil }
-        var reader = SSHWireReader(Array(bytes[magic.count...]))
-        do {
-            _ = try reader.readString()   // ciphername
-            _ = try reader.readString()   // kdfname
-            _ = try reader.readString()   // kdfoptions
-            _ = try reader.readUInt32()   // num keys
-            return try reader.readString() // 第一把公钥 blob
-        } catch {
-            return nil
         }
     }
 }

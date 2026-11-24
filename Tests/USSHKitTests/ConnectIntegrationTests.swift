@@ -125,9 +125,13 @@ final class ConnectIntegrationTests: XCTestCase {
 
     /// 服务端不认这把公钥：报认证失败。服务器没宣告 `server-sig-algs`，自动退级开着，所以 SHA-2 两种都被拒后
     /// 同一条连接里最后试 `ssh-rsa`；关掉自动退级就只有两次。
+    ///
+    /// 服务端要认得 `ssh-rsa` 的签名才会把第三次记下来（`acceptsLegacyAlgorithms`，进程级登记旧算法）；以前这里
+    /// 没设，靠的是同一进程里别的用例先登记过——单独跑这一条时第三次就没被记下。客户端发 `ssh-rsa` 本身不需要
+    /// 登记，见 USSHCore 的 `OpenSSHSHA1UserAuthTests`（在新进程里对真实 sshd 验）。
     func testUnauthorizedRSAKeyIsRejected() async throws {
         let server = try await TestSSH.startServer(authentication: SSHTestAuthentication(
-            authorizedKeys: [TestSSH.username: []]))
+            authorizedKeys: [TestSSH.username: []])) { $0.acceptsLegacyAlgorithms = true }
         defer { Task { await server.stop() } }
 
         let message = await assertConnectionError({
@@ -217,7 +221,7 @@ final class ConnectIntegrationTests: XCTestCase {
 
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(target, jumpHost: self.jumpHost(bastion, password: "wrong"))
-        }) { if case .jumpHostFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .jumpHostFailed(let message, _) = $0 { return message } else { return nil } }
         let auth = SSHConnectionError.authenticationFailed(String(localized: "服务器拒绝了密码", bundle: ModuleBundle.bundle))
         XCTAssertEqual(message, String(
             localized: "无法连接 \(bastion.host):\(String(bastion.port)) —— \(auth.errorDescription!)",
@@ -232,7 +236,7 @@ final class ConnectIntegrationTests: XCTestCase {
 
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(target, credential: .password("wrong"), jumpHost: self.jumpHost(bastion))
-        }) { if case .jumpHostFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .jumpHostFailed(let message, _) = $0 { return message } else { return nil } }
         let auth = SSHConnectionError.authenticationFailed(String(localized: "服务器拒绝了密码", bundle: ModuleBundle.bundle))
         XCTAssertEqual(message, String(
             localized: "经跳板机连接 \(target.host):\(String(target.port)) 失败 —— \(auth.errorDescription!)",
@@ -248,7 +252,7 @@ final class ConnectIntegrationTests: XCTestCase {
 
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(target, jumpHost: self.jumpHost(bastion))
-        }) { if case .jumpHostFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .jumpHostFailed(let message, _) = $0 { return message } else { return nil } }
         let detail = SSHForwardingChannelFailure(kind: .connectFailed, detail: "")
             .userMessage(targetHost: target.host, targetPort: target.port)
         XCTAssertEqual(message, String(
@@ -267,7 +271,7 @@ final class ConnectIntegrationTests: XCTestCase {
         await assertConnectionError({
             _ = try await TestSSH.connect(target, jumpHost: SSHJumpHost(
                 host: "127.0.0.1", port: port, username: TestSSH.username, credential: .password(TestSSH.password)))
-        }) { if case .jumpHostFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .jumpHostFailed(let message, _) = $0 { return message } else { return nil } }
     }
 
     // MARK: - direct-tcpip
@@ -288,5 +292,102 @@ final class ConnectIntegrationTests: XCTestCase {
             let first = try await iterator.next()
             XCTAssertEqual(first.map { String(buffer: $0) }, "greeting")
         }
+    }
+}
+
+/// 经跳板机的失败带上那一跳的类别（`jumpHostFailed(_, cause:)`），app 据此分得清「重试不会好」与「网络断了」；
+/// 文字不变。两跳各测一遍。
+final class JumpHostFailureClassTests: XCTestCase {
+    private enum Class: Equatable { case authentication, hostKey, handshake, network, other }
+
+    private func classify(_ body: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async -> Class? {
+        do {
+            try await body()
+            XCTFail("应当失败", file: file, line: line)
+            return nil
+        } catch SSHConnectionError.jumpHostFailed(_, let cause) {
+            switch cause {
+            case .authenticationFailed?: return .authentication
+            case .hostKeyRejected?: return .hostKey
+            case .handshakeFailed?: return .handshake
+            case .connectFailed?: return .network
+            default: return .other
+            }
+        } catch {
+            XCTFail("应是 jumpHostFailed，实际 \(error)", file: file, line: line)
+            return nil
+        }
+    }
+
+    private func jump(_ bastion: SSHTestServer, password: String = TestSSH.password) -> SSHJumpHost {
+        SSHJumpHost(host: bastion.host, port: bastion.port, username: TestSSH.username, credential: .password(password))
+    }
+
+    func testAuthenticationOnEachHop() async throws {
+        let target = try await TestSSH.startServer()
+        let bastion = try await TestSSH.startServer()
+        defer { Task { await target.stop(); await bastion.stop() } }
+        let onBastion = await classify { _ = try await TestSSH.connect(target, jumpHost: self.jump(bastion, password: "wrong")) }
+        XCTAssertEqual(onBastion, .authentication)
+        let onTarget = await classify {
+            _ = try await TestSSH.connect(target, credential: .password("wrong"), jumpHost: self.jump(bastion))
+        }
+        XCTAssertEqual(onTarget, .authentication)
+    }
+
+    func testHostKeyOnEachHop() async throws {
+        let target = try await TestSSH.startServer()
+        let bastion = try await TestSSH.startServer()
+        defer { Task { await target.stop(); await bastion.stop() } }
+        // strict：库里没有的主机密钥一律拒绝。只记着跳板机时目标那一跳被拒，什么都没记时跳板机那一跳先被拒。
+        let onBastion = await classify { _ = try await TestSSH.connect(target, policy: .strict, jumpHost: self.jump(bastion)) }
+        XCTAssertEqual(onBastion, .hostKey)
+        let store = MemoryHostKeyStore(known: [TestSSH.hostKey(of: bastion)])
+        let onTarget = await classify {
+            _ = try await TestSSH.connect(target, store: store, policy: .strict, jumpHost: self.jump(bastion))
+        }
+        XCTAssertEqual(onTarget, .hostKey)
+    }
+
+    func testHandshakeOnEachHop() async throws {
+        let old = try await TestSSH.startServer { $0.keyExchangeAlgorithms = [SSHDiffieHellmanAlgorithm.group14SHA1.name] }
+        let modern = try await TestSSH.startServer()
+        defer { Task { await old.stop(); await modern.stop() } }
+        let onBastion = await classify {
+            _ = try await TestSSH.connect(modern, jumpHost: self.jump(old), legacyFallback: false)
+        }
+        XCTAssertEqual(onBastion, .handshake)
+        let onTarget = await classify {
+            _ = try await TestSSH.connect(old, jumpHost: self.jump(modern), legacyFallback: false)
+        }
+        XCTAssertEqual(onTarget, .handshake)
+    }
+
+    func testNetworkOnEachHop() async throws {
+        let target = try await TestSSH.startServer()
+        defer { Task { await target.stop() } }
+        let listener = try await ServerBootstrap(group: MultiThreadedEventLoopGroup.singleton)
+            .bind(host: "127.0.0.1", port: 0).get()
+        let closedPort = try XCTUnwrap(listener.localAddress?.port)
+        try await listener.close()
+
+        let onBastion = await classify {
+            _ = try await TestSSH.connect(target, jumpHost: SSHJumpHost(
+                host: "127.0.0.1", port: closedPort, username: TestSSH.username, credential: .password(TestSSH.password)))
+        }
+        XCTAssertEqual(onBastion, .network)
+
+        // 跳板机连得上，它连不上目标（目标端口没人听）：跳板机回原因码 2。
+        let bastion = try await TestSSH.startServer()
+        defer { Task { await bastion.stop() } }
+        let onTarget = await classify {
+            _ = try await SSHClientFactory.connect(
+                endpoint: SSHEndpoint(host: "127.0.0.1", port: closedPort, username: TestSSH.username,
+                                      jumpHost: self.jump(bastion)),
+                credential: .password(TestSSH.password), hostKeyStore: MemoryHostKeyStore(),
+                hostKeyPolicy: .insecureAcceptAll, connectTimeout: .seconds(10), approvalTimeout: .seconds(10),
+                approver: { _ in true }, legacyMemory: SSHLegacyEndpointMemory())
+        }
+        XCTAssertEqual(onTarget, .network)
     }
 }

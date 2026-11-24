@@ -798,6 +798,34 @@
         }
       }
     },
+    "OpenSSH：公钥段与私钥段不是同一把钥匙" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: the public section and the private section are not the same key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：公開鍵セクションと秘密鍵セクションが同じ鍵ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: 공개 키 섹션과 개인 키 섹션이 같은 키가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：公開金鑰區段與私密金鑰區段不是同一把金鑰"
+          }
+        }
+      }
+    },
     "OpenSSH：密钥数量非 1" : {
       "localizations" : {
         "en" : {
@@ -1190,6 +1218,34 @@
         }
       }
     },
+    "RSA 私钥分量超出范围或互相不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA private key components are out of range or inconsistent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 秘密鍵の要素が範囲外か、互いに矛盾しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 개인 키 구성 요소가 범위를 벗어나거나 서로 일치하지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 私密金鑰分量超出範圍或互相不一致"
+          }
+        }
+      }
+    },
     "RSA 私钥构造失败：%@" : {
       "localizations" : {
         "en" : {
@@ -1578,6 +1634,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SSH 本機轉送連接埠綁定失敗：%@"
+          }
+        }
+      }
+    },
+    "SSH 线格式：整数过长" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH wire format: integer too long"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH ワイヤ形式：整数が長すぎます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 와이어 형식: 정수가 너무 김"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 線路格式：整數過長"
           }
         }
       }
@@ -2590,6 +2674,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "檔案在讀取過程中變短了（應有 %1$lld 位元組，只讀到 %2$lld 位元組）"
+          }
+        }
+      }
+    },
+    "文件已上传到 %@，但没能替换 %@（旧文件已删除）：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file was uploaded to %1$@, but %2$@ couldn't be replaced (the old file was already deleted): %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルは %1$@ にアップロードされましたが、%2$@ を置き換えられませんでした（古いファイルは削除済み）：%3$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일은 %1$@에 업로드되었지만 %2$@을(를) 교체하지 못함(이전 파일은 이미 삭제됨): %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案已上傳到 %1$@，但沒能取代 %2$@（舊檔案已刪除）：%3$@"
           }
         }
       }
@@ -3632,6 +3744,34 @@
         }
       }
     },
+    "每次连接都要用口令重新解开私钥，轮数太高会让每次连接卡上很久。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The private key is unlocked with its passphrase on every connection, so a very high round count would stall every connection."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続のたびにパスフレーズで秘密鍵を解除するため、ラウンド数が多すぎると毎回の接続が長く止まってしまいます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결할 때마다 암호로 개인 키를 다시 풀어야 하므로 라운드 수가 너무 많으면 매번 연결이 오래 멈춤."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次連線都要用密碼重新解開私密金鑰，輪數太高會讓每次連線卡住很久。"
+          }
+        }
+      }
+    },
     "派生密钥长度非法" : {
       "localizations" : {
         "en" : {
@@ -3882,6 +4022,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法辨識私密金鑰內容：%@"
+          }
+        }
+      }
+    },
+    "私钥口令的派生轮数 %@ 过高（最多支持 %@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The private key's passphrase derivation uses %1$@ rounds, which is too many (at most %2$@ are supported)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵のパスフレーズの導出ラウンド数 %1$@ が多すぎます（対応しているのは %2$@ まで）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 암호의 파생 라운드 수 %1$@이(가) 너무 많음(최대 %2$@까지 지원)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰密碼的衍生輪數 %1$@ 過高（最多支援 %2$@）"
           }
         }
       }
@@ -4190,6 +4358,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此私密金鑰受密語保護，匯入前需要先解密。"
+          }
+        }
+      }
+    },
+    "请在终端用 ssh-keygen -p -a %@ -f <key> 以较低的轮数重新保存私钥后再导入。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-save the private key with fewer rounds in Terminal (ssh-keygen -p -a %@ -f <key>), then import it again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルで ssh-keygen -p -a %@ -f <key> を実行し、ラウンド数を下げて秘密鍵を保存し直してから読み込んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널에서 ssh-keygen -p -a %@ -f <key>로 라운드 수를 낮춰 개인 키를 다시 저장한 뒤 가져오세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在終端機用 ssh-keygen -p -a %@ -f <key> 以較低的輪數重新儲存私密金鑰後再匯入。"
           }
         }
       }
