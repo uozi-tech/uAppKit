@@ -5,7 +5,7 @@ USSHKit 依赖的 SSH 栈带着补丁，没法作为普通依赖引用（SwiftPM
 
 | target | 上游 | 基线 | 许可证 | 补丁 |
 |---|---|---|---|---|
-| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 5 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
+| `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 12 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
 | `Citadel`、`CCitadelBcrypt` | [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) | `0.12.1`（`ae8562f8`） | MIT（bcrypt 部分为 OpenBSD 的 BSD 许可） | 1 个，见 [Citadel/PATCHES.md](Citadel/PATCHES.md) |
 
 每个组件一个目录：`UPSTREAM`（来源与基线）、`patches/`（按序重放的补丁，`git format-patch` 格式）、
@@ -13,7 +13,7 @@ USSHKit 依赖的 SSH 栈带着补丁，没法作为普通依赖引用（SwiftPM
 
 为什么 NIOSSH 跟 apple/swift-nio-ssh：以前用的 Wellz26 fork 0.3.6 在 2022 年从 Apple 的 0.4.0 分出去，
 之后 Apple 的加固（超长 mpint、认证次数上限、缓冲上限、最大包长、`readVersion` 崩溃等）全都没有；而我们真正需要
-fork 的只有「自定义密钥 / 签名 / 密钥交换」的注册接口。现在这两个接口在 Apple 0.15.2 上作为补丁 0003 / 0004
+fork 的只有「自定义密钥 / 签名 / 密钥交换」的注册接口。现在这两个接口在 Apple 0.15.2 上作为补丁 0004 / 0005
 重做（公开 API 见 [swift-nio-ssh/EXTENSION-API.md](swift-nio-ssh/EXTENSION-API.md)），RSA、DH 等算法在
 USSHCore 里实现，不进 NIOSSH。Citadel 0.12.1 依赖那个 fork 的 API，在 Apple 版上编不过，重写期间停编、之后删除。
 
@@ -27,7 +27,8 @@ NIOSSH 连同上游自己的测试一起取（`UPSTREAM` 的 `PATHS` 有两项�
 - 模块名保持上游原名（`import Citadel` / `import NIOSSH` 不用改），代价是同一个构建图里不能再出现
   上游的 Citadel / swift-nio-ssh 包，否则模块重名编不过。依赖本包的 app 不要再单独引用它们；
   app 要直接链 Citadel 时用本包导出的 `Citadel` product。
-- Apache-2.0 第 4 条：NIOSSH 被改过的文件头部带一行修改声明（swift-nio-ssh 的补丁 0005），LICENSE.txt 随包保留。
+- Apache-2.0 第 4 条：NIOSSH 被改过的文件头部带一行修改声明（swift-nio-ssh 的最后一个补丁），LICENSE.txt 随包保留。
+  新补丁插在修改声明补丁之前，让它始终排在最后。
 
 ## 命令
 
@@ -68,4 +69,6 @@ bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 2026-11 改成现在这样：两个 fork 仓库不再需要，manifest 上的补丁（改依赖地址、裁掉示例与测试、放宽版本区间、
 导出 `CCitadelBcrypt`）随之全部消失，只剩源码补丁。`Sources/` 与那两个 fork 最后一版的源码逐字相同。
 2026-11-24 起 NIOSSH 的基线从 Wellz26 fork 0.3.6 换成 apple/swift-nio-ssh 0.15.2（连同它的测试），旧的 4 个补丁
-在新基线上重做或去掉，另加两个扩展接口，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
+在新基线上重做或去掉，另加两个扩展接口；同月又补上会话密钥续长、`sendChannelEOF` 状态写反、strict KEX
+（Terrapin 对策）、RFC 8308 `server-sig-algs`、公开的通用全局请求（keepalive）、CHANNEL_OPEN_FAILURE 原因码、认证委托用完
+即报错，共 12 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
