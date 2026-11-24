@@ -2793,6 +2793,34 @@
         }
       }
     },
+    "文件已上传到 %@，替换 %@ 的结果无法确定（旧文件可能已删除，新文件可能已就位）：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file was uploaded to %1$@, but whether %2$@ was replaced is unknown (the old file may have been deleted, and the new file may already be in place): %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルは %1$@ にアップロードされましたが、%2$@ を置き換えられたかどうかは不明です（古いファイルは削除済み、新しいファイルは配置済みの可能性があります）：%3$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일은 %1$@에 업로드되었지만 %2$@이(가) 교체되었는지 알 수 없음(이전 파일이 삭제되었고 새 파일이 이미 자리에 있을 수 있음): %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案已上傳到 %1$@，取代 %2$@ 的結果無法確定（舊檔案可能已刪除，新檔案可能已就位）：%3$@"
+          }
+        }
+      }
+    },
     "文件或路径不存在" : {
       "localizations" : {
         "en" : {

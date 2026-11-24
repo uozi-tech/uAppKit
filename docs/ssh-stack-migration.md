@@ -211,14 +211,19 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   `SSHFileTransferSession.download` 现在按 stat 的大小分段（每段 8 MiB）`readAll(expectedLength:)`：**下载过程中文件变短 →
   报 `shortRead`**（以前按成功返回、只拿到前一部分）；变长照旧读到 EOF。
 - **`SSHFileTransferSession` 失败时不丢数据**：
-  - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`）、
-    独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而目标还完好时删掉它。
-  - 没有 `posix-rename` 时，只在第一次改名回 `SSH_FX_FAILURE` / `FILE_ALREADY_EXISTS`、**且目标确实存在**时才先删目标再改名；
-    别的失败（权限不足……）原样报出、不碰目标。删了目标之后最后的改名又失败：**留着临时文件**，抛新的
-    `SSHFileTransferError.uploadNotMovedIntoPlace(temporaryPath:destination:reason:)`（app 对 `SSHFileTransferError` 的 `switch`
-    要补这个 case）。以前这一步会把临时文件也删掉，两份都没了。
-  - 下载先写同目录的隐藏临时文件（`.<名字>.usshkit-download-<随机>`），读完才原子地换到目标；远程打不开、读到一半失败、
-    被取消时，本地原来的文件不动（以前一开始就删掉了本地文件，失败时还会在目标位置留下半截）。
+  - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`；原名太长时
+    截短，保证不超过 255 字节）、独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而
+    目标还完好时删掉它。
+  - 没有 `posix-rename` 时，只在第一次改名回 `SSH_FX_FAILURE` / `FILE_ALREADY_EXISTS`、**且目标确实存在**（`lstat`：悬空的符号
+    链接也算）时才先删目标再改名；别的失败（权限不足……）原样报出、不碰目标。目标是符号链接时替换的是链接本身（与
+    `posix-rename`、与迁移前的实现一样）。删目标的请求发出之后：服务器明确拒绝 → 目标完好、删临时文件、原样报错；删成了、
+    最后的改名被拒 → **留着临时文件**，抛 `SSHFileTransferError.uploadNotMovedIntoPlace(temporaryPath:destination:reason:)`；
+    删除或改名没有确定的回答（被取消、断线）→ 留着临时文件，抛新的
+    **`SSHFileTransferError.uploadOutcomeUnknown(temporaryPath:destination:reason:)`**（旧文件可能已删、新文件可能已就位；
+    这种情形下取消**不**抛 `CancellationError`）。app 对 `SSHFileTransferError` 的 `switch` 要补这两个 case。
+  - 下载先写临时文件（系统给的 `.itemReplacementDirectory`，沙盒里存储面板只授权了那一个文件时也能用；拿不到才退回目标旁边的
+    隐藏文件），读完才原子地换到目标（`replaceItemAt` / `rename(2)`）；远程打不开、读到一半失败、被取消时，本地原来的文件不动。
+  - 取消时远程句柄在后台关（不等回答），临时文件的删除最多等 3 秒（`cleanupDeadline`）：链路卡死时取消也马上返回。
 - `SFTPFile` 是 `Sendable` 的值，可以从多个任务并发 `read` / `write`；`close()` 等在途的请求都回来再关，关之后不会再往旧句柄发请求。
 
 ## 7. 错误怎么分类
