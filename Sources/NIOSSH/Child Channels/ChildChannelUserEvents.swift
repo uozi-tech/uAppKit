@@ -15,9 +15,9 @@
 import NIOCore
 
 /// A namespace for SSH channel request events.
-public enum SSHChannelRequestEvent {
+public enum SSHChannelRequestEvent: Sendable {
     /// A request for the peer to allocate a pseudo-terminal.
-    public struct PseudoTerminalRequest: Hashable, NIOSSHSendable {
+    public struct PseudoTerminalRequest: Hashable, Sendable {
         /// Whether a reply to this PTY request is desired.
         public var wantReply: Bool
 
@@ -59,31 +59,35 @@ public enum SSHChannelRequestEvent {
 
         fileprivate var _terminalPixelHeight: UInt32
 
-        public init(wantReply: Bool,
-                    term: String,
-                    terminalCharacterWidth: Int,
-                    terminalRowHeight: Int,
-                    terminalPixelWidth: Int,
-                    terminalPixelHeight: Int,
-                    terminalModes: SSHTerminalModes)
-        {
-            self = .init(wantReply: wantReply,
-                         term: term,
-                         terminalCharacterWidth: UInt32(terminalCharacterWidth),
-                         terminalRowHeight: UInt32(terminalRowHeight),
-                         terminalPixelWidth: UInt32(terminalPixelWidth),
-                         terminalPixelHeight: UInt32(terminalPixelHeight),
-                         terminalModes: terminalModes)
+        public init(
+            wantReply: Bool,
+            term: String,
+            terminalCharacterWidth: Int,
+            terminalRowHeight: Int,
+            terminalPixelWidth: Int,
+            terminalPixelHeight: Int,
+            terminalModes: SSHTerminalModes
+        ) {
+            self = .init(
+                wantReply: wantReply,
+                term: term,
+                terminalCharacterWidth: UInt32(terminalCharacterWidth),
+                terminalRowHeight: UInt32(terminalRowHeight),
+                terminalPixelWidth: UInt32(terminalPixelWidth),
+                terminalPixelHeight: UInt32(terminalPixelHeight),
+                terminalModes: terminalModes
+            )
         }
 
-        internal init(wantReply: Bool,
-                      term: String,
-                      terminalCharacterWidth: UInt32,
-                      terminalRowHeight: UInt32,
-                      terminalPixelWidth: UInt32,
-                      terminalPixelHeight: UInt32,
-                      terminalModes: SSHTerminalModes)
-        {
+        internal init(
+            wantReply: Bool,
+            term: String,
+            terminalCharacterWidth: UInt32,
+            terminalRowHeight: UInt32,
+            terminalPixelWidth: UInt32,
+            terminalPixelHeight: UInt32,
+            terminalModes: SSHTerminalModes
+        ) {
             self.wantReply = wantReply
             self.term = term
             self._terminalCharacterWidth = terminalCharacterWidth
@@ -95,7 +99,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// An ``EnvironmentRequest`` communicates a single environment variable the peer wants set.
-    public struct EnvironmentRequest: Hashable, NIOSSHSendable {
+    public struct EnvironmentRequest: Hashable, Sendable {
         /// The name of the environment variable.
         public var name: String
 
@@ -113,7 +117,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// A request for this session to invoke a shell.
-    public struct ShellRequest: Hashable, NIOSSHSendable {
+    public struct ShellRequest: Hashable, Sendable {
         /// Whether this request should be replied to.
         public var wantReply: Bool
 
@@ -123,7 +127,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// A request for this session to exec a command.
-    public struct ExecRequest: Hashable {
+    public struct ExecRequest: Hashable, Sendable {
         /// The command to exec.
         public var command: String
 
@@ -137,7 +141,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// The command has exited with the given exit status.
-    public struct ExitStatus: Hashable, NIOSSHSendable {
+    public struct ExitStatus: Hashable, Sendable {
         /// Whether this request should be replied to.
         public var wantReply: Bool {
             false
@@ -165,7 +169,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// A command has terminated in response to a signal.
-    public struct ExitSignal: Hashable, NIOSSHSendable {
+    public struct ExitSignal: Hashable, Sendable {
         /// Whether this request should be replied to.
         public var wantReply: Bool {
             false
@@ -192,7 +196,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// A request for this session to invoke a specific subsystem.
-    public struct SubsystemRequest: Hashable, NIOSSHSendable {
+    public struct SubsystemRequest: Hashable, Sendable {
         /// Whether this request wants a reply.
         public var wantReply: Bool
 
@@ -208,7 +212,7 @@ public enum SSHChannelRequestEvent {
     /// A notification that the user has changed the size of the window.
     ///
     /// Only useful if a pseudo-terminal has been allocated.
-    public struct WindowChangeRequest: Hashable, NIOSSHSendable {
+    public struct WindowChangeRequest: Hashable, Sendable {
         /// Whether a reply to this window change request is desired.
         public var wantReply: Bool {
             false
@@ -246,22 +250,26 @@ public enum SSHChannelRequestEvent {
 
         fileprivate var _terminalPixelHeight: UInt32
 
-        public init(terminalCharacterWidth: Int,
-                    terminalRowHeight: Int,
-                    terminalPixelWidth: Int,
-                    terminalPixelHeight: Int)
-        {
-            self = .init(terminalCharacterWidth: UInt32(terminalCharacterWidth),
-                         terminalRowHeight: UInt32(terminalRowHeight),
-                         terminalPixelWidth: UInt32(terminalPixelWidth),
-                         terminalPixelHeight: UInt32(terminalPixelHeight))
+        public init(
+            terminalCharacterWidth: Int,
+            terminalRowHeight: Int,
+            terminalPixelWidth: Int,
+            terminalPixelHeight: Int
+        ) {
+            self = .init(
+                terminalCharacterWidth: UInt32(terminalCharacterWidth),
+                terminalRowHeight: UInt32(terminalRowHeight),
+                terminalPixelWidth: UInt32(terminalPixelWidth),
+                terminalPixelHeight: UInt32(terminalPixelHeight)
+            )
         }
 
-        internal init(terminalCharacterWidth: UInt32,
-                      terminalRowHeight: UInt32,
-                      terminalPixelWidth: UInt32,
-                      terminalPixelHeight: UInt32)
-        {
+        internal init(
+            terminalCharacterWidth: UInt32,
+            terminalRowHeight: UInt32,
+            terminalPixelWidth: UInt32,
+            terminalPixelHeight: UInt32
+        ) {
             self._terminalCharacterWidth = terminalCharacterWidth
             self._terminalRowHeight = terminalRowHeight
             self._terminalPixelWidth = terminalPixelWidth
@@ -273,7 +281,7 @@ public enum SSHChannelRequestEvent {
     ///
     /// This is sent by the server. If "client can do" is true, the client may do flow control with
     /// ctrl+s and ctrl+q.
-    public struct LocalFlowControlRequest: Hashable, NIOSSHSendable {
+    public struct LocalFlowControlRequest: Hashable, Sendable {
         /// Whether a reply to this request is desired.
         public var wantReply: Bool {
             false
@@ -288,7 +296,7 @@ public enum SSHChannelRequestEvent {
     }
 
     /// Delivers a signal to the remote process.
-    public struct SignalRequest: Hashable, NIOSSHSendable {
+    public struct SignalRequest: Hashable, Sendable {
         /// Whether a reply to this request is desired.
         public var wantReply: Bool {
             false
@@ -307,35 +315,39 @@ extension SSHChannelRequestEvent {
     /// Constructs a channel request event and wraps it up in an Any.
     ///
     /// This is usually used just prior to firing this into the pipeline.
-    static func fromMessage(_ message: SSHMessage.ChannelRequestMessage) -> Any? {
+    internal static func fromMessage(_ message: SSHMessage.ChannelRequestMessage) -> (any Sendable)? {
         switch message.type {
         case .env(let name, let value):
-            return EnvironmentRequest(wantReply: message.wantReply, name: name, value: value) as Any
+            return EnvironmentRequest(wantReply: message.wantReply, name: name, value: value)
         case .exec(let command):
-            return ExecRequest(command: command, wantReply: message.wantReply) as Any
+            return ExecRequest(command: command, wantReply: message.wantReply)
         case .exitStatus(let code):
-            return ExitStatus(exitStatus: code) as Any
+            return ExitStatus(exitStatus: code)
         case .exitSignal(let name, let dumpedCore, let errorMessage, let language):
-            return ExitSignal(signalName: name, errorMessage: errorMessage, language: language, dumpedCore: dumpedCore) as Any
+            return ExitSignal(signalName: name, errorMessage: errorMessage, language: language, dumpedCore: dumpedCore)
         case .ptyReq(let ptyReq):
-            return PseudoTerminalRequest(wantReply: message.wantReply,
-                                         term: ptyReq.termVariable,
-                                         terminalCharacterWidth: ptyReq.characterWidth,
-                                         terminalRowHeight: ptyReq.rowHeight,
-                                         terminalPixelWidth: ptyReq.pixelWidth,
-                                         terminalPixelHeight: ptyReq.pixelHeight,
-                                         terminalModes: ptyReq.terminalModes)
+            return PseudoTerminalRequest(
+                wantReply: message.wantReply,
+                term: ptyReq.termVariable,
+                terminalCharacterWidth: ptyReq.characterWidth,
+                terminalRowHeight: ptyReq.rowHeight,
+                terminalPixelWidth: ptyReq.pixelWidth,
+                terminalPixelHeight: ptyReq.pixelHeight,
+                terminalModes: ptyReq.terminalModes
+            )
         case .shell:
-            return ShellRequest(wantReply: message.wantReply) as Any
+            return ShellRequest(wantReply: message.wantReply)
         case .subsystem(let subsystem):
-            return SubsystemRequest(subsystem: subsystem, wantReply: message.wantReply) as Any
+            return SubsystemRequest(subsystem: subsystem, wantReply: message.wantReply)
         case .windowChange(let windowChange):
-            return WindowChangeRequest(terminalCharacterWidth: windowChange.characterWidth,
-                                       terminalRowHeight: windowChange.rowHeight,
-                                       terminalPixelWidth: windowChange.pixelWidth,
-                                       terminalPixelHeight: windowChange.pixelHeight)
+            return WindowChangeRequest(
+                terminalCharacterWidth: windowChange.characterWidth,
+                terminalRowHeight: windowChange.rowHeight,
+                terminalPixelWidth: windowChange.pixelWidth,
+                terminalPixelHeight: windowChange.pixelHeight
+            )
         case .xonXoff(let clientCanDo):
-            return LocalFlowControlRequest(clientCanDo: clientCanDo) as Any
+            return LocalFlowControlRequest(clientCanDo: clientCanDo)
         case .signal(let signalName):
             return SignalRequest(signal: signalName)
         case .unknown:
@@ -345,12 +357,12 @@ extension SSHChannelRequestEvent {
 }
 
 /// A channel success message was received in reply to a channel request.
-public struct ChannelSuccessEvent: Hashable, NIOSSHSendable {
+public struct ChannelSuccessEvent: Hashable, Sendable {
     public init() {}
 }
 
 /// A channel failure message was received in reply to a channel request.
-public struct ChannelFailureEvent: Hashable, NIOSSHSendable {
+public struct ChannelFailureEvent: Hashable, Sendable {
     public init() {}
 }
 
@@ -358,72 +370,108 @@ public struct ChannelFailureEvent: Hashable, NIOSSHSendable {
 
 extension SSHMessage {
     init(_ event: SSHChannelRequestEvent.ShellRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel, type: .shell, wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .shell,
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.PseudoTerminalRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel,
-                                                       type: .ptyReq(.init(termVariable: event.term,
-                                                                           characterWidth: event._terminalCharacterWidth,
-                                                                           rowHeight: event._terminalRowHeight,
-                                                                           pixelWidth: event._terminalPixelWidth,
-                                                                           pixelHeight: event._terminalPixelHeight,
-                                                                           terminalModes: event.terminalModes)),
-                                                       wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .ptyReq(
+                .init(
+                    termVariable: event.term,
+                    characterWidth: event._terminalCharacterWidth,
+                    rowHeight: event._terminalRowHeight,
+                    pixelWidth: event._terminalPixelWidth,
+                    pixelHeight: event._terminalPixelHeight,
+                    terminalModes: event.terminalModes
+                )
+            ),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.ExecRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel, type: .exec(event.command), wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .exec(event.command),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.EnvironmentRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel, type: .env(event.name, event.value), wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .env(event.name, event.value),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.ExitStatus, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel, type: .exitStatus(UInt32(event.exitStatus)), wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .exitStatus(UInt32(event.exitStatus)),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.ExitSignal, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel,
-                                                       type: .exitSignal(event.signalName, event.dumpedCore, event.errorMessage, event.language),
-                                                       wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .exitSignal(event.signalName, event.dumpedCore, event.errorMessage, event.language),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.SubsystemRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel,
-                                                       type: .subsystem(event.subsystem),
-                                                       wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .subsystem(event.subsystem),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.WindowChangeRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel,
-                                                       type: .windowChange(.init(characterWidth: event._terminalCharacterWidth,
-                                                                                 rowHeight: event._terminalRowHeight,
-                                                                                 pixelWidth: event._terminalPixelWidth,
-                                                                                 pixelHeight: event._terminalPixelHeight)),
-                                                       wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .windowChange(
+                .init(
+                    characterWidth: event._terminalCharacterWidth,
+                    rowHeight: event._terminalRowHeight,
+                    pixelWidth: event._terminalPixelWidth,
+                    pixelHeight: event._terminalPixelHeight
+                )
+            ),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.LocalFlowControlRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel,
-                                                       type: .xonXoff(event.clientCanDo),
-                                                       wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .xonXoff(event.clientCanDo),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 
     init(_ event: SSHChannelRequestEvent.SignalRequest, recipientChannel: UInt32) {
-        let message = SSHMessage.ChannelRequestMessage(recipientChannel: recipientChannel,
-                                                       type: .signal(event.signal),
-                                                       wantReply: event.wantReply)
+        let message = SSHMessage.ChannelRequestMessage(
+            recipientChannel: recipientChannel,
+            type: .signal(event.signal),
+            wantReply: event.wantReply
+        )
         self = .channelRequest(message)
     }
 }

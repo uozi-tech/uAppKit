@@ -28,21 +28,21 @@ extension SSHConnectionStateMachine {
 
         var remoteVersion: String
 
+        var protectionSchemes: [NIOSSHTransportProtection.Type]
+
         var sessionIdentifier: ByteBuffer
 
         /// The backing state machine.
         var keyExchangeStateMachine: SSHKeyExchangeStateMachine
-
-        let connectionAttributes: SSHConnectionStateMachine.Attributes
 
         init(_ previousState: ReceivedKexInitWhenActiveState) {
             self.role = previousState.role
             self.parser = previousState.parser
             self.serializer = previousState.serializer
             self.remoteVersion = previousState.remoteVersion
+            self.protectionSchemes = previousState.protectionSchemes
             self.sessionIdentifier = previousState.sessionIdentifier
             self.keyExchangeStateMachine = previousState.keyExchangeStateMachine
-            self.connectionAttributes = previousState.connectionAttributes
         }
 
         init(_ previousState: SentKexInitWhenActiveState) {
@@ -50,9 +50,13 @@ extension SSHConnectionStateMachine {
             self.parser = previousState.parser
             self.serializer = previousState.serializer
             self.remoteVersion = previousState.remoteVersion
+            self.protectionSchemes = previousState.protectionSchemes
             self.sessionIdentifier = previousState.sessionIdentitifier
             self.keyExchangeStateMachine = previousState.keyExchangeStateMachine
-            self.connectionAttributes = previousState.connectionAttributes
+        }
+
+        mutating func bufferInboundData(_ data: inout ByteBuffer) {
+            self.parser.append(bytes: &data)
         }
     }
 }

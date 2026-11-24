@@ -50,30 +50,42 @@ public final class NIOSSHHandler {
 
     // A buffer of pending channel initializations. A channel initialization is pending if
     // we're attempting to initialize a channel before user auth is complete.
-    private var pendingChannelInitializations: CircularBuffer<(promise: EventLoopPromise<Channel>?, channelType: SSHChannelType, initializer: SSHChildChannel.Initializer?)>
+    private var pendingChannelInitializations:
+        CircularBuffer<
+            (
+                promise: EventLoopPromise<Channel>?, channelType: SSHChannelType,
+                initializer: SSHChildChannel.Initializer?
+            )
+        >
 
     // A buffer of pending global requests. A global request is pending if we tried to send it before user auth completed.
     private var pendingGlobalRequests: CircularBuffer<(SSHMessage.GlobalRequestMessage, PendingGlobalRequestResponse?)>
 
     private var pendingGlobalRequestResponses: CircularBuffer<PendingGlobalRequestResponse?>
 
-    // The authenticated username, if there was one.
-    public var username: String? { stateMachine.username }
-    
     /// Construct a new ``NIOSSHHandler``.
     ///
     /// - parameters:
     ///     - role: The role of this channel in the connection, client or server.
     ///     - allocator: An allocator for `ByteBuffer`s
     ///     - inboundChildChannelInitializer: A callback that will be invoked whenever the remote peer attempts to construct a new SSH channel in a connection.
-    public init(role: SSHConnectionRole, allocator: ByteBufferAllocator, inboundChildChannelInitializer: ((Channel, SSHChannelType) -> EventLoopFuture<Void>)?) {
-        self.stateMachine = SSHConnectionStateMachine(role: role)
+    public init(
+        role: SSHConnectionRole,
+        allocator: ByteBufferAllocator,
+        inboundChildChannelInitializer: ((Channel, SSHChannelType) -> EventLoopFuture<Void>)?
+    ) {
+        self.stateMachine = SSHConnectionStateMachine(role: role, protectionSchemes: role.transportProtectionSchemes)
         self.pendingWrite = false
         self.outboundFrameBuffer = allocator.buffer(capacity: 1024)
         self.pendingChannelInitializations = CircularBuffer(initialCapacity: 4)
         self.pendingGlobalRequests = CircularBuffer(initialCapacity: 4)
         self.pendingGlobalRequestResponses = CircularBuffer(initialCapacity: 4)
-        self.multiplexer = SSHChannelMultiplexer(delegate: self, allocator: allocator, childChannelInitializer: inboundChildChannelInitializer, maximumPacketSize: role.maximumPacketSize)
+        self.multiplexer = SSHChannelMultiplexer(
+            delegate: self,
+            allocator: allocator,
+            childChannelInitializer: inboundChildChannelInitializer,
+            maximumPacketSize: role.maximumPacketSize
+        )
     }
 }
 
@@ -108,8 +120,8 @@ extension NIOSSHHandler {
 extension NIOSSHHandler: ChannelDuplexHandler {
     public typealias InboundIn = ByteBuffer
     public typealias OutboundOut = ByteBuffer
-    public typealias InboundOut = Never // Temporary
-    public typealias OutboundIn = Never // Temporary
+    public typealias InboundOut = Never  // Temporary
+    public typealias OutboundIn = Never  // Temporary
 
     public func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
@@ -162,7 +174,10 @@ extension NIOSSHHandler: ChannelDuplexHandler {
         self.stateMachine.bufferInboundData(&data)
 
         do {
-            while let result = try self.stateMachine.processInboundMessage(allocator: context.channel.allocator, loop: context.eventLoop) {
+            while let result = try self.stateMachine.processInboundMessage(
+                allocator: context.channel.allocator,
+                loop: context.eventLoop
+            ) {
                 try self.processInboundMessageResult(result, context: context)
             }
         } catch {
@@ -183,18 +198,30 @@ extension NIOSSHHandler: ChannelDuplexHandler {
         self.sendGlobalRequestsIfPossible()
     }
 
-    private func writeMessage(_ multiMessage: SSHMultiMessage, context: ChannelHandlerContext, promise: EventLoopPromise<Void>? = nil) throws {
+    private func writeMessage(
+        _ multiMessage: SSHMultiMessage,
+        context: ChannelHandlerContext,
+        promise: EventLoopPromise<Void>? = nil
+    ) throws {
         self.outboundFrameBuffer.clear()
 
         for message in multiMessage {
-            try self.stateMachine.processOutboundMessage(message, buffer: &self.outboundFrameBuffer, allocator: context.channel.allocator, loop: context.eventLoop)
+            try self.stateMachine.processOutboundMessage(
+                message,
+                buffer: &self.outboundFrameBuffer,
+                allocator: context.channel.allocator,
+                loop: context.eventLoop
+            )
             self.pendingWrite = true
         }
 
         context.write(self.wrapOutboundOut(self.outboundFrameBuffer), promise: promise)
     }
 
-    private func processInboundMessageResult(_ result: SSHConnectionStateMachine.StateMachineInboundProcessResult, context: ChannelHandlerContext) throws {
+    private func processInboundMessageResult(
+        _ result: SSHConnectionStateMachine.StateMachineInboundProcessResult,
+        context: ChannelHandlerContext
+    ) throws {
         switch result {
         case .emitMessage(let message):
             try self.writeMessage(message, context: context)
@@ -202,7 +229,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
             break
         case .possibleFutureMessage(let future):
             // TODO(cory): This is not right, but for now it's good enough.
-            future.whenComplete { result in
+            future.hop(to: context.eventLoop).assumeIsolatedUnsafeUnchecked().whenComplete { result in
                 switch result {
                 case .success(.some(let message)):
                     do {
@@ -245,8 +272,14 @@ extension NIOSSHHandler {
     ///     - promise: An `EventLoopPromise` that will be fulfilled with the channel when it becomes active.
     ///     - channelType: The type of the channel to create. Defaults to ``SSHChannelType/session`` for running remote processes.
     ///     - channelInitializer: A callback that will be invoked to initialize the channel.
-    public func createChannel(_ promise: EventLoopPromise<Channel>? = nil, channelType: SSHChannelType = .session, _ channelInitializer: ((Channel, SSHChannelType) -> EventLoopFuture<Void>)?) {
-        self.pendingChannelInitializations.append((promise: promise, channelType: channelType, initializer: channelInitializer))
+    public func createChannel(
+        _ promise: EventLoopPromise<Channel>? = nil,
+        channelType: SSHChannelType = .session,
+        _ channelInitializer: ((Channel, SSHChannelType) -> EventLoopFuture<Void>)?
+    ) {
+        self.pendingChannelInitializations.append(
+            (promise: promise, channelType: channelType, initializer: channelInitializer)
+        )
         self.createPendingChannelsIfPossible()
     }
 
@@ -279,7 +312,10 @@ extension NIOSSHHandler {
     ///     - request: The request to send.
     ///     - promise: An `EventLoopPromise` that will be fulfilled when the request is accepted. Will error
     ///         if the request was rejected or could not be sent.
-    public func sendTCPForwardingRequest(_ request: GlobalRequest.TCPForwardingRequest, promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse?>? = nil) {
+    public func sendTCPForwardingRequest(
+        _ request: GlobalRequest.TCPForwardingRequest,
+        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse?>? = nil
+    ) {
         let message = SSHMessage.GlobalRequestMessage(wantReply: true, type: .init(request))
         self.pendingGlobalRequests.append((value: message, promise: promise.map { .tcpForwarding($0) }))
         self.sendGlobalRequestsIfPossible()
@@ -288,24 +324,29 @@ extension NIOSSHHandler {
     /// Sends a global request of any kind. This is commonly used for TCP forwarding requests, but can be used to extend the protocol.
     ///
     /// This function is **not** thread-safe: it may only be called from on the channel.
-    func sendGlobalRequestMessage(_ message: SSHMessage.GlobalRequestMessage, promise: EventLoopPromise<ByteBuffer?>? = nil) {
+    func sendGlobalRequestMessage(
+        _ message: SSHMessage.GlobalRequestMessage,
+        promise: EventLoopPromise<ByteBuffer?>? = nil
+    ) {
         self.pendingGlobalRequests.append((value: message, promise: promise.map { .unknown($0) }))
         self.sendGlobalRequestsIfPossible()
     }
 
-    private func dropAllPendingGlobalRequests(_ error: Error) {
+    fileprivate func dropAllPendingGlobalRequests(_ error: Error) {
         while let next = self.pendingGlobalRequests.popFirst() {
             next.1?.fail(error)
         }
     }
 
-    private func dropUnsatisfiedGlobalRequests(_ error: Error) {
+    fileprivate func dropUnsatisfiedGlobalRequests(_ error: Error) {
         while let next = self.pendingGlobalRequestResponses.popFirst() {
             next?.fail(error)
         }
     }
 
-    private func handleGlobalRequestResponse(_ response: SSHConnectionStateMachine.StateMachineInboundProcessResult.GlobalRequestResponse) throws {
+    fileprivate func handleGlobalRequestResponse(
+        _ response: SSHConnectionStateMachine.StateMachineInboundProcessResult.GlobalRequestResponse
+    ) throws {
         guard let next = self.pendingGlobalRequestResponses.popFirst() else {
             throw NIOSSHError.unexpectedGlobalRequestResponse
         }
@@ -318,7 +359,7 @@ extension NIOSSHHandler {
         }
     }
 
-    private func handleGlobalRequest(_ message: SSHMessage.GlobalRequestMessage) throws {
+    fileprivate func handleGlobalRequest(_ message: SSHMessage.GlobalRequestMessage) throws {
         guard let context = context else {
             // Weird, somehow we're out of the channel now. Drop this.
             return
@@ -342,22 +383,39 @@ extension NIOSSHHandler {
 
             switch self.stateMachine.role {
             case .client(let config):
-                config.globalRequestDelegate.tcpForwardingRequest(.listen(host: host, port: Int(port)), handler: self, promise: responsePromise)
+                config.globalRequestDelegate.tcpForwardingRequest(
+                    .listen(host: host, port: Int(port)),
+                    handler: self,
+                    promise: responsePromise
+                )
             case .server(let config):
-                config.globalRequestDelegate.tcpForwardingRequest(.listen(host: host, port: Int(port)), handler: self, promise: responsePromise)
+                config.globalRequestDelegate.tcpForwardingRequest(
+                    .listen(host: host, port: Int(port)),
+                    handler: self,
+                    promise: responsePromise
+                )
             }
         case .cancelTcpipForward(let host, let port):
             responsePromise = context.eventLoop.makePromise()
 
             switch self.stateMachine.role {
             case .client(let config):
-                config.globalRequestDelegate.tcpForwardingRequest(.cancel(host: host, port: Int(port)), handler: self, promise: responsePromise)
+                config.globalRequestDelegate.tcpForwardingRequest(
+                    .cancel(host: host, port: Int(port)),
+                    handler: self,
+                    promise: responsePromise
+                )
             case .server(let config):
-                config.globalRequestDelegate.tcpForwardingRequest(.cancel(host: host, port: Int(port)), handler: self, promise: responsePromise)
+                config.globalRequestDelegate.tcpForwardingRequest(
+                    .cancel(host: host, port: Int(port)),
+                    handler: self,
+                    promise: responsePromise
+                )
             }
         }
 
-        responsePromise.futureResult.whenComplete { result in
+        // The promise is created a few lines above on the context's event loop, so this is safe.
+        responsePromise.futureResult.assumeIsolatedUnsafeUnchecked().whenComplete { result in
             guard message.wantReply else {
                 // Nothing to do.
                 return
@@ -366,7 +424,14 @@ extension NIOSSHHandler {
             do {
                 switch result {
                 case .success(let tcpForwardingResponse):
-                    try self.writeMessage(.init(.requestSuccess(.init(.tcpForwarding(tcpForwardingResponse), allocator: context.channel.allocator))), context: context)
+                    try self.writeMessage(
+                        .init(
+                            .requestSuccess(
+                                .init(.tcpForwarding(tcpForwardingResponse), allocator: context.channel.allocator)
+                            )
+                        ),
+                        context: context
+                    )
                     context.flush()
                 case .failure:
                     // We don't care why, we just say no.
@@ -401,11 +466,15 @@ extension NIOSSHHandler {
         }
     }
 
-    private func sendGlobalRequest(_ request: SSHMessage.GlobalRequestMessage, promise: PendingGlobalRequestResponse?, context: ChannelHandlerContext) {
+    private func sendGlobalRequest(
+        _ request: SSHMessage.GlobalRequestMessage,
+        promise: PendingGlobalRequestResponse?,
+        context: ChannelHandlerContext
+    ) {
         // Sending a single global request is tricky, because we don't want to succeed the promise until we have the result of the
         // request. That means we need a buffer of promises for request success/failure messages, as well as to create new promises.
         let writePromise = context.eventLoop.makePromise(of: Void.self)
-        writePromise.futureResult.whenComplete { result in
+        writePromise.futureResult.assumeIsolatedUnsafeUnchecked().whenComplete { result in
             switch result {
             case .success:
                 guard self.context != nil else {
@@ -440,10 +509,14 @@ extension NIOSSHHandler {
     // This function mostly exists for testing purposes: we don't initiate re-keying today because it's not
     // well-supported by evidence. But we want to be able to test against implementations who do, so we have support for
     // kicking it off.
-    func _rekey() throws {
+    internal func _rekey() throws {
         // As this is test-only there are a bunch of preconditions in here, we don't really mind if we hit them in testing.
         var buffer = self.context!.channel.allocator.buffer(capacity: 1024)
-        try self.stateMachine.beginRekeying(buffer: &buffer, allocator: self.context!.channel.allocator, loop: self.context!.eventLoop)
+        try self.stateMachine.beginRekeying(
+            buffer: &buffer,
+            allocator: self.context!.channel.allocator,
+            loop: self.context!.eventLoop
+        )
         self.context!.writeAndFlush(self.wrapOutboundOut(buffer), promise: nil)
     }
 }
@@ -452,7 +525,7 @@ extension NIOSSHHandler {
 
 extension NIOSSHHandler {
     // This function is for testing purposes only.
-    func _disconnect() throws {
+    internal func _disconnect() throws {
         // As this is test-only there are a bunch of preconditions in here, we don't really mind if we hit them in testing.
         try self.writeMessage(.init(.disconnect(.init(reason: 0, description: "", tag: ""))), context: self.context!)
         self.context!.flush()

@@ -14,9 +14,9 @@
 
 import NIOCore
 
-/// `SSHChannelType` represents the type of a single SSH channel.
+/// ``SSHChannelType`` represents the type of a single SSH channel.
 ///
-/// SSH Channels are always one of a number of types. The most common type is "session", which
+/// SSH Channels are always one of a number of types. The most common type is ``SSHChannelType/session``, which
 /// encompasses remote execution of a program, whether that be a single binary, a shell, a subsystem,
 /// or something else.
 ///
@@ -26,7 +26,7 @@ import NIOCore
 ///
 /// Some channel types have associated metadata. That metadata can be retrieved from SSH channels using
 /// channel options.
-public enum SSHChannelType: Equatable, NIOSSHSendable {
+public enum SSHChannelType: Equatable, Sendable {
     /// A "session" is remote execution of a program.
     case session
 
@@ -37,8 +37,9 @@ public enum SSHChannelType: Equatable, NIOSSHSendable {
     case forwardedTCPIP(ForwardedTCPIP)
 }
 
-public extension SSHChannelType {
-    struct DirectTCPIP: Equatable, NIOSSHSendable {
+extension SSHChannelType {
+    /// ``SSHChannelType/DirectTCPIP`` is a request from the client to the server to open an outbound connection.
+    public struct DirectTCPIP: Equatable, Sendable {
         /// The target host for the forwarded TCP connection.
         public var targetHost: String
 
@@ -71,8 +72,10 @@ public extension SSHChannelType {
     }
 }
 
-public extension SSHChannelType {
-    struct ForwardedTCPIP: Equatable, NIOSSHSendable {
+extension SSHChannelType {
+    /// ``SSHChannelType/ForwardedTCPIP`` is a connection that was accepted from a listening socket on the
+    /// server and is being forwarded to the client.
+    public struct ForwardedTCPIP: Equatable, Sendable {
         /// The host the remote peer connected to. This should be identical to the one that was requested.
         public var listeningHost: String
 
@@ -111,9 +114,21 @@ extension SSHChannelType {
         case .session:
             self = .session
         case .directTCPIP(let message):
-            self = .directTCPIP(.init(targetHost: message.hostToConnectTo, targetPort: message.portToConnectTo, originatorAddress: message.originatorAddress))
+            self = .directTCPIP(
+                .init(
+                    targetHost: message.hostToConnectTo,
+                    targetPort: message.portToConnectTo,
+                    originatorAddress: message.originatorAddress
+                )
+            )
         case .forwardedTCPIP(let message):
-            self = .forwardedTCPIP(.init(listeningHost: message.hostListening, listeningPort: message.portListening, originatorAddress: message.originatorAddress))
+            self = .forwardedTCPIP(
+                .init(
+                    listeningHost: message.hostListening,
+                    listeningPort: message.portListening,
+                    originatorAddress: message.originatorAddress
+                )
+            )
         }
     }
 }
@@ -124,9 +139,21 @@ extension SSHMessage.ChannelOpenMessage.ChannelType {
         case .session:
             self = .session
         case .directTCPIP(let data):
-            self = .directTCPIP(.init(hostToConnectTo: data.targetHost, portToConnectTo: data._targetPort, originatorAddress: data.originatorAddress))
+            self = .directTCPIP(
+                .init(
+                    hostToConnectTo: data.targetHost,
+                    portToConnectTo: data._targetPort,
+                    originatorAddress: data.originatorAddress
+                )
+            )
         case .forwardedTCPIP(let data):
-            self = .forwardedTCPIP(.init(hostListening: data.listeningHost, portListening: data._listeningPort, originatorAddress: data.originatorAddress))
+            self = .forwardedTCPIP(
+                .init(
+                    hostListening: data.listeningHost,
+                    portListening: data._listeningPort,
+                    originatorAddress: data.originatorAddress
+                )
+            )
         }
     }
 }

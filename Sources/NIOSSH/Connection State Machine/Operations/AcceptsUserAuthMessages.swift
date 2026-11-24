@@ -14,16 +14,14 @@
 
 import NIOCore
 
-protocol AcceptsUserAuthMessages {
+protocol AcceptsUserAuthMessages: _NIOSSHSendableMetatype {
     var userAuthStateMachine: UserAuthenticationStateMachine { get set }
 
-    var connectionAttributes: SSHConnectionStateMachine.Attributes { get }
-    
     var role: SSHConnectionRole { get }
 }
 
 /// This event indicates that server wants us to display the following message to the end user.
-public struct NIOUserAuthBannerEvent: Hashable {
+public struct NIOUserAuthBannerEvent: Hashable, Sendable {
     /// The message to be displayed to end user
     public var message: String
 
@@ -37,12 +35,14 @@ public struct NIOUserAuthBannerEvent: Hashable {
 }
 
 /// This event indicates that server accepted our response to authentication challenge. The SSH session can be considered active after this point.
-public struct UserAuthSuccessEvent: Hashable {
+public struct UserAuthSuccessEvent: Hashable, Sendable {
     public init() {}
 }
 
 extension AcceptsUserAuthMessages {
-    mutating func receiveServiceRequest(_ message: SSHMessage.ServiceRequestMessage) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+    mutating func receiveServiceRequest(
+        _ message: SSHMessage.ServiceRequestMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
         let result = try self.userAuthStateMachine.receiveServiceRequest(message)
 
         if let message = result {
@@ -52,27 +52,36 @@ extension AcceptsUserAuthMessages {
         }
     }
 
-    mutating func receiveServiceAccept(_ message: SSHMessage.ServiceAcceptMessage) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+    mutating func receiveServiceAccept(
+        _ message: SSHMessage.ServiceAcceptMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
         let result = try self.userAuthStateMachine.receiveServiceAccept(message)
 
         if let future = result {
-            return .possibleFutureMessage(future.map(Self.transform(_:)))
+            return .possibleFutureMessage(
+                future.map {
+                    Self.transform($0)
+                }
+            )
         } else {
             return .noMessage
         }
     }
 
-    mutating func receiveUserAuthRequest(_ message: SSHMessage.UserAuthRequestMessage) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+    mutating func receiveUserAuthRequest(
+        _ message: SSHMessage.UserAuthRequestMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
         let result = try self.userAuthStateMachine.receiveUserAuthRequest(message)
-        
+
         if let future = result {
-            var banner: SSHServerConfiguration.UserAuthBanner?
+            let banner: SSHServerConfiguration.UserAuthBanner?
             if case .server(let config) = role {
                 banner = config.banner
+            } else {
+                banner = nil
             }
 
-            let connectionAttributes = self.connectionAttributes
-            return .possibleFutureMessage(future.map { Self.transform($0, connectionAttributes: connectionAttributes, username: message.username, banner: banner) })
+            return .possibleFutureMessage(future.map { Self.transform($0, banner: banner) })
         } else {
             return .noMessage
         }
@@ -86,30 +95,42 @@ extension AcceptsUserAuthMessages {
         return .event(UserAuthSuccessEvent())
     }
 
-    mutating func receiveUserAuthFailure(_ message: SSHMessage.UserAuthFailureMessage) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+    mutating func receiveUserAuthFailure(
+        _ message: SSHMessage.UserAuthFailureMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
         let result = try self.userAuthStateMachine.receiveUserAuthFailure(message)
 
         if let future = result {
-            return .possibleFutureMessage(future.map(Self.transform(_:)))
+            return .possibleFutureMessage(
+                future.map {
+                    Self.transform($0)
+                }
+            )
         } else {
             return .noMessage
         }
     }
 
-    mutating func receiveUserAuthBanner(_ message: SSHMessage.UserAuthBannerMessage) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
+    mutating func receiveUserAuthBanner(
+        _ message: SSHMessage.UserAuthBannerMessage
+    ) throws -> SSHConnectionStateMachine.StateMachineInboundProcessResult {
         try self.userAuthStateMachine.receiveUserAuthBanner(message)
         return .event(NIOUserAuthBannerEvent(message: message.message, languageTag: message.languageTag))
     }
 
-    private static func transform(_ result: NIOSSHUserAuthenticationResponseMessage, connectionAttributes: SSHConnectionStateMachine.Attributes?, username: String, banner: SSHServerConfiguration.UserAuthBanner? = nil) -> SSHMultiMessage {
+    private static func transform(
+        _ result: NIOSSHUserAuthenticationResponseMessage,
+        banner: SSHServerConfiguration.UserAuthBanner? = nil
+    ) -> SSHMultiMessage {
         switch result {
         case .success:
-            connectionAttributes?.username = username
-            
             if let banner = banner {
                 // Send banner bundled with auth success to avoid leaking any information to unauthenticated clients.
                 // Note that this is by no means the only option according to RFC 4252
-                return SSHMultiMessage(.userAuthBanner(.init(message: banner.message, languageTag: banner.languageTag)), .userAuthSuccess)
+                return SSHMultiMessage(
+                    .userAuthBanner(.init(message: banner.message, languageTag: banner.languageTag)),
+                    .userAuthSuccess
+                )
             }
 
             return SSHMultiMessage(.userAuthSuccess)
@@ -117,6 +138,8 @@ extension AcceptsUserAuthMessages {
             return SSHMultiMessage(.userAuthFailure(message))
         case .publicKeyOK(let message):
             return SSHMultiMessage(.userAuthPKOK(message))
+        case .disconnect(let disconnect):
+            return SSHMultiMessage(.disconnect(disconnect))
         }
     }
 

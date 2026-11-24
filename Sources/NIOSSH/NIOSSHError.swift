@@ -29,8 +29,6 @@ public struct NIOSSHError: Error {
     private var diagnostics: String?
 }
 
-extension NIOSSHError: NIOSSHSendable {}
-
 // MARK: - Internal helper functions for error construction.
 
 // These are never inlined as they are inherently cold path functions.
@@ -47,19 +45,21 @@ extension NIOSSHError {
 
     internal static let invalidNonceLength = NIOSSHError(type: .invalidNonceLength, diagnostics: nil)
 
-    internal static let excessiveVersionLength = NIOSSHError(type: .excessiveVersionLength, diagnostics: nil)
+    internal static let invalidEncryptedPacketLength = NIOSSHError(
+        type: .invalidEncryptedPacketLength,
+        diagnostics: nil
+    )
 
-    internal static let invalidEncryptedPacketLength = NIOSSHError(type: .invalidEncryptedPacketLength, diagnostics: nil)
-
-    internal static let invalidDecryptedPlaintextLength = NIOSSHError(type: .invalidDecryptedPlaintextLength, diagnostics: nil)
+    internal static let invalidDecryptedPlaintextLength = NIOSSHError(
+        type: .invalidDecryptedPlaintextLength,
+        diagnostics: nil
+    )
 
     internal static let invalidKeySize = NIOSSHError(type: .invalidKeySize, diagnostics: nil)
 
     internal static let insufficientPadding = NIOSSHError(type: .insufficientPadding, diagnostics: nil)
 
     internal static let excessPadding = NIOSSHError(type: .excessPadding, diagnostics: nil)
-    
-    internal static let invalidMacSelected = NIOSSHError(type: .invalidMacSelected, diagnostics: nil)
 
     @inline(never)
     internal static func unknownPublicKey(algorithm: String) -> NIOSSHError {
@@ -76,7 +76,10 @@ extension NIOSSHError {
         NIOSSHError(type: .invalidDomainParametersForKey, diagnostics: parameters)
     }
 
-    internal static let invalidExchangeHashSignature = NIOSSHError(type: .invalidExchangeHashSignature, diagnostics: nil)
+    internal static let invalidExchangeHashSignature = NIOSSHError(
+        type: .invalidExchangeHashSignature,
+        diagnostics: nil
+    )
 
     internal static let invalidPacketFormat = NIOSSHError(type: .invalidPacketFormat, diagnostics: nil)
 
@@ -85,11 +88,17 @@ extension NIOSSHError {
         NIOSSHError(type: .protocolViolation, diagnostics: "Protocol \(protocolName) violated due to \(violation)")
     }
 
-    internal static let keyExchangeNegotiationFailure = NIOSSHError(type: .keyExchangeNegotiationFailure, diagnostics: nil)
+    internal static let keyExchangeNegotiationFailure = NIOSSHError(
+        type: .keyExchangeNegotiationFailure,
+        diagnostics: nil
+    )
 
     @inline(never)
     internal static func unsupportedVersion(_ version: String) -> NIOSSHError {
-        NIOSSHError(type: .unsupportedVersion, diagnostics: "Version \(version) offered by the remote peer is not supported")
+        NIOSSHError(
+            type: .unsupportedVersion,
+            diagnostics: "Version \(version) offered by the remote peer is not supported"
+        )
     }
 
     @inline(never)
@@ -99,7 +108,10 @@ extension NIOSSHError {
 
     @inline(never)
     internal static func flowControlViolation(currentWindow: UInt32, increment: UInt32) -> NIOSSHError {
-        NIOSSHError(type: .flowControlViolation, diagnostics: "Window size \(currentWindow), bad increment \(increment)")
+        NIOSSHError(
+            type: .flowControlViolation,
+            diagnostics: "Window size \(currentWindow), bad increment \(increment)"
+        )
     }
 
     internal static let creatingChannelAfterClosure = NIOSSHError(type: .creatingChannelAfterClosure, diagnostics: nil)
@@ -115,9 +127,15 @@ extension NIOSSHError {
 
     internal static let unsupportedGlobalRequest = NIOSSHError(type: .unsupportedGlobalRequest, diagnostics: nil)
 
-    internal static let unexpectedGlobalRequestResponse = NIOSSHError(type: .unexpectedGlobalRequestResponse, diagnostics: nil)
+    internal static let unexpectedGlobalRequestResponse = NIOSSHError(
+        type: .unexpectedGlobalRequestResponse,
+        diagnostics: nil
+    )
 
-    internal static let missingGlobalRequestResponse = NIOSSHError(type: .missingGlobalRequestResponse, diagnostics: nil)
+    internal static let missingGlobalRequestResponse = NIOSSHError(
+        type: .missingGlobalRequestResponse,
+        diagnostics: nil
+    )
 
     internal static let globalRequestRefused = NIOSSHError(type: .globalRequestRefused, diagnostics: nil)
 
@@ -128,7 +146,10 @@ extension NIOSSHError {
 
     @inline(never)
     internal static func invalidHostKeyForKeyExchange(expected: Substring, got actual: String.UTF8View) -> NIOSSHError {
-        NIOSSHError(type: .invalidHostKeyForKeyExchange, diagnostics: "Expected \(String(expected)), got \(String(actual))")
+        NIOSSHError(
+            type: .invalidHostKeyForKeyExchange,
+            diagnostics: "Expected \(String(expected)), got \(String(actual))"
+        )
     }
 
     @inline(never)
@@ -186,8 +207,6 @@ extension NIOSSHError {
             case invalidHostKeyForKeyExchange
             case invalidOpenSSHPublicKey
             case invalidCertificate
-            case excessiveVersionLength
-            case invalidMacSelected
         }
 
         private var base: Base
@@ -205,9 +224,6 @@ extension NIOSSHError {
         /// The length of the nonce provided to a cipher is invalid for that cipher.
         public static let invalidNonceLength: ErrorType = .init(.invalidNonceLength)
 
-        /// The version length sent by a client was excessively large.
-        public static let excessiveVersionLength: ErrorType = .init(.excessiveVersionLength)
-
         /// The encrypted packet received has an invalid length for the negotiated encyption scheme
         public static let invalidEncryptedPacketLength: ErrorType = .init(.invalidEncryptedPacketLength)
 
@@ -222,9 +238,6 @@ extension NIOSSHError {
 
         /// More padding bytes were supposed to be present than actually are present in a packet.
         public static let excessPadding: ErrorType = .init(.excessPadding)
-        
-        /// The selected MAC was not valid for this transport method
-        public static let invalidMacSelected: ErrorType = .init(.invalidMacSelected)
 
         /// The public key type provided is not recognised.
         public static let unknownPublicKey: ErrorType = .init(.unknownPublicKey)
@@ -300,7 +313,7 @@ extension NIOSSHError.ErrorType: Hashable {}
 
 // MARK: - NIOSSHError.ErrorType Sendable conformance
 
-extension NIOSSHError.ErrorType: NIOSSHSendable {}
+extension NIOSSHError.ErrorType: Sendable {}
 
 // MARK: - NIOSSHError.ErrorType CustomStringConvertible conformance
 

@@ -28,18 +28,34 @@ extension SSHConnectionStateMachine {
 
         var remoteVersion: String
 
+        var protectionSchemes: [NIOSSHTransportProtection.Type]
+
         /// The backing state machine.
         var keyExchangeStateMachine: SSHKeyExchangeStateMachine
 
-        let connectionAttributes: SSHConnectionStateMachine.Attributes
-
-        init(sentVersionState state: SentVersionState, allocator: ByteBufferAllocator, loop: EventLoop, remoteVersion: String) {
+        init(
+            sentVersionState state: SentVersionState,
+            allocator: ByteBufferAllocator,
+            loop: EventLoop,
+            remoteVersion: String
+        ) {
             self.role = state.role
             self.parser = state.parser
             self.serializer = state.serializer
             self.remoteVersion = remoteVersion
-            self.keyExchangeStateMachine = SSHKeyExchangeStateMachine(allocator: allocator, loop: loop, role: state.role, remoteVersion: remoteVersion, keyExchangeAlgorithms: state.role.keyExchangeAlgorithms, transportProtectionSchemes: state.role.transportProtectionSchemes, previousSessionIdentifier: nil)
-            self.connectionAttributes = state.connectionAttributes
+            self.protectionSchemes = state.protectionSchemes
+            self.keyExchangeStateMachine = SSHKeyExchangeStateMachine(
+                allocator: allocator,
+                loop: loop,
+                role: state.role,
+                remoteVersion: remoteVersion,
+                protectionSchemes: state.protectionSchemes,
+                previousSessionIdentifier: nil
+            )
+        }
+
+        mutating func bufferInboundData(_ data: inout ByteBuffer) {
+            self.parser.append(bytes: &data)
         }
     }
 }

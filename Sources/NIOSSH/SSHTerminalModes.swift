@@ -29,20 +29,20 @@ public struct SSHTerminalModes {
 
 extension SSHTerminalModes: Hashable {}
 
-extension SSHTerminalModes: NIOSSHSendable {}
+extension SSHTerminalModes: Sendable {}
 
 // MARK: Opcode
 
-public extension SSHTerminalModes {
+extension SSHTerminalModes {
     /// A terminal mode opcode.
-    struct Opcode {
+    public struct Opcode {
         /// The raw value of the terminal mode opcode.
         public var rawValue: UInt8 {
             get {
                 self._rawValue
             }
             set {
-                precondition(newValue != 0) // Reserved for TTY_OP_END.
+                precondition(newValue != 0)  // Reserved for TTY_OP_END.
                 self._rawValue = newValue
             }
         }
@@ -50,7 +50,7 @@ public extension SSHTerminalModes {
         private var _rawValue: UInt8
 
         public init(rawValue: UInt8) {
-            precondition(rawValue != 0) // Reserved for TTY_OP_END.
+            precondition(rawValue != 0)  // Reserved for TTY_OP_END.
             self._rawValue = rawValue
         }
 
@@ -63,7 +63,7 @@ public extension SSHTerminalModes {
         /// Erase the character to left of the cursor.
         public static let VERASE = Opcode(rawValue: 3)
 
-        /// Kill the current input line.
+        /// Discard the current input line.
         public static let VKILL = Opcode(rawValue: 4)
 
         /// End-of-file character (sends EOF from the terminal).
@@ -159,7 +159,7 @@ public extension SSHTerminalModes {
         /// Visually erase chars.
         public static let ECHOE = Opcode(rawValue: 54)
 
-        /// Kill character discards current line.
+        /// Discard current line.
         public static let ECHOK = Opcode(rawValue: 55)
 
         /// Echo NL even if ECHO is off.
@@ -177,7 +177,7 @@ public extension SSHTerminalModes {
         /// Echo control characters as ^(Char).
         public static let ECHOCTL = Opcode(rawValue: 60)
 
-        /// Visual erase for line kill.
+        /// Visual erase for discard line.
         public static let ECHOKE = Opcode(rawValue: 61)
 
         /// Retype pending input.
@@ -223,7 +223,7 @@ public extension SSHTerminalModes {
 
 extension SSHTerminalModes.Opcode: Hashable {}
 
-extension SSHTerminalModes.Opcode: NIOSSHSendable {}
+extension SSHTerminalModes.Opcode: Sendable {}
 
 extension SSHTerminalModes.Opcode: Comparable {
     public static func < (lhs: SSHTerminalModes.Opcode, rhs: SSHTerminalModes.Opcode) -> Bool {
@@ -360,9 +360,9 @@ extension SSHTerminalModes.Opcode: CustomStringConvertible {
 
 // MARK: OpcodeValue
 
-public extension SSHTerminalModes {
+extension SSHTerminalModes {
     /// The value of an SSH terminal mode opcode.
-    struct OpcodeValue {
+    public struct OpcodeValue {
         /// The raw value of this opcode.
         public var rawValue: UInt32
 
@@ -374,7 +374,7 @@ public extension SSHTerminalModes {
 
 extension SSHTerminalModes.OpcodeValue: Hashable {}
 
-extension SSHTerminalModes.OpcodeValue: NIOSSHSendable {}
+extension SSHTerminalModes.OpcodeValue: Sendable {}
 
 extension SSHTerminalModes.OpcodeValue: Comparable {
     public static func < (lhs: SSHTerminalModes.OpcodeValue, rhs: SSHTerminalModes.OpcodeValue) -> Bool {
@@ -399,9 +399,12 @@ extension ByteBuffer {
             // Opcodes 1 to 159 have a single uint32 argument.  Opcodes 160 to 255 are not yet
             // defined, and cause parsing to stop (they should only be used after any other data).
             // The stream is terminated by opcode TTY_OP_END (0x00).
-            while let opcode = self.readInteger(as: UInt8.self), (1 ..< 159).contains(opcode) {
+            while let opcode = self.readInteger(as: UInt8.self), (1..<159).contains(opcode) {
                 guard let value = self.readInteger(as: UInt32.self) else {
-                    throw NIOSSHError.protocolViolation(protocolName: "ssh-connection", violation: "invalid encoded terminal modes")
+                    throw NIOSSHError.protocolViolation(
+                        protocolName: "ssh-connection",
+                        violation: "invalid encoded terminal modes"
+                    )
                 }
 
                 mapping[SSHTerminalModes.Opcode(rawValue: opcode)] = SSHTerminalModes.OpcodeValue(rawValue: value)

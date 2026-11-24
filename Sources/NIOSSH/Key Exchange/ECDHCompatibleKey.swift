@@ -153,11 +153,11 @@ extension P521.KeyAgreement.PrivateKey: ECDHCompatiblePrivateKey {
 
 // MARK: Helpers
 
-private extension SharedSecret {
+extension SharedSecret {
     /// In Curve25519 we need to check for the possibility that the peer's key is a point of low order.
     /// If it is, we will end up generating the all-zero shared secret, which is pretty not good.
     /// This property is `true` if the secret is strong, and `false` if it is not.
-    var isStrongSecret: Bool {
+    fileprivate var isStrongSecret: Bool {
         // CryptoKit doesn't want to let us look directly at this, so we need to exfiltrate a pointer.
         // For the sake of avoiding leaking information about the secret, we choose to do this in constant
         // time by ORing every byte together: if the result is zero, this point is invalid.

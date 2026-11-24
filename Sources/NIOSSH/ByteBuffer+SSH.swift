@@ -99,7 +99,8 @@ extension ByteBuffer {
 
     /// Sets the given bytes as an SSH string at the given offset. Does not mutate the writer index.
     @discardableResult
-    mutating func setSSHString<Buffer: Collection>(_ value: Buffer, at offset: Int) -> Int where Buffer.Element == UInt8 {
+    mutating func setSSHString<Buffer: Collection>(_ value: Buffer, at offset: Int) -> Int
+    where Buffer.Element == UInt8 {
         // RFC 4251 § 5:
         //
         // > Arbitrary length binary string.  Strings are allowed to contain
@@ -181,9 +182,9 @@ extension ByteBuffer {
             switch necessaryPaddingBytes {
             case 8...:
                 writtenBytes = self.writeInteger(rng.next(), as: UInt64.self)
-            case 4 ... 7:
+            case 4...7:
                 writtenBytes = self.writeInteger(rng.next(), as: UInt32.self)
-            case 2 ... 3:
+            case 2...3:
                 writtenBytes = self.writeInteger(rng.next(), as: UInt16.self)
             case 1:
                 writtenBytes = self.writeInteger(rng.next(), as: UInt8.self)
@@ -194,7 +195,10 @@ extension ByteBuffer {
             necessaryPaddingBytes -= writtenBytes
         }
 
-        precondition(necessaryPaddingBytes == 0, "Math is wrong, remaining expected padding bytes is nonzero: \(necessaryPaddingBytes)")
+        precondition(
+            necessaryPaddingBytes == 0,
+            "Math is wrong, remaining expected padding bytes is nonzero: \(necessaryPaddingBytes)"
+        )
         return count
     }
 
@@ -205,7 +209,7 @@ extension ByteBuffer {
     mutating func writeCompositeSSHString(_ compositeFunction: (inout ByteBuffer) throws -> Int) rethrows -> Int {
         // Reserve 4 bytes for the length.
         let originalWriterIndex = self.writerIndex
-        self.moveWriterIndex(forwardBy: 4)
+        self.writeInteger(UInt32(0))
 
         var writtenLength: Int
         do {

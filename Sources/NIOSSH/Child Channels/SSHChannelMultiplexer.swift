@@ -34,9 +34,15 @@ final class SSHChannelMultiplexer {
     /// Whether new channels are allowed. Set to `false` once the parent channel is shut down at the TCP level.
     private var canCreateNewChannels: Bool
 
-    internal let maximumPacketSize: Int
+    /// The maximum channel data payload size we advertise to peers when opening channels.
+    private let maximumPacketSize: UInt32
 
-    init(delegate: SSHMultiplexerDelegate, allocator: ByteBufferAllocator, childChannelInitializer: SSHChildChannel.Initializer?, maximumPacketSize: Int = 1 << 17) {
+    init(
+        delegate: SSHMultiplexerDelegate,
+        allocator: ByteBufferAllocator,
+        childChannelInitializer: SSHChildChannel.Initializer?,
+        maximumPacketSize: UInt32
+    ) {
         self.channels = [:]
         self.channels.reserveCapacity(8)
         self.erroredChannels = []
@@ -96,9 +102,6 @@ extension SSHChannelMultiplexer {
             self.erroredChannels.append(channelID)
         }
     }
-    
-    // The username which the server accepted in authorization
-    var username: String? { delegate?.username }
 }
 
 // MARK: Calls from SSH handlers.
@@ -155,7 +158,11 @@ extension SSHChannelMultiplexer {
         }
     }
 
-    func createChildChannel(_ promise: EventLoopPromise<Channel>? = nil, channelType: SSHChannelType, _ channelInitializer: SSHChildChannel.Initializer?) {
+    func createChildChannel(
+        _ promise: EventLoopPromise<Channel>? = nil,
+        channelType: SSHChannelType,
+        _ channelInitializer: SSHChildChannel.Initializer?
+    ) {
         do {
             let channel = try self.openNewChannel(initializer: channelInitializer)
             channel.configure(userPromise: promise, channelType: channelType)
@@ -180,7 +187,10 @@ extension SSHChannelMultiplexer {
     /// Opens a new channel and adds it to the multiplexer.
     private func openNewChannel(initializer: SSHChildChannel.Initializer?) throws -> SSHChildChannel {
         guard let parentChannel = self.delegate?.channel else {
-            throw NIOSSHError.protocolViolation(protocolName: "channel", violation: "Opening new channel after channel shutdown")
+            throw NIOSSHError.protocolViolation(
+                protocolName: "channel",
+                violation: "Opening new channel after channel shutdown"
+            )
         }
 
         guard self.canCreateNewChannels else {
@@ -196,15 +206,23 @@ extension SSHChannelMultiplexer {
             self.nextChannelID = 0
         }
 
-        // `maximumPacketSize` can be safely cast, because overrides of the default by implementations are expected to have sensible values
-        // These are also asserted in SSHPackageParser.init
-        let channel = SSHChildChannel(allocator: self.allocator,
-                                      parent: parentChannel,
-                                      multiplexer: self,
-                                      initializer: initializer,
-                                      localChannelID: channelID,
-                                      targetWindowSize: Int32(self.maximumPacketSize),
-                                      initialOutboundWindowSize: 0) // The initial outbound window size is presumed to be 0 until we're told otherwise.
+        var (windowsize, overflow) = Int(self.maximumPacketSize).multipliedReportingOverflow(
+            by: Constants.channelWindowSizePacketMultiple
+        )
+        if overflow || windowsize > Int32.max {
+            windowsize = Int(Int32.max)
+        }
+
+        let channel = SSHChildChannel(
+            allocator: self.allocator,
+            parent: parentChannel,
+            multiplexer: self,
+            initializer: initializer,
+            localChannelID: channelID,
+            targetWindowSize: Int32(windowsize),
+            initialOutboundWindowSize: 0,
+            maximumPacketSize: self.maximumPacketSize
+        )  // The initial outbound window size is presumed to be 0 until we're told otherwise.
 
         self.channels[channelID] = channel
         return channel
@@ -216,7 +234,10 @@ extension SSHChannelMultiplexer {
         } else if self.erroredChannels.contains(localID) {
             return nil
         } else {
-            throw NIOSSHError.protocolViolation(protocolName: "channel", violation: "Unexpected request with local channel id \(localID)")
+            throw NIOSSHError.protocolViolation(
+                protocolName: "channel",
+                violation: "Unexpected request with local channel id \(localID)"
+            )
         }
     }
 }
@@ -225,8 +246,6 @@ extension SSHChannelMultiplexer {
 protocol SSHMultiplexerDelegate {
     var channel: Channel? { get }
 
-    var username: String? { get }
-    
     func writeFromChildChannel(_: SSHMessage, _: EventLoopPromise<Void>?)
 
     func flushFromChildChannel()

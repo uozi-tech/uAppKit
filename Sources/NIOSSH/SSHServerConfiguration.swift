@@ -16,12 +16,6 @@
 public struct SSHServerConfiguration {
     /// The user authentication delegate to be used with this server.
     public var userAuthDelegate: NIOSSHServerUserAuthenticationDelegate
-    
-    /// The enabled TransportProtectionSchemes
-    public var transportProtectionSchemes: [NIOSSHTransportProtection.Type] = SSHConnectionStateMachine.bundledTransportProtectionSchemes
-    
-    /// The enabled KeyExchangeAlgorithms
-    public var keyExchangeAlgorithms: [NIOSSHKeyExchangeAlgorithmProtocol.Type] = SSHKeyExchangeStateMachine.bundledKeyExchangeImplementations
 
     /// The global request delegate to be used with this server.
     public var globalRequestDelegate: GlobalRequestDelegate
@@ -31,46 +25,97 @@ public struct SSHServerConfiguration {
 
     /// The ssh banner to display to clients upon authentication
     public var banner: UserAuthBanner?
-    
-    /// The maximum packet size that this NIOSSH server will accept
-    public var maximumPacketSize = SSHPacketParser.defaultMaximumPacketSize
-    
-    /// The trusted certificate authority public keys for user authentication.
-    /// When set, users presenting certificates signed by these CAs will be authenticated
-    /// if the certificate is valid and the principal matches.
-    public var trustedUserCAKeys: [NIOSSHPublicKey] = []
-    
-    /// The acceptable critical options for user certificate validation.
-    /// When validating user certificates, only these critical options will be accepted.
-    /// Default includes "force-command" and "source-address" per OpenSSH standards.
-    public var acceptableCriticalOptions: [String] = ["force-command", "source-address"]
 
-    public init(hostKeys: [NIOSSHPrivateKey], userAuthDelegate: NIOSSHServerUserAuthenticationDelegate, globalRequestDelegate: GlobalRequestDelegate? = nil, banner: UserAuthBanner? = nil) {
+    /// Supported data encryption algorithms
+    public var transportProtectionSchemes: [NIOSSHTransportProtection.Type]
+
+    /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
+    /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
+    /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).
+    ///
+    /// The per-channel receive window we advertise is a fixed multiple of this value (64x), so raising
+    /// this value raises the window proportionally. The window is stored as an `Int32`, meaning
+    /// values above ~33 MiB (`Int32.max / 64`) saturate the window.
+    ///
+    /// - Precondition: Must be at least 32768 bytes, the uncompressed payload size
+    ///   RFC 4253 §6.1 requires every implementation to support.
+    /// - Precondition: The packet size must leave 1024 bytes for headers and framing.
+    public var maximumPacketSize: Int = Constants.defaultMaximumChannelPacketSize {
+        didSet {
+            precondition(
+                self.maximumPacketSize >= Constants.minimumChannelPacketSize,
+                "maximumPacketSize must be at least \(Constants.minimumChannelPacketSize) bytes (RFC 4253 §6.1)"
+            )
+            precondition(
+                self.maximumPacketSize <= Constants.maximumChannelPacketSize,
+                "maximumPacketSize must leave room for SSH framing and padding (RFC 4253 §6)."
+            )
+        }
+    }
+
+    /// The maximum number of `SSH_MSG_USERAUTH_REQUEST` messages the server will process on a
+    /// single connection before disconnecting the client. Every request counts, including
+    /// authentication probes. Defaults to 1024; set to `Int.max` to effectively disable the limit.
+    /// Must be positive: a value of 0 or less disconnects every client on its first request.
+    public var maxAuthAttempts: Int? = nil
+
+    public init(
+        hostKeys: [NIOSSHPrivateKey],
+        userAuthDelegate: NIOSSHServerUserAuthenticationDelegate,
+        globalRequestDelegate: GlobalRequestDelegate? = nil,
+        banner: UserAuthBanner? = nil
+    ) {
+        self.init(
+            hostKeys: hostKeys,
+            userAuthDelegate: userAuthDelegate,
+            globalRequestDelegate: globalRequestDelegate,
+            banner: banner,
+            transportProtectionSchemes: Constants.bundledTransportProtectionSchemes
+        )
+    }
+
+    public init(
+        hostKeys: [NIOSSHPrivateKey],
+        userAuthDelegate: NIOSSHServerUserAuthenticationDelegate,
+        globalRequestDelegate: GlobalRequestDelegate? = nil
+    ) {
+        self.init(
+            hostKeys: hostKeys,
+            userAuthDelegate: userAuthDelegate,
+            globalRequestDelegate: globalRequestDelegate,
+            banner: nil
+        )
+    }
+
+    public init(
+        hostKeys: [NIOSSHPrivateKey],
+        userAuthDelegate: NIOSSHServerUserAuthenticationDelegate,
+        globalRequestDelegate: GlobalRequestDelegate? = nil,
+        banner: UserAuthBanner? = nil,
+        transportProtectionSchemes: [NIOSSHTransportProtection.Type]
+    ) {
         self.hostKeys = hostKeys
         self.userAuthDelegate = userAuthDelegate
         self.globalRequestDelegate = globalRequestDelegate ?? DefaultGlobalRequestDelegate()
         self.banner = banner
-    }
-
-    public init(hostKeys: [NIOSSHPrivateKey], userAuthDelegate: NIOSSHServerUserAuthenticationDelegate, globalRequestDelegate: GlobalRequestDelegate? = nil) {
-        self.init(hostKeys: hostKeys, userAuthDelegate: userAuthDelegate, globalRequestDelegate: globalRequestDelegate, banner: nil)
+        self.transportProtectionSchemes = transportProtectionSchemes
     }
 }
 
+// The various delegates aren't required to be Sendable, so the config isn't sendable.
+@available(*, unavailable)
+extension SSHServerConfiguration: Sendable {}
+
 // MARK: - UserAuthBanner
 
-public extension SSHServerConfiguration {
-    /**
-     Server sends `UserAuthBanner` to client some time during authentication.
-     Client is obligated to display this banner to the end user, unless explicitely told
-     to ignore banners.
-     */
-    struct UserAuthBanner {
-        /**
-         The message to be displayed by client to end user during authentication.
-         Note that control characters contained in message might be filtered by
-         client in accordance with RFC 4252.
-         */
+extension SSHServerConfiguration {
+    /// A server sends a ``UserAuthBanner`` to the client at some point during authentication.
+    /// A client is obligated to display this banner to the end user, unless explicitely told
+    /// to ignore banners.
+    public struct UserAuthBanner: Sendable {
+        // The message to be displayed by the client to the end user during authentication.
+        // Note that control characters contained in the message might be filtered by
+        // the client in accordance with RFC 4252.
         public var message: String
 
         /// Tag describing the language used for message. Must obey RFC 3066

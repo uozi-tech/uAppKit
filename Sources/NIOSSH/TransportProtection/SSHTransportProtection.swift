@@ -48,21 +48,25 @@ public protocol NIOSSHTransportProtection: AnyObject {
     /// The name of the cipher portion of this transport protection scheme as negotiated on the wire.
     static var cipherName: String { get }
 
-    /// The names of the supported MAC portion of this transport protection scheme as negotiated on the wire. May be empty, in which
+    /// The name of the MAC portion of this transport protection scheme as negotiated on the wire. May be nil, in which
     /// case this scheme does not care about the MAC field because it is an @openssh.org style AEAD construction.
-    static var macNames: [String] { get }
+    static var macName: String? { get }
 
     /// The block size of the cipher in this protection scheme.
     static var cipherBlockSize: Int { get }
 
     /// The key sizes required for this protection scheme.
-    static func keySizes(forMac mac: String?) throws -> ExpectedKeySizes
+    static var keySizes: ExpectedKeySizes { get }
 
     /// The number of bytes consumed by the MAC
     var macBytes: Int { get }
 
+    /// Whether legnth of the packet will be encrypted. If length is not encrypted, it should be counted
+    /// when padding size is calculated.
+    var lengthEncrypted: Bool { get }
+
     /// Create a new instance of this transport protection scheme with the given keys.
-    init(initialKeys: NIOSSHSessionKeys, mac: String?) throws
+    init(initialKeys: NIOSSHSessionKeys) throws
 
     /// A rekey has occurred and the encryption keys need to be changed.
     func updateKeys(_ newKeys: NIOSSHSessionKeys) throws
@@ -90,7 +94,7 @@ public protocol NIOSSHTransportProtection: AnyObject {
     func decryptAndVerifyRemainingPacket(_ source: inout ByteBuffer, sequenceNumber: UInt32) throws -> ByteBuffer
 
     /// Encrypt an entire outbound packet
-    func encryptPacket(_ packet: NIOSSHEncryptablePayload, to outboundBuffer: inout ByteBuffer, sequenceNumber: UInt32) throws
+    func encryptPacket(_ destination: inout ByteBuffer, sequenceNumber: UInt32) throws
 }
 
 extension NIOSSHTransportProtection {

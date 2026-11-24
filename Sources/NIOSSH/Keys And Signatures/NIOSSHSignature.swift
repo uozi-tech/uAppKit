@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-import Crypto
+@preconcurrency import Crypto
 import Foundation
 import NIOCore
 import NIOFoundationCompat
@@ -21,7 +21,7 @@ import NIOFoundationCompat
 ///
 /// This type is intentionally highly opaque: we don't expect users to do anything with this directly.
 /// Instead, we expect them to work with other APIs available on our opaque types.
-public struct NIOSSHSignature: Hashable {
+public struct NIOSSHSignature: Hashable, Sendable {
     internal var backingSignature: BackingSignature
 
     internal init(backingSignature: BackingSignature) {
@@ -29,14 +29,18 @@ public struct NIOSSHSignature: Hashable {
     }
 }
 
+// swift-format-ignore: DontRepeatTypeInStaticProperties
 extension NIOSSHSignature {
     /// The various signature types that can be used with NIOSSH.
-    internal enum BackingSignature {
-        case ed25519(RawBytes) // There is no structured Signature type for Curve25519, and we may want Data or ByteBuffer.
+    internal enum BackingSignature: Sendable {
+        // There is no structured Signature type for Curve25519, and we may want Data or ByteBuffer.
+        case ed25519(RawBytes)
+
         case ecdsaP256(P256.Signing.ECDSASignature)
+
         case ecdsaP384(P384.Signing.ECDSASignature)
+
         case ecdsaP521(P521.Signing.ECDSASignature)
-        case custom(NIOSSHSignatureProtocol)
 
         internal enum RawBytes {
             case byteBuffer(ByteBuffer)
@@ -58,7 +62,10 @@ extension NIOSSHSignature {
 }
 
 extension NIOSSHSignature.BackingSignature.RawBytes: Equatable {
-    public static func == (lhs: NIOSSHSignature.BackingSignature.RawBytes, rhs: NIOSSHSignature.BackingSignature.RawBytes) -> Bool {
+    public static func == (
+        lhs: NIOSSHSignature.BackingSignature.RawBytes,
+        rhs: NIOSSHSignature.BackingSignature.RawBytes
+    ) -> Bool {
         switch (lhs, rhs) {
         case (.byteBuffer(let lhs), .byteBuffer(let rhs)):
             return lhs == rhs
@@ -86,13 +93,10 @@ extension NIOSSHSignature.BackingSignature: Equatable {
             return lhs.rawRepresentation == rhs.rawRepresentation
         case (.ecdsaP521(let lhs), .ecdsaP521(let rhs)):
             return lhs.rawRepresentation == rhs.rawRepresentation
-        case (.custom(let lhs), .custom(let rhs)):
-            return lhs.rawRepresentation == rhs.rawRepresentation
         case (.ed25519, _),
-             (.ecdsaP256, _),
-             (.ecdsaP384, _),
-             (.ecdsaP521, _),
-             (.custom, _):
+            (.ecdsaP256, _),
+            (.ecdsaP384, _),
+            (.ecdsaP521, _):
             return false
         }
     }
@@ -113,10 +117,6 @@ extension NIOSSHSignature.BackingSignature: Hashable {
         case .ecdsaP521(let sig):
             hasher.combine(3)
             hasher.combine(sig.rawRepresentation)
-        case .custom(let sig):
-            hasher.combine(4)
-            hasher.combine(sig.signaturePrefix)
-            hasher.combine(sig.rawRepresentation)
         }
     }
 }
@@ -134,10 +134,6 @@ extension ByteBuffer {
             return self.writeECDSAP384Signature(baseSignature: sig)
         case .ecdsaP521(let sig):
             return self.writeECDSAP521Signature(baseSignature: sig)
-        case .custom(let sig):
-            var writtenBytes = writeSSHString(sig.signaturePrefix.utf8)
-            writtenBytes += sig.write(to: &self)
-            return writtenBytes
         }
     }
 
@@ -234,15 +230,10 @@ extension ByteBuffer {
             } else if bytesView.elementsEqual(NIOSSHSignature.ecdsaP521SignaturePrefix) {
                 return try buffer.readECDSAP521Signature()
             } else {
-                for signature in NIOSSHPublicKey.customSignatures {
-                    if bytesView.elementsEqual(signature.signaturePrefix.utf8) {
-                        let signature = try signature.read(from: &buffer)
-                        return NIOSSHSignature(backingSignature: .custom(signature))
-                    }
-                }
-
                 // We don't know this signature type.
-                let signature = signatureIdentifierBytes.readString(length: signatureIdentifierBytes.readableBytes) ?? "<unknown signature>"
+                let signature =
+                    signatureIdentifierBytes.readString(length: signatureIdentifierBytes.readableBytes)
+                    ?? "<unknown signature>"
                 throw NIOSSHError.unknownSignature(algorithm: signature)
             }
         }
@@ -277,7 +268,9 @@ extension ByteBuffer {
 
         // Time to put these into the raw format that CryptoKit wants. This is r || s, with each
         // integer explicitly left-padded with zeros.
-        return try NIOSSHSignature(backingSignature: .ecdsaP256(ECDSASignatureHelper.toECDSASignature(r: rBytes, s: sBytes)))
+        return try NIOSSHSignature(
+            backingSignature: .ecdsaP256(ECDSASignatureHelper.toECDSASignature(r: rBytes, s: sBytes))
+        )
     }
 
     /// A helper function that reads an ECDSA P-384 signature.
@@ -296,7 +289,9 @@ extension ByteBuffer {
 
         // Time to put these into the raw format that CryptoKit wants. This is r || s, with each
         // integer explicitly left-padded with zeros.
-        return try NIOSSHSignature(backingSignature: .ecdsaP384(ECDSASignatureHelper.toECDSASignature(r: rBytes, s: sBytes)))
+        return try NIOSSHSignature(
+            backingSignature: .ecdsaP384(ECDSASignatureHelper.toECDSASignature(r: rBytes, s: sBytes))
+        )
     }
 
     /// A helper function that reads an ECDSA P-521 signature.
@@ -315,7 +310,9 @@ extension ByteBuffer {
 
         // Time to put these into the raw format that CryptoKit wants. This is r || s, with each
         // integer explicitly left-padded with zeros.
-        return try NIOSSHSignature(backingSignature: .ecdsaP521(ECDSASignatureHelper.toECDSASignature(r: rBytes, s: sBytes)))
+        return try NIOSSHSignature(
+            backingSignature: .ecdsaP521(ECDSASignatureHelper.toECDSASignature(r: rBytes, s: sBytes))
+        )
     }
 }
 
@@ -329,24 +326,34 @@ extension ByteBuffer {
 /// This structure is wide enough for any of these signatures, and just uses the appropriate amount of space for whatever
 /// algorithm is actually in use.
 private struct ECDSASignatureHelper {
-    private var storage: (
-        UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64,
-        UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64,
-        UInt64
-    ) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    private var storage:
+        (
+            UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64,
+            UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64, UInt64,
+            UInt64
+        ) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 
-    private init(r: ByteBuffer, s: ByteBuffer, pointSize: Int) {
+    private init(r: ByteBuffer, s: ByteBuffer, pointSize: Int) throws {
         precondition(MemoryLayout<ECDSASignatureHelper>.size >= pointSize, "Invalid width for ECDSA signature helper.")
 
         let rByteView = r.mpIntView
         let sByteView = s.mpIntView
 
+        // The r and s components are attacker-controlled and parsed pre-authentication. Neither may be
+        // wider than the curve's point size: a larger value produces a negative starting offset below and
+        // an out-of-bounds write into the stack storage.
+        guard rByteView.count <= pointSize, sByteView.count <= pointSize else {
+            throw NIOSSHError.invalidSSHMessage(reason: "ECDSA signature mpint exceeds curve point size")
+        }
+
         let rByteStartingOffset = pointSize - rByteView.count
         let sByteStartingOffset = pointSize - sByteView.count
 
         withUnsafeMutableBytes(of: &self.storage) { storagePtr in
-            let rPtr = UnsafeMutableRawBufferPointer(rebasing: storagePtr[rByteStartingOffset ..< pointSize])
-            let sPtr = UnsafeMutableRawBufferPointer(rebasing: storagePtr[(sByteStartingOffset + pointSize) ..< (pointSize * 2)])
+            let rPtr = UnsafeMutableRawBufferPointer(rebasing: storagePtr[rByteStartingOffset..<pointSize])
+            let sPtr = UnsafeMutableRawBufferPointer(
+                rebasing: storagePtr[(sByteStartingOffset + pointSize)..<(pointSize * 2)]
+            )
 
             precondition(rPtr.count == rByteView.count)
             precondition(sPtr.count == sByteView.count)
@@ -357,17 +364,19 @@ private struct ECDSASignatureHelper {
     }
 
     static func toECDSASignature<Signature: ECDSASignatureProtocol>(r: ByteBuffer, s: ByteBuffer) throws -> Signature {
-        let helper = ECDSASignatureHelper(r: r, s: s, pointSize: Signature.pointSize)
+        let helper = try ECDSASignatureHelper(r: r, s: s, pointSize: Signature.pointSize)
         return try withUnsafeBytes(of: helper.storage) { storagePtr in
-            try Signature(rawRepresentation: UnsafeRawBufferPointer(rebasing: storagePtr.prefix(Signature.pointSize * 2)))
+            try Signature(
+                rawRepresentation: UnsafeRawBufferPointer(rebasing: storagePtr.prefix(Signature.pointSize * 2))
+            )
         }
     }
 }
 
-private extension ByteBuffer {
+extension ByteBuffer {
     // A view onto the mpInt bytes. Strips off a leading 0 if it is present for
     // size reasons.
-    var mpIntView: ByteBufferView {
+    fileprivate var mpIntView: ByteBufferView {
         var baseView = self.readableBytesView
         if baseView.first == 0 {
             baseView = baseView.dropFirst()

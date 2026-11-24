@@ -10,8 +10,6 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
-// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
-//
 //===----------------------------------------------------------------------===//
 
 import Atomics
@@ -60,24 +58,32 @@ final class SSHChildChannel {
     ///
     /// To correctly respect flushes, we deliberately withold data from the parent channel until this
     /// stream is flushed, at which time we deliver them all. This buffer holds the pending ones.
-    private var pendingWritesFromChannel: MarkedCircularBuffer<(PendingContent, EventLoopPromise<Void>?)> = MarkedCircularBuffer(initialCapacity: 8)
+    private var pendingWritesFromChannel: MarkedCircularBuffer<(PendingContent, EventLoopPromise<Void>?)> =
+        MarkedCircularBuffer(initialCapacity: 8)
 
     /// A buffer of pending outbound messages for the parent channel.
     ///
     /// This buffer exists to avoid message re-ordering issues when we make outcalls. Some messages
     /// trigger multiple outcalls, any of which could interrupt message delivery or event ordering.
     /// To avoid difficulty here, we make sure we enqueue the writes for the multiplexer here.
-    private var pendingWritesForMultiplexer: CircularBuffer<(SSHMessage, EventLoopPromise<Void>?)> = CircularBuffer(initialCapacity: 8)
+    private var pendingWritesForMultiplexer: CircularBuffer<(SSHMessage, EventLoopPromise<Void>?)> = CircularBuffer(
+        initialCapacity: 8
+    )
 
     /// When we're activating, outbound operations cannot be processed. We buffer them here temporarily and re-process them
     /// once we've activated. After activation this list should be empty.
-    private var bufferedOutboundOperations: CircularBuffer<OutboundControlOperation> = CircularBuffer(initialCapacity: 8)
+    private var bufferedOutboundOperations: CircularBuffer<OutboundControlOperation> = CircularBuffer(
+        initialCapacity: 8
+    )
 
     /// An object that controls whether this channel should be writable.
     private var writabilityManager: ChildChannelWritabilityManager
 
     /// The max message size set by the peer. We initialize it to zero to begin with.
     private var peerMaxMessageSize: UInt32
+
+    /// The maximum channel data payload size we advertise to the peer when opening this channel.
+    private let maximumPacketSize: UInt32
 
     private var activationState: ActivationState
 
@@ -104,31 +110,38 @@ final class SSHChildChannel {
     /// A promise from the user that will be fired when the channel goes active.
     private var userActivatePromise: EventLoopPromise<Channel>?
 
-    internal convenience init(allocator: ByteBufferAllocator,
-                              parent: Channel,
-                              multiplexer: SSHChannelMultiplexer,
-                              initializer: Initializer?,
-                              localChannelID: UInt32,
-                              targetWindowSize: Int32,
-                              initialOutboundWindowSize: UInt32)
-    {
-        self.init(allocator: allocator,
-                  parent: parent,
-                  multiplexer: multiplexer,
-                  initializer: initializer,
-                  initialState: .init(localChannelID: localChannelID),
-                  targetWindowSize: targetWindowSize,
-                  initialOutboundWindowSize: initialOutboundWindowSize)
+    internal convenience init(
+        allocator: ByteBufferAllocator,
+        parent: Channel,
+        multiplexer: SSHChannelMultiplexer,
+        initializer: Initializer?,
+        localChannelID: UInt32,
+        targetWindowSize: Int32,
+        initialOutboundWindowSize: UInt32,
+        maximumPacketSize: UInt32
+    ) {
+        self.init(
+            allocator: allocator,
+            parent: parent,
+            multiplexer: multiplexer,
+            initializer: initializer,
+            initialState: .init(localChannelID: localChannelID),
+            targetWindowSize: targetWindowSize,
+            initialOutboundWindowSize: initialOutboundWindowSize,
+            maximumPacketSize: maximumPacketSize
+        )
     }
 
-    private init(allocator: ByteBufferAllocator,
-                 parent: Channel,
-                 multiplexer: SSHChannelMultiplexer,
-                 initializer: Initializer?,
-                 initialState: ChildChannelStateMachine,
-                 targetWindowSize: Int32,
-                 initialOutboundWindowSize: UInt32)
-    {
+    private init(
+        allocator: ByteBufferAllocator,
+        parent: Channel,
+        multiplexer: SSHChannelMultiplexer,
+        initializer: Initializer?,
+        initialState: ChildChannelStateMachine,
+        targetWindowSize: Int32,
+        initialOutboundWindowSize: UInt32,
+        maximumPacketSize: UInt32
+    ) {
         self.allocator = allocator
         self.closePromise = parent.eventLoop.makePromise()
         self.parent = parent
@@ -139,9 +152,12 @@ final class SSHChildChannel {
         self._isWritable = .init(true)
         self._isActive = .init(false)
         self.state = initialState
-        self.writabilityManager = ChildChannelWritabilityManager(initialWindowSize: initialOutboundWindowSize,
-                                                                 parentIsWritable: parent.isWritable)
+        self.writabilityManager = ChildChannelWritabilityManager(
+            initialWindowSize: initialOutboundWindowSize,
+            parentIsWritable: parent.isWritable
+        )
         self.peerMaxMessageSize = 0
+        self.maximumPacketSize = maximumPacketSize
 
         // To begin with we initialize autoRead and halfClosure to false, but we are going to fetch it from our parent before we
         // go much further.
@@ -153,7 +169,8 @@ final class SSHChildChannel {
     }
 }
 
-extension SSHChildChannel: NIOSSHSendable {}
+// `SSHChildChannel` protects its shared state by dispatching to its associated `eventLoop`
+extension SSHChildChannel: @unchecked Sendable {}
 
 extension SSHChildChannel: Channel, ChannelCore {
     public var closeFuture: EventLoopFuture<Void> {
@@ -177,7 +194,7 @@ extension SSHChildChannel: Channel, ChannelCore {
     }
 
     func remoteAddress0() throws -> SocketAddress {
-        try self.parent!._channelCore.localAddress0()
+        try self.parent!._channelCore.remoteAddress0()
     }
 
     func setOption<Option: ChannelOption>(_ option: Option, value: Option.Value) -> EventLoopFuture<Void> {
@@ -231,8 +248,6 @@ extension SSHChildChannel: Channel, ChannelCore {
             return self.type! as! Option.Value
         case _ as SSHChildChannelOptions.Types.PeerMaximumMessageLengthOption:
             return self.peerMaxMessageSize as! Option.Value
-        case _ as SSHChildChannelOptions.Types.UsernameOption:
-            return multiplexer.username as! Option.Value
         case _ as ChannelOptions.Types.AutoReadOption:
             return self.autoRead as! Option.Value
         case _ as ChannelOptions.Types.AllowRemoteHalfClosureOption:
@@ -452,7 +467,9 @@ extension SSHChildChannel: Channel, ChannelCore {
     fileprivate func performActivation() {
         // We validate that the parent is active, and that we're active on the network, and that we haven't
         // activated already before we proceed. This makes this method idempotent.
-        guard let parent = self.parent, parent.isActive, self.state.isActiveOnNetwork, case .neverActivated = self.activationState else {
+        guard let parent = self.parent, parent.isActive, self.state.isActiveOnNetwork,
+            case .neverActivated = self.activationState
+        else {
             return
         }
 
@@ -476,34 +493,39 @@ extension SSHChildChannel: Channel, ChannelCore {
 
         if self.state.isActiveOnNetwork {
             // We need to send a channelOpenSuccess.
-            let message = SSHMessage.ChannelOpenConfirmationMessage(recipientChannel: self.state.remoteChannelIdentifier!,
-                                                                    senderChannel: self.state.localChannelIdentifier,
-                                                                    initialWindowSize: self.windowManager.targetWindowSize,
-                                                                    maximumPacketSize: UInt32(self.multiplexer.maximumPacketSize)) // This is a weirdly hard-coded choice.
+            let message = SSHMessage.ChannelOpenConfirmationMessage(
+                recipientChannel: self.state.remoteChannelIdentifier!,
+                senderChannel: self.state.localChannelIdentifier,
+                initialWindowSize: self.windowManager.targetWindowSize,
+                maximumPacketSize: self.maximumPacketSize
+            )
             self.processOutboundMessage(.channelOpenConfirmation(message), promise: nil)
             self.writePendingToMultiplexer()
         } else if !self.state.isClosed {
             // We need to request the channel. We must have the channel by now.
-            let message = SSHMessage.ChannelOpenMessage(type: .init(self.type!),
-                                                        senderChannel: self.state.localChannelIdentifier,
-                                                        initialWindowSize: self.windowManager.targetWindowSize,
-                                                        maximumPacketSize: UInt32(self.multiplexer.maximumPacketSize))
+            let message = SSHMessage.ChannelOpenMessage(
+                type: .init(self.type!),
+                senderChannel: self.state.localChannelIdentifier,
+                initialWindowSize: self.windowManager.targetWindowSize,
+                maximumPacketSize: self.maximumPacketSize
+            )
             self.processOutboundMessage(.channelOpen(message), promise: nil)
             self.writePendingToMultiplexer()
         } else {
-            // Already closed, just fail this promise. (Do not cascade from closeFuture:
-            // it never fails — cascadeFailure would leave the promise forever pending.)
-            userPromise?.fail(ChannelError.ioOnClosedChannel)
+            // Already closed, just fail this promise.
+            self.closeFuture.cascadeFailure(to: userPromise)
         }
     }
 
     private func initializerFailed(error: Error) {
         // Tell the remote peer to go away.
         if self.state.isActiveOnNetwork {
-            let message = SSHMessage.ChannelOpenFailureMessage(recipientChannel: self.state.remoteChannelIdentifier!,
-                                                               reasonCode: 2,
-                                                               description: "",
-                                                               language: "en-US")
+            let message = SSHMessage.ChannelOpenFailureMessage(
+                recipientChannel: self.state.remoteChannelIdentifier!,
+                reasonCode: 2,
+                description: "",
+                language: "en-US"
+            )
             self.processOutboundMessage(.channelOpenFailure(message), promise: nil)
             self.writePendingToMultiplexer()
         } else {
@@ -573,7 +595,7 @@ extension SSHChildChannel: Channel, ChannelCore {
 
         self.deliverPendingReads()
         self.failPendingWrites(error: error)
-        self.failPendingOutboundEvents(error: error) // These all go away, but we're going to use our own!
+        self.failPendingOutboundEvents(error: error)  // These all go away, but we're going to use our own!
         if let promise = self.pendingClosePromise {
             self.pendingClosePromise = nil
             promise.fail(error)
@@ -594,14 +616,11 @@ extension SSHChildChannel: Channel, ChannelCore {
 
         self.eventLoop.execute {
             self.removeHandlers(pipeline: self.pipeline)
-            // `Channel.closeFuture` must never fail (NIOCore contract): `NIOAsyncChannel`'s
-            // `executeThenClose` asserts on a failed closeFuture, which turned abrupt SSH
-            // transport teardown (`NIOSSHError.tcpShutdown` via `parentChannelInactive`) into
-            // a debug-build crash for wrapped direct-tcpip channels. The error itself has
-            // already been surfaced via `fireErrorCaught`, failed pending writes, and the
-            // pending close promise above — the closeFuture only reports "closed".
-            self.closePromise.succeed(())
-            self.multiplexer.childChannelErrored(channelID: self.state.localChannelIdentifier, expectClose: !self.state.isClosed)
+            self.closePromise.fail(error)
+            self.multiplexer.childChannelErrored(
+                channelID: self.state.localChannelIdentifier,
+                expectClose: !self.state.isClosed
+            )
         }
     }
 
@@ -644,7 +663,7 @@ extension SSHChildChannel: Channel, ChannelCore {
 
 // MARK: - Functions used to manage pending reads and writes.
 
-private extension SSHChildChannel {
+extension SSHChildChannel {
     /// Deliver reads to the channel.
     ///
     /// This is sometimes done when the channel itself is closed, because data loss in these circumstances is unacceptable.
@@ -658,22 +677,17 @@ private extension SSHChildChannel {
     private func deliverSingleRead(_ data: PendingContent) {
         switch data {
         case .data(let data):
-            // We only futz with the window manager if the channel is still in a state that
-            // accepts a CHANNEL_WINDOW_ADJUST. Draining buffered reads while the channel is
-            // closing would otherwise emit a window adjust, which the state machine rejects with
-            // a preconditionFailure ("Sent channel window adjust on channel in invalid state")
-            // and crashes the whole process on the EventLoop thread.
-            //
-            // uTerm patch #1 used `!self.state.sentClose`, which only excluded the WE-closed
-            // direction (.closedLocally/.closed). The peer-closed-first direction (.closedRemotely
-            // — the network-flap case) still passed the guard and crashed. uTerm patch #2 gates on
-            // `canSendWindowAdjust`, the exact accepting set of `sendChannelWindowAdjust`, covering
-            // both directions. See vendor/swift-nio-ssh/UTERM-PATCHES.md.
-            if !self.didClose, self.state.canSendWindowAdjust, let increment = self.windowManager.unbufferBytes(data.data.readableBytes) {
-                let update = SSHMessage.ChannelWindowAdjustMessage(recipientChannel: self.state.remoteChannelIdentifier!, bytesToAdd: UInt32(increment))
+            // We only futz with the window manager if the channel is not already closed.
+            if !self.didClose, !self.state.sentClose,
+                let increment = self.windowManager.unbufferBytes(data.data.readableBytes)
+            {
+                let update = SSHMessage.ChannelWindowAdjustMessage(
+                    recipientChannel: self.state.remoteChannelIdentifier!,
+                    bytesToAdd: UInt32(increment)
+                )
                 self.processOutboundMessage(.channelWindowAdjust(update), promise: nil)
             }
-            self.pipeline.fireChannelRead(NIOAny(data))
+            self.pipeline.syncOperations.fireChannelRead(NIOAny(data))
 
         case .eof:
             self.pipeline.fireUserInboundEventTriggered(ChannelEvent.inputClosed)
@@ -682,7 +696,9 @@ private extension SSHChildChannel {
 
     /// Delivers all pending flushed writes to the parent channel.
     private func deliverPendingWrites() {
-        while self.pendingWritesFromChannel.hasMark, self.writabilityManager.windowSpaceOnNetwork > 0, var write = self.pendingWritesFromChannel.first {
+        while self.pendingWritesFromChannel.hasMark, self.writabilityManager.windowSpaceOnNetwork > 0,
+            var write = self.pendingWritesFromChannel.first
+        {
             let maxWriteLength = min(self.writabilityManager.windowSpaceOnNetwork, Int(self.peerMaxMessageSize))
             let (actualWrite, excess) = write.0.trim(maxLength: maxWriteLength)
             write.0 = actualWrite
@@ -780,7 +796,9 @@ extension SSHChildChannel {
 
     private func handleInboundChannelOpenFailure(_ message: SSHMessage.ChannelOpenFailureMessage) throws {
         try self.state.receiveChannelOpenFailure(message)
-        self.errorEncountered(error: NIOSSHError.channelSetupRejected(reasonCode: message.reasonCode, reason: message.description))
+        self.errorEncountered(
+            error: NIOSSHError.channelSetupRejected(reasonCode: message.reasonCode, reason: message.description)
+        )
     }
 
     private func handleInboundChannelEOF(_ message: SSHMessage.ChannelEOFMessage) throws {
@@ -922,24 +940,38 @@ extension SSHChildChannel {
         }
     }
 
-    private func handleOutboundChannelOpen(_ message: SSHMessage.ChannelOpenMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelOpen(
+        _ message: SSHMessage.ChannelOpenMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         self.state.sendChannelOpen(message)
         self.pendingWritesForMultiplexer.append((.channelOpen(message), promise))
     }
 
-    private func handleOutboundChannelOpenConfirmation(_ message: SSHMessage.ChannelOpenConfirmationMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelOpenConfirmation(
+        _ message: SSHMessage.ChannelOpenConfirmationMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         self.state.sendChannelOpenConfirmation(message)
         self.pendingWritesForMultiplexer.append((.channelOpenConfirmation(message), promise))
         self.performActivation()
     }
 
-    private func handleOutboundChannelOpenFailure(_ message: SSHMessage.ChannelOpenFailureMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelOpenFailure(
+        _ message: SSHMessage.ChannelOpenFailureMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         self.state.sendChannelOpenFailure(message)
         self.pendingWritesForMultiplexer.append((.channelOpenFailure(message), promise))
-        self.errorEncountered(error: NIOSSHError.channelSetupRejected(reasonCode: message.reasonCode, reason: message.description))
+        self.errorEncountered(
+            error: NIOSSHError.channelSetupRejected(reasonCode: message.reasonCode, reason: message.description)
+        )
     }
 
-    private func handleOutboundChannelEOF(_ message: SSHMessage.ChannelEOFMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelEOF(
+        _ message: SSHMessage.ChannelEOFMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelEOF(message)
         self.pendingWritesForMultiplexer.append((.channelEOF(message), promise))
 
@@ -947,7 +979,10 @@ extension SSHChildChannel {
         self.pipeline.fireUserInboundEventTriggered(ChannelEvent.outputClosed)
     }
 
-    private func handleOutboundChannelClose(_ message: SSHMessage.ChannelCloseMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelClose(
+        _ message: SSHMessage.ChannelCloseMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelClose(message)
         self.pendingWritesForMultiplexer.append((.channelClose(message), promise))
 
@@ -957,33 +992,51 @@ extension SSHChildChannel {
         }
     }
 
-    private func handleOutboundChannelWindowAdjust(_ message: SSHMessage.ChannelWindowAdjustMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelWindowAdjust(
+        _ message: SSHMessage.ChannelWindowAdjustMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelWindowAdjust(message)
         self.pendingWritesForMultiplexer.append((.channelWindowAdjust(message), promise))
     }
 
-    private func handleOutboundChannelData(_ message: SSHMessage.ChannelDataMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelData(
+        _ message: SSHMessage.ChannelDataMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         // Validate this data in the state machine.
         try self.state.sendChannelData(message)
         self.pendingWritesForMultiplexer.append((.channelData(message), promise))
     }
 
-    private func handleOutboundChannelExtendedData(_ message: SSHMessage.ChannelExtendedDataMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelExtendedData(
+        _ message: SSHMessage.ChannelExtendedDataMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelExtendedData(message)
         self.pendingWritesForMultiplexer.append((.channelExtendedData(message), promise))
     }
 
-    private func handleOutboundChannelRequest(_ message: SSHMessage.ChannelRequestMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelRequest(
+        _ message: SSHMessage.ChannelRequestMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelRequest(message)
         self.pendingWritesForMultiplexer.append((.channelRequest(message), promise))
     }
 
-    private func handleOutboundChannelSuccess(_ message: SSHMessage.ChannelSuccessMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelSuccess(
+        _ message: SSHMessage.ChannelSuccessMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelSuccess(message)
         self.pendingWritesForMultiplexer.append((.channelSuccess(message), promise))
     }
 
-    private func handleOutboundChannelFailure(_ message: SSHMessage.ChannelFailureMessage, _ promise: EventLoopPromise<Void>?) throws {
+    private func handleOutboundChannelFailure(
+        _ message: SSHMessage.ChannelFailureMessage,
+        _ promise: EventLoopPromise<Void>?
+    ) throws {
         try self.state.sendChannelFailure(message)
         self.pendingWritesForMultiplexer.append((.channelFailure(message), promise))
     }
@@ -1014,7 +1067,8 @@ extension SSHChildChannel {
     }
 
     func parentChannelWritabilityChanged(newValue: Bool) {
-        guard case .changed(newValue: let localValue) = self.writabilityManager.parentWritabilityChanged(newValue) else {
+        guard case .changed(newValue: let localValue) = self.writabilityManager.parentWritabilityChanged(newValue)
+        else {
             return
         }
 
@@ -1122,7 +1176,7 @@ extension SSHChildChannel {
         while let operation = self.bufferedOutboundOperations.popFirst() {
             switch operation {
             case .close(_, _, let promise),
-                 .userOutboundEvent(_, let promise):
+                .userOutboundEvent(_, let promise):
 
                 promise?.fail(error)
             }
@@ -1191,8 +1245,8 @@ extension SSHChildChannel {
     }
 }
 
-private extension IOData {
-    mutating func slicePrefix(_ length: Int) -> IOData {
+extension IOData {
+    fileprivate mutating func slicePrefix(_ length: Int) -> IOData {
         assert(length < self.readableBytes)
 
         switch self {
@@ -1203,14 +1257,14 @@ private extension IOData {
             return .byteBuffer(newBuf)
 
         case .fileRegion(var region):
-            let newRegion = FileRegion(fileHandle: region.fileHandle, readerIndex: region.readerIndex, endIndex: region.readerIndex + length)
+            let newRegion = FileRegion(
+                fileHandle: region.fileHandle,
+                readerIndex: region.readerIndex,
+                endIndex: region.readerIndex + length
+            )
             region.moveReaderIndex(forwardBy: length)
             self = .fileRegion(region)
             return .fileRegion(newRegion)
         }
     }
 }
-
-#if swift(>=5.6)
-extension SSHChildChannel: @unchecked Sendable {}
-#endif // swift(>=5.6)

@@ -29,6 +29,8 @@ extension SSHConnectionStateMachine {
 
         var remoteVersion: String
 
+        var protectionSchemes: [NIOSSHTransportProtection.Type]
+
         var sessionIdentifier: ByteBuffer
 
         /// The backing state machine.
@@ -37,23 +39,28 @@ extension SSHConnectionStateMachine {
         /// The user auth state machine that drives user authentication.
         var userAuthStateMachine: UserAuthenticationStateMachine
 
-        let connectionAttributes: SSHConnectionStateMachine.Attributes
-
-        init(keyExchangeState state: KeyExchangeState,
-             loop: EventLoop)
-        {
+        init(
+            keyExchangeState state: KeyExchangeState,
+            loop: EventLoop
+        ) {
             self.role = state.role
             self.parser = state.parser
             self.serializer = state.serializer
             self.keyExchangeStateMachine = state.keyExchangeStateMachine
             self.remoteVersion = state.remoteVersion
+            self.protectionSchemes = state.protectionSchemes
 
             // We force unwrap the session ID here because it's programmer error to not have it at this stage.
             self.sessionIdentifier = self.keyExchangeStateMachine.sessionID!
-            self.userAuthStateMachine = UserAuthenticationStateMachine(role: self.role,
-                                                                       loop: loop,
-                                                                       sessionID: self.sessionIdentifier)
-            self.connectionAttributes = state.connectionAttributes
+            self.userAuthStateMachine = UserAuthenticationStateMachine(
+                role: self.role,
+                loop: loop,
+                sessionID: self.sessionIdentifier
+            )
+        }
+
+        mutating func bufferInboundData(_ data: inout ByteBuffer) {
+            self.parser.append(bytes: &data)
         }
     }
 }

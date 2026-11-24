@@ -2,7 +2,7 @@
 //
 // This source file is part of the SwiftNIO open source project
 //
-// Copyright (c) 2022 Apple Inc. and the SwiftNIO project authors
+// Copyright (c) 2019-2020 Apple Inc. and the SwiftNIO project authors
 // Licensed under Apache License v2.0
 //
 // See LICENSE.txt for license information
@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if swift(>=5.6)
-@preconcurrency protocol NIOSSHSendable: Sendable {}
+#if compiler(>=6.2)
+public typealias _NIOSSHSendableMetatype = SendableMetatype
 #else
-protocol NIOSSHSendable: Any {}
-#endif // swift(>=5.6)
+public typealias _NIOSSHSendableMetatype = Any
+#endif

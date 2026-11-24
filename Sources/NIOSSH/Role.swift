@@ -40,32 +40,24 @@ public enum SSHConnectionRole {
 
     internal var transportProtectionSchemes: [NIOSSHTransportProtection.Type] {
         switch self {
-        case .client(let client):
-            return client.transportProtectionSchemes
-        case .server(let server):
-            return server.transportProtectionSchemes
+        case .client(let configuration):
+            return configuration.transportProtectionSchemes
+        case .server(let configuration):
+            return configuration.transportProtectionSchemes
         }
     }
 
-    internal var keyExchangeAlgorithmNames: [Substring] {
-        self.keyExchangeAlgorithms.flatMap { $0.keyExchangeAlgorithmNames }
-    }
-
-    internal var keyExchangeAlgorithms: [NIOSSHKeyExchangeAlgorithmProtocol.Type] {
+    /// The maximum size of a channel data payload this peer advertises it is willing to receive,
+    /// and against which inbound encrypted packets are bounded.
+    internal var maximumPacketSize: UInt32 {
         switch self {
-        case .client(let client):
-            return client.keyExchangeAlgorithms
-        case .server(let server):
-            return server.keyExchangeAlgorithms
-        }
-    }
-
-    internal var maximumPacketSize: Int {
-        switch self {
-        case .client(let client):
-            return client.maximumPacketSize
-        case .server(let server):
-            return server.maximumPacketSize
+        case .client(let configuration):
+            return UInt32(truncatingIfNeeded: configuration.maximumPacketSize)
+        case .server(let configuration):
+            return UInt32(truncatingIfNeeded: configuration.maximumPacketSize)
         }
     }
 }
+
+@available(*, unavailable)
+extension SSHConnectionRole: Sendable {}

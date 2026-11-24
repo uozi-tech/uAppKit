@@ -24,23 +24,33 @@ import NIOCore
 public protocol GlobalRequestDelegate {
     /// The client wants to manage TCP port forwarding.
     ///
+    /// The eventLoop associated with the promise passed in must be the same as the one used to create the handler.
+    ///
     /// The default implementation rejects all requests to establish TCP port forwarding.
-    func tcpForwardingRequest(_: GlobalRequest.TCPForwardingRequest, handler: NIOSSHHandler, promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>)
+    func tcpForwardingRequest(
+        _: GlobalRequest.TCPForwardingRequest,
+        handler: NIOSSHHandler,
+        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
+    )
 }
 
-public extension GlobalRequestDelegate {
-    func tcpForwardingRequest(_ request: GlobalRequest.TCPForwardingRequest, handler: NIOSSHHandler, promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>) {
+extension GlobalRequestDelegate {
+    public func tcpForwardingRequest(
+        _ request: GlobalRequest.TCPForwardingRequest,
+        handler: NIOSSHHandler,
+        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
+    ) {
         // The default implementation rejects all requests.
         promise.fail(NIOSSHError.unsupportedGlobalRequest)
     }
 }
 
 /// A namespace of ``GlobalRequest`` objects that implementations of ``GlobalRequestDelegate`` may be asked to handle.
-public enum GlobalRequest {
+public enum GlobalRequest: Sendable {
     /// A request from a client to a server for the server to listen on a port on the client's behalf. If accepted,
     /// the server will listen on a port, and will forward accepted connections to the client using the "forwarded-tcpip"
     /// channel type.
-    public enum TCPForwardingRequest: Equatable {
+    public enum TCPForwardingRequest: Equatable, Sendable {
         /// A request to listen on a given address.
         case listen(host: String, port: Int)
 
@@ -49,7 +59,7 @@ public enum GlobalRequest {
     }
 
     /// The data associated with a successful response to a TCP forwarding request.
-    public struct TCPForwardingResponse: Hashable {
+    public struct TCPForwardingResponse: Hashable, Sendable {
         /// If requested to listen on a port, and the port the client requested was 0, this is set to the
         /// port that was actually bound. Otherwise is nil.
         public var boundPort: Int?
@@ -69,18 +79,18 @@ public enum GlobalRequest {
 internal struct DefaultGlobalRequestDelegate: GlobalRequestDelegate {}
 
 extension SSHMessage.GlobalRequestMessage.RequestType {
-    init(_ request: GlobalRequest.TCPForwardingRequest) {
+    internal init(_ request: GlobalRequest.TCPForwardingRequest) {
         switch request {
-        case .listen(host: let host, port: let port):
+        case .listen(let host, let port):
             self = .tcpipForward(host, UInt32(port))
-        case .cancel(host: let host, port: let port):
+        case .cancel(let host, let port):
             self = .cancelTcpipForward(host, UInt32(port))
         }
     }
 }
 
 extension GlobalRequest.TCPForwardingResponse {
-    init(_ response: SSHMessage.RequestSuccessMessage) {
+    internal init(_ response: SSHMessage.RequestSuccessMessage) {
         var data = response.buffer
         if let boundPort = data.readInteger(as: UInt32.self) {
             self.boundPort = Int(boundPort)
@@ -89,7 +99,7 @@ extension GlobalRequest.TCPForwardingResponse {
 }
 
 extension SSHMessage.RequestSuccessMessage {
-    init(_ request: GlobalRequest.GlobalRequestResponse, allocator: ByteBufferAllocator) {
+    internal init(_ request: GlobalRequest.GlobalRequestResponse, allocator: ByteBufferAllocator) {
         switch request {
         case .tcpForwarding(let response):
             var buffer = allocator.buffer(capacity: 4)

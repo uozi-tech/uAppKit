@@ -26,17 +26,25 @@ extension SSHConnectionStateMachine {
         /// The packet serializer used by this state machine.
         var serializer: SSHPacketSerializer
 
-        let connectionAttributes: SSHConnectionStateMachine.Attributes
-        
+        var protectionSchemes: [NIOSSHTransportProtection.Type]
+
         private let allocator: ByteBufferAllocator
 
-        init(idleState state: IdleState, allocator: ByteBufferAllocator, maximumPacketSize: Int) {
+        init(idleState state: IdleState, allocator: ByteBufferAllocator) {
             self.role = state.role
             self.serializer = state.serializer
+            self.protectionSchemes = state.protectionSchemes
 
-            self.parser = SSHPacketParser(allocator: allocator, maximumPacketSize: maximumPacketSize)
+            self.parser = SSHPacketParser(
+                isServer: self.role.isServer,
+                allocator: allocator,
+                maximumPacketSize: self.role.maximumPacketSize
+            )
             self.allocator = allocator
-            self.connectionAttributes = state.connectionAttributes
+        }
+
+        mutating func bufferInboundData(_ data: inout ByteBuffer) {
+            self.parser.append(bytes: &data)
         }
     }
 }
