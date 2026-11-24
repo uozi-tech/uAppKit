@@ -200,6 +200,12 @@ struct AuthenticationDelegateFailure: Error {
 /// `NIOSSHClientUserAuthenticationDelegate` 的实现：按 `SSHAuthentication.methods` 的顺序，
 /// 跳过服务器不再接受的方式。
 ///
+/// **部分成功**（RFC 4252 §5.1，NIOSSH 补丁 0014 的 `partialSuccess`）：上一次提交的方式已被接受、服务器还要别的。
+/// 那一种方式记为部分通过，以后不再提交（RSA 私钥不再换别的签名算法重递，成功的算法记下来）；下一个从配置的方式里
+/// **从头**挑：服务器现在要的、按配置顺序的第一个、部分通过过的除外。之前被拒或因为服务器当时不收而跳过的方式这时
+/// 会被重新考虑（上一阶段拒绝它，可能只是那时还不允许这种方式；每次部分成功都消耗掉一种方式，所以重试有上限）。
+/// 上一次是 `.delegate` 给的就把标志转给它，由它接着答。普通拒绝之后照旧往后走，不回头。
+///
 /// 列表用完时以 `nil` 完成 promise，NIOSSH（补丁 0011）随即在 pipeline 上报
 /// `NIOSSHError.noFurtherAuthenticationOffers`，`SSHConnectionGuard` 据此结束连接、取 `failure` 作为详情。
 /// 认证结束（成功或失败）后 `forgetCredentials()` 丢掉口令与私钥，不让它们跟着连接活下去。
@@ -208,20 +214,29 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private var methods: [SSHAuthenticationMethod]
     private let allowsLegacyAlgorithms: Bool
     private let allowsSHA1Fallback: Bool
+    /// 往后走的游标（普通拒绝之后从这里接着挑）。
     private var index = 0
-    private var activeDelegate: (any NIOSSHClientUserAuthenticationDelegate & Sendable)?
+    /// 这一阶段提交过的方式（下标），不再提交；部分成功之后重置成 `consumed`。
+    private var offered: Set<Int> = []
+    /// 得到部分成功的方式（下标），整个认证过程里都不再提交。
+    private var consumed: Set<Int> = []
+    private var activeDelegate: (index: Int, delegate: any NIOSSHClientUserAuthenticationDelegate & Sendable)?
     /// 正在逐个算法尝试的 RSA 用户私钥与还没试的算法。
-    private var rsaAttempts: (key: SSHRSAPrivateKey, remaining: ArraySlice<SSHRSASignatureAlgorithm>)?
+    private var rsaAttempts: (index: Int, key: SSHRSAPrivateKey, remaining: ArraySlice<SSHRSASignatureAlgorithm>)?
+    /// 最近一次提交的是哪种方式（RSA 带上签名算法）。
+    private var lastOffer: (index: Int, kind: SSHAuthenticationMethod.Kind, rsaAlgorithm: SSHRSASignatureAlgorithm?)?
     private(set) var attempted: [SSHAuthenticationMethod.Kind] = []
+    /// 得到部分成功的方式，按顺序。
+    private(set) var partiallyAccepted: [SSHAuthenticationMethod.Kind] = []
     /// 依次试过的 RSA 签名算法（测试用）。
     private(set) var attemptedRSAAlgorithms: [SSHRSASignatureAlgorithm] = []
-    /// 最近一次出价是 RSA 用户私钥时用的签名算法，别的方式时为 nil。认证成功时它就是成功的那一次。
-    private(set) var lastOfferedRSAAlgorithm: SSHRSASignatureAlgorithm?
+    /// 部分成功时用的 RSA 签名算法。
+    private var partiallyAcceptedRSAAlgorithms: [SSHRSASignatureAlgorithm] = []
     /// 服务器最后一次声明还接受的方式。
     private var lastAvailable: NIOSSHAvailableUserAuthenticationMethods = .all
 
-    /// 服务器在 `server-sig-algs`（RFC 8308）里宣告的公钥算法（NIOSSH 补丁 0008 交给三参数的
-    /// `nextAuthenticationType`）；没宣告时 `nil`。EXT_INFO 早于 SERVICE_ACCEPT，第一次被问时就已经在了。
+    /// 服务器在 `server-sig-algs`（RFC 8308）里宣告的公钥算法（NIOSSH 补丁 0008）；没宣告时 `nil`。
+    /// EXT_INFO 早于 SERVICE_ACCEPT，第一次被问时就已经在了。
     private(set) var serverSignatureAlgorithms: [String]?
 
     init(authentication: SSHAuthentication, allowsLegacyAlgorithms: Bool, allowsSHA1Fallback: Bool = false) {
@@ -231,9 +246,20 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
         self.allowsSHA1Fallback = allowsSHA1Fallback
     }
 
+    /// 最近一次出价是 RSA 用户私钥时用的签名算法，别的方式时为 nil。
+    var lastOfferedRSAAlgorithm: SSHRSASignatureAlgorithm? { lastOffer?.rsaAlgorithm }
+
+    /// 认证成功时：通过了的 RSA 步骤（部分成功的与最后那一次）里用的签名算法。有 SHA-1 的 `ssh-rsa` 就报它
+    /// （旧算法用没用上要如实），否则报最后一个。
+    var authenticatedRSAAlgorithm: SSHRSASignatureAlgorithm? {
+        let used = partiallyAcceptedRSAAlgorithms + [lastOffer?.rsaAlgorithm].compactMap { $0 }
+        return used.first(where: \.isLegacy) ?? used.last
+    }
+
     /// 认证失败的详情（列表用完时）。
     var failure: SSHAuthenticationFailure {
-        SSHAuthenticationFailure(remainingMethods: lastAvailable, attemptedMethods: attempted)
+        SSHAuthenticationFailure(remainingMethods: lastAvailable, attemptedMethods: attempted,
+                                 partiallyAcceptedMethods: partiallyAccepted)
     }
 
     /// 丢掉还没用到（或已经用过）的口令、私钥与委托。
@@ -249,7 +275,8 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
         nextAuthenticationType(
-            availableMethods: availableMethods, serverSignatureAlgorithms: nil, nextChallengePromise: nextChallengePromise)
+            availableMethods: availableMethods, serverSignatureAlgorithms: nil, partialSuccess: false,
+            nextChallengePromise: nextChallengePromise)
     }
 
     func nextAuthenticationType(
@@ -257,11 +284,35 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
         serverSignatureAlgorithms: [String]?,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
+        nextAuthenticationType(
+            availableMethods: availableMethods, serverSignatureAlgorithms: serverSignatureAlgorithms,
+            partialSuccess: false, nextChallengePromise: nextChallengePromise)
+    }
+
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        partialSuccess: Bool,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
         lastAvailable = availableMethods
         self.serverSignatureAlgorithms = serverSignatureAlgorithms
-        lastOfferedRSAAlgorithm = nil
-        if let delegate = activeDelegate {
-            ask(delegate, availableMethods: availableMethods, promise: nextChallengePromise)
+        let previous = lastOffer
+        lastOffer = nil
+        if partialSuccess, let previous {
+            partiallyAccepted.append(previous.kind)
+            if let algorithm = previous.rsaAlgorithm { partiallyAcceptedRSAAlgorithms.append(algorithm) }
+            // 这把 RSA 钥匙已经通过了，别再换算法重递。
+            rsaAttempts = nil
+            if activeDelegate == nil {
+                // 新的一阶段：从头挑，部分通过过的除外。
+                consumed.insert(previous.index)
+                offered = consumed
+                index = 0
+            }
+        }
+        if case let (_, delegate)? = activeDelegate {
+            ask(delegate, availableMethods: availableMethods, partialSuccess: partialSuccess, promise: nextChallengePromise)
         } else if availableMethods.contains(.publicKey), let next = nextRSAAttempt() {
             nextChallengePromise.succeed(next)
         } else {
@@ -274,11 +325,15 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private func nextRSAAttempt() -> NIOSSHUserAuthenticationOffer? {
         guard var attempts = rsaAttempts, let algorithm = attempts.remaining.popFirst() else { return nil }
         rsaAttempts = attempts
-        attempted.append(.publicKey)
+        record(attempts.index, .publicKey, rsaAlgorithm: algorithm)
         attemptedRSAAlgorithms.append(algorithm)
-        lastOfferedRSAAlgorithm = algorithm
         let key = NIOSSHPrivateKey(rsaPrivateKey: attempts.key, algorithm: algorithm)
         return .init(username: username, serviceName: "", offer: .privateKey(.init(privateKey: key)))
+    }
+
+    private func record(_ index: Int, _ kind: SSHAuthenticationMethod.Kind, rsaAlgorithm: SSHRSASignatureAlgorithm? = nil) {
+        attempted.append(kind)
+        lastOffer = (index, kind, rsaAlgorithm)
     }
 
     private func advance(
@@ -286,21 +341,26 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
         promise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
         while index < methods.count {
-            let method = methods[index]
+            let current = index
+            let method = methods[current]
             index += 1
+            guard !offered.contains(current) else { continue }
             switch method {
             case .delegate(let delegate):
-                activeDelegate = delegate
-                ask(delegate, availableMethods: availableMethods, promise: promise)
+                offered.insert(current)
+                activeDelegate = (current, delegate)
+                ask(delegate, availableMethods: availableMethods, partialSuccess: false, promise: promise)
                 return
             case .password(let password):
                 guard availableMethods.contains(.password) else { continue }
-                attempted.append(.password)
+                offered.insert(current)
+                record(current, .password)
                 promise.succeed(.init(username: username, serviceName: "", offer: .password(.init(password: password))))
                 return
             case .privateKey(let key):
                 guard availableMethods.contains(.publicKey) else { continue }
-                attempted.append(.publicKey)
+                offered.insert(current)
+                record(current, .publicKey)
                 promise.succeed(.init(username: username, serviceName: "", offer: .privateKey(.init(privateKey: key))))
                 return
             case .rsaPrivateKey(let key):
@@ -308,13 +368,15 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
                 let plan = SSHRSAUserAuthenticationPlan.algorithms(
                     allowsSHA1: allowsLegacyAlgorithms || allowsSHA1Fallback,
                     serverSignatureAlgorithms: serverSignatureAlgorithms)
-                rsaAttempts = (key, plan[...])
+                offered.insert(current)
+                rsaAttempts = (current, key, plan[...])
                 guard let offer = nextRSAAttempt() else { continue }
                 promise.succeed(offer)
                 return
             case .certifiedPrivateKey(let key, let certificate):
                 guard availableMethods.contains(.publicKey) else { continue }
-                attempted.append(.publicKey)
+                offered.insert(current)
+                record(current, .publicKey)
                 promise.succeed(.init(
                     username: username, serviceName: "",
                     offer: .privateKey(.init(privateKey: key, certifiedKey: certificate))))
@@ -327,20 +389,21 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private func ask(
         _ delegate: any NIOSSHClientUserAuthenticationDelegate & Sendable,
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        partialSuccess: Bool,
         promise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
         let eventLoop = promise.futureResult.eventLoop
         let inner = eventLoop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
         delegate.nextAuthenticationType(
             availableMethods: availableMethods, serverSignatureAlgorithms: serverSignatureAlgorithms,
-            nextChallengePromise: inner)
+            partialSuccess: partialSuccess, nextChallengePromise: inner)
         // delegate 可能在别的线程完成 promise；回调总在 promise 的 EventLoop（即本连接的）上。
         let loopBoundSelf = NIOLoopBound(self, eventLoop: eventLoop)
         inner.futureResult.whenComplete { result in
             let this = loopBoundSelf.value
             switch result {
             case .success(.some(let offer)):
-                this.attempted.append(.delegate)
+                this.record(this.activeDelegate?.index ?? -1, .delegate)
                 promise.succeed(offer)
             case .success(.none):
                 this.activeDelegate = nil

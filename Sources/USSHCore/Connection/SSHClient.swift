@@ -22,7 +22,8 @@ public final class SSHClient: Sendable {
     /// 读不出 KEXINIT 时为 nil：嗅探器的解析和 NIOSSH 一样宽松、也跳过它之前的 IGNORE / DEBUG，剩下的情形
     /// （包超过 256 KiB 之类）NIOSSH 多半也连不上；万一连上了，nil 的意思是「不知道」，不是「没用旧算法」。
     public let negotiatedAlgorithms: SSHNegotiatedAlgorithms?
-    /// 用 RSA 用户私钥（`SSHAuthenticationMethod.rsaPrivateKey`）认证成功时用的签名算法；别的方式成功时为 nil。
+    /// 用 RSA 用户私钥（`SSHAuthenticationMethod.rsaPrivateKey`）认证通过时用的签名算法（多步认证里 RSA 那一步
+    /// 得到部分成功也算；几步都是 RSA 时有 `ssh-rsa` 就报它）；没有 RSA 步骤时为 nil。
     public let rsaUserAuthenticationAlgorithm: SSHRSASignatureAlgorithm?
 
     let sshHandler: NIOLoopBound<NIOSSHHandler>

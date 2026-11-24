@@ -126,6 +126,16 @@ nonisolated enum SSHErrorText {
     /// 认证失败的原因：按实际发出过的方式说；什么都没发出过、或发出过的方式服务器根本不收，
     /// 就列出服务器接受的方式。
     static func describe(_ failure: SSHAuthenticationFailure) -> String {
+        if !failure.partiallyAcceptedMethods.isEmpty {
+            // 凭据没被拒：这一步通过了，服务器还要别的（口令、一次性验证码……），配置里没有能用的。
+            var names: [String] = []
+            for kind in failure.partiallyAcceptedMethods {
+                let name = describe(kind)
+                if !names.contains(name) { names.append(name) }
+            }
+            let accepted = names.joined(separator: String(localized: "、", bundle: ModuleBundle.bundle, comment: "并列项之间的分隔符"))
+            return String(localized: "服务器已接受\(accepted)，但还要求另一种认证（服务器支持：\(methodNames(failure.remainingMethods))），没有配置可用的方式", bundle: ModuleBundle.bundle)
+        }
         let attempted = Set(failure.attemptedMethods)
         let acceptedByServer = attempted.contains { kind in
             switch kind {
@@ -144,6 +154,15 @@ nonisolated enum SSHErrorText {
             return String(localized: "服务器拒绝了密码", bundle: ModuleBundle.bundle)
         }
         return String(localized: "服务器拒绝了提供的凭据", bundle: ModuleBundle.bundle)
+    }
+
+    /// 认证方式的叫法（嵌在「服务器已接受…」里）。
+    static func describe(_ kind: SSHAuthenticationMethod.Kind) -> String {
+        switch kind {
+        case .password: return String(localized: "密码", bundle: ModuleBundle.bundle, comment: "认证方式，嵌在「服务器已接受%@」里")
+        case .publicKey: return String(localized: "私钥", bundle: ModuleBundle.bundle, comment: "认证方式，嵌在「服务器已接受%@」里")
+        case .delegate: return String(localized: "前一步认证", bundle: ModuleBundle.bundle, comment: "认证方式，嵌在「服务器已接受%@」里")
+        }
     }
 
     /// RFC 4252 的方式名，协议里的写法，不翻译。

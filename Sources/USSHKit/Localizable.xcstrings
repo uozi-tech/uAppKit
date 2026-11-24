@@ -1,6 +1,35 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "、" : {
+      "comment" : "并列项之间的分隔符",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ", "
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "、"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : ", "
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "、"
+          }
+        }
+      }
+    },
     "%@ 秒" : {
       "comment" : "带一位小数的秒数",
       "localizations" : {
@@ -2087,6 +2116,35 @@
         }
       }
     },
+    "前一步认证" : {
+      "comment" : "认证方式，嵌在「服务器已接受%@」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "previous authentication step"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前の認証ステップ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이전 인증 단계"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前一步驗證"
+          }
+        }
+      }
+    },
     "加密" : {
       "comment" : "算法类别，嵌在「…的任何%@算法」里",
       "localizations" : {
@@ -2393,6 +2451,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "密文長度不是區塊大小的整數倍"
+          }
+        }
+      }
+    },
+    "密码" : {
+      "comment" : "认证方式，嵌在「服务器已接受%@」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "password"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "パスワード"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "암호"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密碼"
           }
         }
       }
@@ -3095,6 +3182,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器只提供 SHA-1 時代的舊%1$@演算法（伺服器提供：%2$@）。這類演算法安全性較低，通常只有很舊的裝置還在用；這次連線沒有啟用相容舊裝置的演算法。"
+          }
+        }
+      }
+    },
+    "服务器已接受%@，但还要求另一种认证（服务器支持：%@），没有配置可用的方式" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server accepted the %1$@ but requires another authentication step (the server supports: %2$@), and no usable method is configured"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバは%1$@を受け入れましたが、さらに別の認証を求めています（サーバの対応：%2$@）。使える方法が設定されていません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버가 %1$@을(를) 받아들였지만 다른 인증을 더 요구함(서버 지원: %2$@). 사용할 수 있는 방식이 설정되어 있지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器已接受%1$@，但還要求另一種驗證（伺服器支援：%2$@），沒有設定可用的方式"
           }
         }
       }
@@ -3994,6 +4109,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "目標是一個目錄"
+          }
+        }
+      }
+    },
+    "私钥" : {
+      "comment" : "认证方式，嵌在「服务器已接受%@」里",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "private key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰"
           }
         }
       }

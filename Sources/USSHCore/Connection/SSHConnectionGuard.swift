@@ -96,7 +96,7 @@ final class SSHConnectionGuard: ChannelInboundHandler {
             clock.stop()
             let facts = SSHSessionFacts(
                 negotiatedAlgorithms: sniffer.negotiated,
-                rsaUserAuthenticationAlgorithm: authDelegate.lastOfferedRSAAlgorithm)
+                rsaUserAuthenticationAlgorithm: authDelegate.authenticatedRSAAlgorithm)
             authDelegate.forgetCredentials()
             lifecycle.markConnected()
             logger.debug("SSH 认证成功")
