@@ -298,8 +298,10 @@ nonisolated enum SSHClientFactory {
                 return .hostKeyRejected(SSHErrorText.describe(error))
             case .authenticationFailed, .authenticationDelegateFailed:
                 return .authenticationFailed(SSHErrorText.describe(error))
-            case .connectTimeout, .connectFailed, .handshakeTimeout, .handshakeFailed, .noCommonAlgorithm,
-                 .connectionClosed:
+            case .handshakeFailed, .noCommonAlgorithm:
+                // 配置问题、不是网络断了：单列，app 的重连逻辑据此不打转。显示同 `.connectFailed`。
+                return .handshakeFailed(SSHErrorText.describe(error))
+            case .connectTimeout, .connectFailed, .handshakeTimeout, .connectionClosed:
                 return .connectFailed(SSHErrorText.describe(error))
             }
         default:

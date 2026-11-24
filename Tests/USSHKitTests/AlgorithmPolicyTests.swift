@@ -92,7 +92,7 @@ final class AlgorithmPolicyTests: XCTestCase {
         for _ in 0..<attempts {
             let message = await assertConnectionError({
                 _ = try await TestSSH.connect(server, algorithms: .builtInOnly)
-            }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
+            }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
             XCTAssertEqual(message, noCommonAlgorithm(.hostKey, serverOffer: ["rsa-sha2-512", "rsa-sha2-256"]))
         }
         XCTAssertTrue(server.events.authAttempts.isEmpty)
@@ -110,7 +110,7 @@ final class AlgorithmPolicyTests: XCTestCase {
 
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(server, legacyFallback: false)
-        }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
         XCTAssertEqual(message, noCommonAlgorithm(.hostKey, serverOffer: ["ssh-rsa"]))
 
         let client = try await TestSSH.connect(server, algorithms: .legacyCompatible, legacyFallback: false)
@@ -127,7 +127,7 @@ final class AlgorithmPolicyTests: XCTestCase {
 
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(server, legacyFallback: false)
-        }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
         XCTAssertEqual(message, noCommonAlgorithm(.keyExchange, serverOffer: ["diffie-hellman-group14-sha1"]))
 
         let client = try await TestSSH.connect(server, algorithms: .legacyCompatible, legacyFallback: false)

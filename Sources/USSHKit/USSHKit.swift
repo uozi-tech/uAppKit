@@ -205,6 +205,9 @@ public enum SSHConnectionError: Error, LocalizedError, Sendable {
     case unsupportedAgentAuthentication
     case authenticationFailed(String)
     case connectFailed(String)
+    /// 握手没成（协议错误、算法协商不成）：服务器配置问题，**不是**网络断了，重试不会好。
+    /// 与 `connectFailed` 分开是为了让 app 的重连逻辑不在这种错误上打转；给用户看的文案与 `connectFailed` 相同。
+    case handshakeFailed(String)
     case jumpHostFailed(String)
     case hostKeyRejected(String)
     case bindFailed(String)
@@ -219,7 +222,7 @@ public enum SSHConnectionError: Error, LocalizedError, Sendable {
             return String(localized: "当前版本尚未支持 ssh-agent 认证", bundle: ModuleBundle.bundle)
         case .authenticationFailed(let message):
             return String(localized: "SSH 认证失败：\(message)", bundle: ModuleBundle.bundle)
-        case .connectFailed(let message):
+        case .connectFailed(let message), .handshakeFailed(let message):
             return String(localized: "SSH 连接失败：\(message)", bundle: ModuleBundle.bundle)
         case .jumpHostFailed(let message):
             return String(localized: "SSH 跳板机连接失败：\(message)", bundle: ModuleBundle.bundle)

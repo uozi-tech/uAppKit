@@ -106,7 +106,7 @@ final class LegacyFallbackTests: XCTestCase {
         defer { Task { await server.stop() } }
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(server, legacyFallback: false)
-        }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
         XCTAssertEqual(message, SSHErrorText.describe(SSHClientError.noCommonAlgorithm(
             SSHAlgorithmNegotiationFailure(category: .hostKey, clientOffer: [], serverOffer: ["ssh-rsa"]))))
         XCTAssertEqual(attempts(server), 1)
@@ -124,7 +124,7 @@ final class LegacyFallbackTests: XCTestCase {
         aeadOnly.transportProtectionSchemes = Constants.bundledTransportProtectionSchemes
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(server, algorithms: aeadOnly)
-        }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
         XCTAssertEqual(message, SSHErrorText.describe(SSHClientError.noCommonAlgorithm(
             SSHAlgorithmNegotiationFailure(category: .mac, clientOffer: [], serverOffer: ["hmac-sha2-256"]))))
         XCTAssertEqual(attempts(server), 2)

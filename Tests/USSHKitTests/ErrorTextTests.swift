@@ -50,10 +50,13 @@ final class ErrorTextTests: XCTestCase {
         guard case .hostKeyRejected("x") = try map(SSHClientError.hostKeyRejected(SSHConnectionError.hostKeyRejected("x")))
         else { return XCTFail("信任判定自己的拒绝原样交出") }
         for error in [SSHClientError.connectTimeout(.seconds(1)), .handshakeTimeout(.seconds(1)),
-                      .handshakeFailed(ChannelError.eof), .connectionClosed(.remoteClosed),
-                      .connectFailed(ChannelError.eof)] {
+                      .connectionClosed(.remoteClosed), .connectFailed(ChannelError.eof)] {
             guard case .connectFailed = try map(error) else { return XCTFail("\(error)") }
         }
+        // 握手失败单列（app 据此不重连），文案与连不上相同。
+        let handshake = try map(SSHClientError.handshakeFailed(ChannelError.eof))
+        guard case .handshakeFailed(let detail) = handshake else { return XCTFail("\(handshake)") }
+        XCTAssertEqual(handshake.errorDescription, SSHConnectionError.connectFailed(detail).errorDescription)
         XCTAssertThrowsError(try map(CancellationError())) { XCTAssertTrue($0 is CancellationError) }
     }
 
@@ -121,10 +124,10 @@ final class ErrorTextTests: XCTestCase {
                        handshake(localized("本应用不支持服务器提供的任何\(encryption)算法（服务器提供：\("aes128-cbc")）")))
         XCTAssertEqual(text(.mac, []),
                        handshake(localized("本应用不支持服务器提供的任何\(mac)算法（服务器提供：\(localized("无"))）")))
-        // 归到 `.connectFailed`（不是网络断开，重试也不会好）。
+        // 归到 `.handshakeFailed`（不是网络断开，重试也不会好；显示同 `.connectFailed`）。
         let mapped = try? SSHClientFactory.connectionError(for: SSHClientError.noCommonAlgorithm(.init(
             category: .hostKey, clientOffer: [], serverOffer: ["ssh-rsa"])))
-        guard case .connectFailed = mapped else { return XCTFail("\(String(describing: mapped))") }
+        guard case .handshakeFailed = mapped else { return XCTFail("\(String(describing: mapped))") }
     }
 
     /// 英文资源确实带上了新文案（找不到时界面只剩中文原文）。

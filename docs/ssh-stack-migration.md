@@ -95,7 +95,7 @@ public struct SSHLegacyAlgorithm: Sendable, Hashable {
 | 之前 | 之后 |
 |---|---|
 | `struct SSHPrivateKey: @unchecked Sendable` | `struct SSHPrivateKey: Sendable` |
-| `SSHConnectionError` | case 不变；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
+| `SSHConnectionError` | **新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
 | `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
 | USSHCore 的错误类型没有文案 | USSHKit 给 `SSHClientError`、`SSHChannelError`、`SFTPError`、`SSHCommandError`、`SSHRSAError` 补上 `LocalizedError`（四种语言），`error.localizedDescription` 直接可用。判断一律看类型与 case，不看文案 |
 
@@ -171,7 +171,7 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   - **为什么不削弱能连现代服务器的安全性**：协商取的是客户端最偏好、服务器也支持的那个，补上的旧算法一律排在全部现代算法之后；
     双方报的算法列表算进交换哈希、由主机密钥签名，中间人删掉服务器报的现代算法签名就对不上，所以对主机密钥已被信任的服务器，攻击者
     没法把连接逼到旧算法上。于是退级只会发生在真的什么更好的都不支持的服务器上。SHA-1 原理上仍然更弱，所以结果要报出来、记日志。
-  - `legacyFallback: false`：只用 `algorithms`，没有共同算法就报 `.connectFailed`（文案说明是哪一类、服务器报了什么）。
+  - `legacyFallback: false`：只用 `algorithms`，没有共同算法就报 `.handshakeFailed`（文案说明是哪一类、服务器报了什么）。
 - **协商到的算法**：USSHCore 的 `SSHClient.negotiatedAlgorithms`（`SSHNegotiatedAlgorithms`：密钥交换、主机密钥、加密、商定的 MAC 名、
   `encryptionIsAEAD` / `macInUse`、压缩）与 `rsaUserAuthenticationAlgorithm`（RSA 用户私钥成功时用的签名算法）。NIOSSH 不公开它自己的
   协商结果，这是 USSHCore 从双方的 KEXINIT 按与 NIOSSH 相同的规则算出来的。
@@ -224,8 +224,8 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 | `SSHClientError` | USSHKit 抛的 | 值得重试？ |
 |---|---|---|
 | `.connectTimeout`、`.connectFailed`、`.handshakeTimeout`、`.connectionClosed` | `.connectFailed` | 是（网络问题） |
-| `.noCommonAlgorithm(f)`（双方没有共同算法；`f.category` 是哪一类，`f.serverOffer` 是服务器报的） | `.connectFailed`（「SSH 握手失败：…」，说明类别与服务器的报价） | 否（配置问题，重试不会好；默认已经自动退过旧算法，见第 5 节） |
-| `.handshakeFailed`（协议错误，包括 USSHCore 算法实现抛的错；**不含**协商不成） | `.connectFailed`（「SSH 握手失败：…」） | 否（重试不会好） |
+| `.noCommonAlgorithm(f)`（双方没有共同算法；`f.category` 是哪一类，`f.serverOffer` 是服务器报的） | `.handshakeFailed`（「SSH 握手失败：…」，说明类别与服务器的报价；显示同 `.connectFailed`） | 否（配置问题，重试不会好；默认已经自动退过旧算法，见第 5 节） |
+| `.handshakeFailed`（协议错误，包括 USSHCore 算法实现抛的错；**不含**协商不成） | `.handshakeFailed`（「SSH 握手失败：…」） | 否（重试不会好） |
 | `.authenticationFailed`、`.authenticationDelegateFailed` | `.authenticationFailed` | 否 |
 | `.hostKeyRejected`、`.hostKeyValidationTimeout` | `.hostKeyRejected` | 否 |
 

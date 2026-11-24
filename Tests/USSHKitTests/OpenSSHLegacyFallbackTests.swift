@@ -37,7 +37,7 @@ final class OpenSSHLegacyFallbackTests: XCTestCase {
         let refused = ApproverProbe(.approve)
         let message = await assertConnectionError({
             _ = try await self.connect(sshd, probe: refused, legacyFallback: false)
-        }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
+        }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
         XCTAssertEqual(message, SSHErrorText.describe(SSHClientError.noCommonAlgorithm(refusal)), file: file, line: line)
         await sshd.waitForConnections(3)
         XCTAssertEqual(sshd.connections, 3, file: file, line: line)
