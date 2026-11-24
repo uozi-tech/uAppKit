@@ -123,7 +123,8 @@ final class SFTPReadIntegrityTests: XCTestCase {
         try await file.close()
     }
 
-    /// 服务端宣告的读写上限超过 uint32、本端收帧上限也开到很大：长度封顶在 UInt32.max，读写照常、不 trap。
+    /// 服务端宣告的读写上限超过 uint32、本端收帧上限也开到很大：长度封顶在 `maximumTransferLength`（256 KiB），
+    /// 读写照常、不 trap。
     func testHugeAdvertisedLimitsAreClampedToUInt32() async throws {
         await pair.shutdown()
         let huge = SFTPServerLimits(maximumPacketLength: .max, maximumReadLength: .max, maximumWriteLength: .max, maximumOpenHandles: 0)
@@ -131,8 +132,8 @@ final class SFTPReadIntegrityTests: XCTestCase {
             server: SFTPServer.Configuration(limits: huge),
             client: SFTPClient.Configuration(maximumInboundPacketLength: Int.max),
             serving: memory)
-        XCTAssertEqual(pair.client.maximumReadLength, Int(UInt32.max))
-        XCTAssertEqual(pair.client.maximumWriteLength, Int(UInt32.max))
+        XCTAssertEqual(pair.client.maximumReadLength, SFTPClient.maximumTransferLength)
+        XCTAssertEqual(pair.client.maximumWriteLength, SFTPClient.maximumTransferLength)
         let all = try await readAll()
         XCTAssertEqual(all, payload)
         let exact = try await readAll(expectedLength: 1234)

@@ -192,6 +192,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **单次读写的上限**跟服务器的 `limits@openssh.com` 走（OpenSSH 是 255 KiB），没宣告时按 32 KiB：`client.maximumReadLength` /
   `client.maximumWriteLength`。`write(_:at:)` 超过上限抛 `requestTooLarge`，不会切块；`read(from:length:)` 超过上限按上限要。
   **app 自己的流水线（uTerm 的 `SFTPPipeline` 写死的 32 000）要按这两个值切块**，USSHKit 的 `SSHFileTransferSession` 已经这样做。
+  两个值都封顶在 `SFTPClient.maximumTransferLength`（256 KiB）：服务端宣告得再大（`limits@openssh.com` 能报到 2^64）也只按这么多切，
+  所以按它们从本地文件读、往内存里拼都有上限。app 自己按它们 `read(upToCount:)` 的代码不用再额外封顶，但别绕过它们直接用
+  `client.limits` 里的原始宣告值。
 - **完整性**：知道大小时用 `file.readAll(from:expectedLength:maximumBytes:window:)`：读不满就抛 `SFTPError.shortRead(expected:actual:)`，
   不会把被截短的数据当成功；0 字节的 DATA、EOF 后面又冒出数据都是 `invalidResponse`。区间越过 `UInt64` 抛 `offsetOutOfRange`。
   `SSHFileTransferSession.download` 现在按 stat 的大小分段（每段 8 MiB）`readAll(expectedLength:)`：**下载过程中文件变短 →

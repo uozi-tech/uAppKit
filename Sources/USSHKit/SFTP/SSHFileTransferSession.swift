@@ -111,6 +111,10 @@ public actor SSHFileTransferSession {
     /// wait for a window adjust.
     static let downloadWindow = 16
 
+    /// 上传时一次从本地文件读进内存（也就是一个 WRITE）的上限，与 OpenSSH 的 256 KiB 一致。实际取它与
+    /// `SFTPClient.maximumWriteLength`（服务端的宣告，已经封顶在 `SFTPClient.maximumTransferLength`）的小者。
+    static let uploadChunkBytes = 256 * 1024
+
     /// How much of the stat'ed size one `readAll(expectedLength:)` covers (and
     /// so how much is held in memory before it is written out).
     static let downloadSegmentBytes = 8 << 20
@@ -252,8 +256,9 @@ public actor SSHFileTransferSession {
             remotePath,
             flags: [.write, .create, .truncate]
         )
-        // 每个 WRITE 按服务端允许的上限切（`limits@openssh.com`，没宣告时 SFTPClient 按 32 KiB）。
-        let chunkSize = sftp.maximumWriteLength
+        // 每个 WRITE 按服务端允许的上限切（`limits@openssh.com`，没宣告时 SFTPClient 按 32 KiB），再封顶在
+        // `uploadChunkBytes`：一次从本地读进内存的就这么多，服务端宣告多大都一样。
+        let chunkSize = min(sftp.maximumWriteLength, Self.uploadChunkBytes)
         do {
             var offset: UInt64 = 0
             while true {

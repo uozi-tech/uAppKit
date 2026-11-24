@@ -180,4 +180,35 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: back), content)
         await session.close()
     }
+
+    /// 服务端宣告「不限」（`limits@openssh.com` 报到 2^64，收帧上限也开大）：上传照样按 256 KiB 一块从本地读、
+    /// 一块一个 WRITE，不会一次把整个文件读进内存。1 MiB + 1 字节正好 5 个 WRITE。
+    func testUploadChunksAreCappedWhenTheServerAdvertisesHugeLimits() async throws {
+        let huge = SFTPServerLimits(maximumPacketLength: .max, maximumReadLength: .max,
+                                    maximumWriteLength: .max, maximumOpenHandles: 0)
+        let fileSystem = self.fileSystem!
+        let faults = SFTPFaultInjector()
+        let server = try await TestSSH.startServer { configuration in
+            configuration.serveSFTP(fileSystem: fileSystem,
+                                    configuration: SFTPServer.Configuration(limits: huge, maximumPacketLength: 64 << 20),
+                                    faults: faults)
+        }
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+
+        let content = pattern((1 << 20) + 1)
+        let local = localDirectory.appendingPathComponent("huge-limits.bin")
+        try content.write(to: local)
+        try await session.uploadAtomically(local, to: "/huge-limits.bin")
+        XCTAssertEqual(faults.requestCount(of: .write), 5)
+        XCTAssertEqual(SSHFileTransferSession.uploadChunkBytes, SFTPClient.maximumTransferLength)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: fileSystem.hostPath(for: "/huge-limits.bin"))), content)
+
+        let back = localDirectory.appendingPathComponent("huge-limits-back.bin")
+        try await session.download("/huge-limits.bin", to: back)
+        XCTAssertEqual(try Data(contentsOf: back), content)
+        // READ 也一样封顶：每个最多 256 KiB。
+        XCTAssertGreaterThanOrEqual(faults.requestCount(of: .read), 4)
+        await session.close()
+    }
 }
