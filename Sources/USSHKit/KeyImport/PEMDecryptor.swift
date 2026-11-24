@@ -118,8 +118,11 @@ nonisolated enum PEMDecryptor {
         let iterations = try intValue(params[1])
         // 迭代次数来自不可信 DER，仅受 4 字节宽度约束（最高约 4.29 亿）。
         // 不设上限会让构造的密钥强制执行多分钟级 HMAC，造成 CPU DoS / 界面卡死。
-        guard iterations >= 1, iterations <= KeyImportCrypto.maxPBKDF2Iterations else {
+        guard iterations >= 1 else {
             throw PrivateKeyImportError.malformedKey(reason: String(localized: "PBKDF2 迭代次数超出允许范围", bundle: ModuleBundle.bundle))
+        }
+        guard iterations <= KeyImportCrypto.maxPBKDF2Iterations else {
+            throw PrivateKeyImportError.unsupportedKDFCost(rounds: iterations, maximum: KeyImportCrypto.maxPBKDF2Iterations)
         }
         var keyLen: Int?
         var prf: KeyImportCrypto.PRF = .sha1            // 默认 hmacWithSHA1

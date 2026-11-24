@@ -4310,6 +4310,34 @@
         }
       }
     },
+    "私钥文件过大" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The private key file is too large"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵ファイルが大きすぎます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 파일이 너무 큼"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰檔案過大"
+          }
+        }
+      }
+    },
     "私钥结构损坏：%@" : {
       "localizations" : {
         "en" : {

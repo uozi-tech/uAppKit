@@ -21,8 +21,7 @@ nonisolated struct SSHWireWriter {
 
     /// `mpint`：去前导零；若结果最高位为 1 则前补 0x00；再按 `string` 写出。
     mutating func writeMPInt(_ magnitude: [UInt8]) {
-        var m = magnitude
-        while m.count > 1, m.first == 0x00 { m.removeFirst() }
+        var m = SSHWireReader.strippingLeadingZeros(magnitude)
         if m == [0x00] { m = [] }                       // 数值 0 -> 空 string
         if let first = m.first, first & 0x80 != 0 { m.insert(0x00, at: 0) }
         writeString(m)
@@ -66,10 +65,15 @@ nonisolated struct SSHWireReader {
         return Array(bytes[offset..<offset + length])
     }
 
+    /// 去掉前导零（至少留一个字节）。一次切片，线性；以前逐个 `removeFirst` 是平方级的。
+    static func strippingLeadingZeros(_ bytes: [UInt8]) -> [UInt8] {
+        let trimmed = bytes.drop(while: { $0 == 0 })
+        return trimmed.isEmpty ? Array(bytes.suffix(1)) : Array(trimmed)
+    }
+
     /// 读 `mpint`，返回无符号大端幅值（去掉符号 0x00）。
     mutating func readMPInt() throws -> [UInt8] {
-        var m = try readString()
-        while m.count > 1, m.first == 0x00 { m.removeFirst() }
+        let m = Self.strippingLeadingZeros(try readString())
         guard m.count <= Self.maximumMPIntLength else {
             throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：整数过长", bundle: ModuleBundle.bundle))
         }

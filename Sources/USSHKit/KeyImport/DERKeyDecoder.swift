@@ -1,3 +1,4 @@
+import USSHCore
 import Foundation
 import SwiftASN1
 import Crypto
@@ -36,11 +37,17 @@ nonisolated enum DERKeyDecoder {
         return Array(bytes)
     }
 
+    /// 一个 INTEGER 的原始编码最长这么多字节：8192 位的模数加一个符号 0x00。私钥文件里的整数都不会更长，
+    /// 更长的（例如前面塞了几兆字节的零）在做任何处理之前就拒绝。
+    static let maximumIntegerLength = SSHRSAPublicKey.maximumModulusBits / 8 + 1
+
     /// 取 INTEGER 节点的无符号大端幅值（去掉 DER 符号 0x00）。
     static func integerMagnitude(_ node: ASN1Node) throws -> [UInt8] {
-        var bytes = try primitiveBytes(node)
-        while bytes.count > 1, bytes.first == 0x00 { bytes.removeFirst() }
-        return bytes
+        let bytes = try primitiveBytes(node)
+        guard bytes.count <= maximumIntegerLength else {
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：整数过长", bundle: ModuleBundle.bundle))
+        }
+        return SSHWireReader.strippingLeadingZeros(bytes)
     }
 
     /// 把 OBJECT IDENTIFIER 节点解析为点分字符串。
@@ -124,8 +131,10 @@ nonisolated extension DERKeyDecoder {
     /// 按曲线 OID 把原始标量左补零到字段宽度后构造 swift-crypto 密钥。
     static func makeECKey(curveOID: String, scalar: [UInt8]) throws -> ParsedPrivateKey {
         func padded(_ bytes: [UInt8], to width: Int) throws -> [UInt8] {
-            var s = bytes
-            while s.count > width, s.first == 0x00 { s.removeFirst() }
+            guard bytes.count <= maximumIntegerLength else {
+                throw PrivateKeyImportError.malformedKey(reason: String(localized: "EC 标量超长", bundle: ModuleBundle.bundle))
+            }
+            let s = bytes.count > width ? SSHWireReader.strippingLeadingZeros(bytes) : bytes
             guard s.count <= width else {
                 throw PrivateKeyImportError.malformedKey(reason: String(localized: "EC 标量超长", bundle: ModuleBundle.bundle))
             }

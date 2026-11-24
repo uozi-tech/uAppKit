@@ -295,6 +295,10 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   在专门的队列上做（带口令的私钥要跑 bcrypt，1024 轮在 Mac 上约二十秒），开始前与结束后看取消。解析结果只活到这次
   `connect` 结束。`USSHKitIntegration.makeAuthentication` / `makeConfiguration` 仍是同步的、每次调用都导入——app 若在
   `async` 上下文里调它们，应自己挪到后台。
+- **私钥文件与 PEM 的上限**：整个私钥文件最多 64 KiB（`.malformedKey`「私钥文件过大」）；DER 里的整数原始编码最多 1025 字节
+  （8192 位加符号位），前导零一次切掉（以前逐个删，前面塞几兆字节的零就要卡几分钟）。PEM（PKCS#8 PBES2）的 PBKDF2 迭代次数
+  最多 200 万（以前 1000 万；200 万次 SHA-256 约 0.23 秒，SHA-512 约 0.6 秒），超过的报 `.unsupportedKDFCost`（与 bcrypt 同一种），
+  不再是 `.malformedKey`。
 - **私钥导入的上限**：带口令的 OpenSSH 容器 bcrypt 轮数最多 1024（`ssh-keygen -a` 默认 16；一轮约 20 ms，每次连接都要解一遍），
   更高的报新的 `PrivateKeyImportError.unsupportedKDFCost(rounds:maximum:)`（app 对这个 enum 的 `switch` 要补；建议文案让用户
   `ssh-keygen -p -a 100` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对
