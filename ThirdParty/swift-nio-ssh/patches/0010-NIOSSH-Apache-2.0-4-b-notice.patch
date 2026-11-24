@@ -1,15 +1,15 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
 Date: Tue, 24 Nov 2026 12:57:52 +0800
-Subject: [PATCH 9/9] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
+Subject: [PATCH 10/10] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
  =?UTF-8?q?=E7=9A=84=E6=96=87=E4=BB=B6=E5=8A=A0=E4=BF=AE=E6=94=B9=E5=A3=B0?=
  =?UTF-8?q?=E6=98=8E=EF=BC=88Apache-2.0=20=C2=A74(b)=20notice=EF=BC=89?=
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-Apache-2.0 第 4(b) 条要求被修改的文件带有显著的修改声明。前面补丁改过的 20 个上游源文件和
-1 个上游测试文件（ChildChannelMultiplexerTests.swift）头部各加一行。补丁新增的文件（CustomKeys、CustomKeyExchange、SSHKeyDerivation、ExtensionNegotiation 与七个测试文件）
+Apache-2.0 第 4(b) 条要求被修改的文件带有显著的修改声明。前面补丁改过的 21 个上游源文件和
+1 个上游测试文件（ChildChannelMultiplexerTests.swift）头部各加一行。补丁新增的文件（CustomKeys、CustomKeyExchange、SSHKeyDerivation、ExtensionNegotiation、GenericGlobalRequest 与八个测试文件）
 文件头本身写明出自 uAppKit，不用再加。
 
 以后的补丁改到别的上游文件，就在这个补丁里给那个文件也加一行；这个补丁始终排在最后。
@@ -25,6 +25,7 @@ Apache-2.0 第 4(b) 条要求被修改的文件带有显著的修改声明。前
  Sources/NIOSSH/Keys And Signatures/NIOSSHPrivateKey.swift       | 2 ++
  Sources/NIOSSH/Keys And Signatures/NIOSSHPublicKey.swift        | 2 ++
  Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift        | 2 ++
+ Sources/NIOSSH/NIOSSHHandler.swift                              | 2 ++
  Sources/NIOSSH/SSHClientConfiguration.swift                     | 2 ++
  Sources/NIOSSH/SSHMessages.swift                                | 2 ++
  Sources/NIOSSH/SSHPacketParser.swift                            | 2 ++
@@ -35,7 +36,7 @@ Apache-2.0 第 4(b) 条要求被修改的文件带有显著的修改声明。前
  .../NIOSSH/User Authentication/UserAuthenticationMethod.swift   | 2 ++
  .../User Authentication/UserAuthenticationStateMachine.swift    | 2 ++
  Tests/NIOSSHTests/ChildChannelMultiplexerTests.swift            | 2 ++
- 21 files changed, 42 insertions(+)
+ 22 files changed, 44 insertions(+)
 
 diff --git a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift
 index 9e1472b..3bb40c8 100644
@@ -180,6 +181,19 @@ index d882694..d713942 100644
  //===----------------------------------------------------------------------===//
  
  @preconcurrency import Crypto
+diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
+index 44b9014..331ae95 100644
+--- a/Sources/NIOSSH/NIOSSHHandler.swift
++++ b/Sources/NIOSSH/NIOSSHHandler.swift
+@@ -10,6 +10,8 @@
+ //
+ // SPDX-License-Identifier: Apache-2.0
+ //
++// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
++//
+ //===----------------------------------------------------------------------===//
+ 
+ import NIOCore
 diff --git a/Sources/NIOSSH/SSHClientConfiguration.swift b/Sources/NIOSSH/SSHClientConfiguration.swift
 index dd789ad..df35e90 100644
 --- a/Sources/NIOSSH/SSHClientConfiguration.swift

@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import NIOCore
@@ -96,6 +98,7 @@ extension NIOSSHHandler {
     enum PendingGlobalRequestResponse {
         case tcpForwarding(EventLoopPromise<GlobalRequest.TCPForwardingResponse?>)
         case unknown(EventLoopPromise<ByteBuffer?>)
+        case generic(EventLoopPromise<GlobalRequest.GenericResponse>)  // `sendGlobalRequest(type:…)`
 
         func succeed(_ result: SSHMessage.RequestSuccessMessage?) {
             switch self {
@@ -103,6 +106,8 @@ extension NIOSSHHandler {
                 promise.succeed(result.map(GlobalRequest.TCPForwardingResponse.init))
             case .unknown(let promise):
                 promise.succeed(result?.buffer)
+            case .generic(let promise):
+                promise.succeed(.success(result?.buffer ?? ByteBuffer()))
             }
         }
 
@@ -112,6 +117,18 @@ extension NIOSSHHandler {
                 promise.fail(error)
             case .unknown(let promise):
                 promise.fail(error)
+            case .generic(let promise):
+                promise.fail(error)
+            }
+        }
+
+        /// The peer answered SSH_MSG_REQUEST_FAILURE.
+        func refuse() {
+            switch self {
+            case .generic(let promise):
+                promise.succeed(.failure)
+            case .tcpForwarding, .unknown:
+                self.fail(NIOSSHError.globalRequestRefused)
             }
         }
     }
@@ -332,6 +349,12 @@ extension NIOSSHHandler {
         self.sendGlobalRequestsIfPossible()
     }
 
+    /// Queues a global request behind the others; see `sendGlobalRequest(type:payload:wantReply:promise:)`.
+    func sendGlobalRequest(_ message: SSHMessage.GlobalRequestMessage, response: PendingGlobalRequestResponse?) {
+        self.pendingGlobalRequests.append((value: message, promise: response))
+        self.sendGlobalRequestsIfPossible()
+    }
+
     fileprivate func dropAllPendingGlobalRequests(_ error: Error) {
         while let next = self.pendingGlobalRequests.popFirst() {
             next.1?.fail(error)
@@ -355,7 +378,7 @@ extension NIOSSHHandler {
         case .success(let response):
             next?.succeed(response)
         case .failure:
-            next?.fail(NIOSSHError.globalRequestRefused)
+            next?.refuse()
         }
     }
 

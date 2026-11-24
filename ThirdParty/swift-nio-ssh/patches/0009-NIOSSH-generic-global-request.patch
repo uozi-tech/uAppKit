@@ -1,0 +1,306 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 12:55:25 +0800
+Subject: [PATCH 09/10] =?UTF-8?q?NIOSSH:=20=E5=85=AC=E5=BC=80=E5=8F=91?=
+ =?UTF-8?q?=E9=80=81=E4=BB=BB=E6=84=8F=E5=85=A8=E5=B1=80=E8=AF=B7=E6=B1=82?=
+ =?UTF-8?q?=E7=9A=84=E6=8E=A5=E5=8F=A3=EF=BC=88generic=20global=20request?=
+ =?UTF-8?q?=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+客户端要做保活就得发 keepalive@openssh.com 且 want_reply = true：对端回 REQUEST_SUCCESS 还是
+REQUEST_FAILURE 都证明它还活着。NIOSSH 里能发任意全局请求的 sendGlobalRequestMessage 是 internal 的，
+公开的只有 sendTCPForwardingRequest。
+
+新增 NIOSSHHandler.sendGlobalRequest(type:payload:wantReply:promise:)（新文件 GenericGlobalRequest.swift），
+风格照 sendTCPForwardingRequest；回复是新的 GlobalRequest.GenericResponse：.success(附带数据) 或 .failure。
+拒绝不是错误，promise 只在发不出去或连接在回复前关闭时失败；want_reply = false 的请求写出后以
+.success(空) 完成。它和 TCP 转发请求共用同一条发送队列与回复队列，回复按发送顺序配对。
+
+NIOSSHHandler.swift 里只加了：PendingGlobalRequestResponse 的 .generic 一支、refuse()（REQUEST_FAILURE
+时 .generic 成功为 .failure，原有两支照旧以 globalRequestRefused 失败），以及一个把请求排进队列的 internal
+辅助函数；handleGlobalRequestResponse 改调 refuse()。收到对端未知的全局请求照旧回 REQUEST_FAILURE。
+
+测试（GenericGlobalRequestTests）：对 NIOSSH 服务端的保活往返（它回 failure，含连接建立前就排队的请求，
+连接之后照常可用）；不要回复的请求写出即完成、不占用回复；与 tcpip-forward 交错时各自拿到自己的回复；
+请求挂着时连接关闭，promise 以 ChannelError.eof 失败；success 带出附带数据。
+
+可以提给上游。
+---
+ Sources/NIOSSH/GenericGlobalRequest.swift     |  55 +++++++
+ Sources/NIOSSH/NIOSSHHandler.swift            |  23 ++-
+ .../GenericGlobalRequestTests.swift           | 140 ++++++++++++++++++
+ 3 files changed, 217 insertions(+), 1 deletion(-)
+ create mode 100644 Sources/NIOSSH/GenericGlobalRequest.swift
+ create mode 100644 Tests/NIOSSHTests/GenericGlobalRequestTests.swift
+
+diff --git a/Sources/NIOSSH/GenericGlobalRequest.swift b/Sources/NIOSSH/GenericGlobalRequest.swift
+new file mode 100644
+index 0000000..9aa949e
+--- /dev/null
++++ b/Sources/NIOSSH/GenericGlobalRequest.swift
+@@ -0,0 +1,55 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++
++extension GlobalRequest {
++    /// The peer's answer to a global request sent with `NIOSSHHandler.sendGlobalRequest(type:payload:wantReply:promise:)`.
++    public enum GenericResponse: Hashable, Sendable {
++        /// SSH_MSG_REQUEST_SUCCESS, with the request-specific data that followed the message number (often empty).
++        /// A request sent with `wantReply: false` completes with `.success` and an empty payload once it is written.
++        case success(ByteBuffer)
++
++        /// SSH_MSG_REQUEST_FAILURE: the peer refused or did not understand the request.
++        case failure
++    }
++}
++
++extension NIOSSHHandler {
++    /// Sends a global request of any type (RFC 4254 §4), e.g. `keepalive@openssh.com` with `wantReply: true`:
++    /// both possible replies prove the peer is alive.
++    ///
++    /// Requests are sent once the connection is active, in order with the other global requests (TCP forwarding
++    /// ones included), and replies are matched in that order. The promise fails only if the request could not be
++    /// sent or the connection closed before the reply arrived; a refusal is `.failure`, not an error.
++    ///
++    /// This function is **not** thread-safe: it may only be called from on the channel.
++    ///
++    /// - parameters:
++    ///     - type: The request name, e.g. `keepalive@openssh.com`.
++    ///     - payload: The request-specific data after `want reply`, or `nil` for none.
++    ///     - wantReply: Whether the peer must answer.
++    ///     - promise: Completed with the answer.
++    public func sendGlobalRequest(
++        type: String,
++        payload: ByteBuffer?,
++        wantReply: Bool,
++        promise: EventLoopPromise<GlobalRequest.GenericResponse>? = nil
++    ) {
++        let message = SSHMessage.GlobalRequestMessage(
++            wantReply: wantReply,
++            type: .unknown(type, payload ?? ByteBuffer())
++        )
++        self.sendGlobalRequest(message, response: promise.map { .generic($0) })
++    }
++}
+diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
+index 245a139..44b9014 100644
+--- a/Sources/NIOSSH/NIOSSHHandler.swift
++++ b/Sources/NIOSSH/NIOSSHHandler.swift
+@@ -96,6 +96,7 @@ extension NIOSSHHandler {
+     enum PendingGlobalRequestResponse {
+         case tcpForwarding(EventLoopPromise<GlobalRequest.TCPForwardingResponse?>)
+         case unknown(EventLoopPromise<ByteBuffer?>)
++        case generic(EventLoopPromise<GlobalRequest.GenericResponse>)  // `sendGlobalRequest(type:…)`
+ 
+         func succeed(_ result: SSHMessage.RequestSuccessMessage?) {
+             switch self {
+@@ -103,6 +104,8 @@ extension NIOSSHHandler {
+                 promise.succeed(result.map(GlobalRequest.TCPForwardingResponse.init))
+             case .unknown(let promise):
+                 promise.succeed(result?.buffer)
++            case .generic(let promise):
++                promise.succeed(.success(result?.buffer ?? ByteBuffer()))
+             }
+         }
+ 
+@@ -112,6 +115,18 @@ extension NIOSSHHandler {
+                 promise.fail(error)
+             case .unknown(let promise):
+                 promise.fail(error)
++            case .generic(let promise):
++                promise.fail(error)
++            }
++        }
++
++        /// The peer answered SSH_MSG_REQUEST_FAILURE.
++        func refuse() {
++            switch self {
++            case .generic(let promise):
++                promise.succeed(.failure)
++            case .tcpForwarding, .unknown:
++                self.fail(NIOSSHError.globalRequestRefused)
+             }
+         }
+     }
+@@ -332,6 +347,12 @@ extension NIOSSHHandler {
+         self.sendGlobalRequestsIfPossible()
+     }
+ 
++    /// Queues a global request behind the others; see `sendGlobalRequest(type:payload:wantReply:promise:)`.
++    func sendGlobalRequest(_ message: SSHMessage.GlobalRequestMessage, response: PendingGlobalRequestResponse?) {
++        self.pendingGlobalRequests.append((value: message, promise: response))
++        self.sendGlobalRequestsIfPossible()
++    }
++
+     fileprivate func dropAllPendingGlobalRequests(_ error: Error) {
+         while let next = self.pendingGlobalRequests.popFirst() {
+             next.1?.fail(error)
+@@ -355,7 +376,7 @@ extension NIOSSHHandler {
+         case .success(let response):
+             next?.succeed(response)
+         case .failure:
+-            next?.fail(NIOSSHError.globalRequestRefused)
++            next?.refuse()
+         }
+     }
+ 
+diff --git a/Tests/NIOSSHTests/GenericGlobalRequestTests.swift b/Tests/NIOSSHTests/GenericGlobalRequestTests.swift
+new file mode 100644
+index 0000000..a6207e6
+--- /dev/null
++++ b/Tests/NIOSSHTests/GenericGlobalRequestTests.swift
+@@ -0,0 +1,140 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++/// A server global request delegate that accepts every TCP forwarding request with a fixed port.
++final class AcceptingForwardingDelegate: GlobalRequestDelegate {
++    func tcpForwardingRequest(
++        _ request: GlobalRequest.TCPForwardingRequest,
++        handler: NIOSSHHandler,
++        promise: EventLoopPromise<GlobalRequest.TCPForwardingResponse>
++    ) {
++        promise.succeed(.init(boundPort: 4242))
++    }
++}
++
++final class GenericGlobalRequestTests: XCTestCase {
++    private var channel: BackToBackEmbeddedChannel!
++
++    override func setUp() {
++        super.setUp()
++        self.channel = BackToBackEmbeddedChannel()
++    }
++
++    override func tearDown() {
++        try? self.channel.finish()
++        self.channel = nil
++        super.tearDown()
++    }
++
++    private func keepalive(
++        wantReply: Bool = true
++    ) -> (EventLoopFuture<GlobalRequest.GenericResponse>, NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?>) {
++        let promise = self.channel.client.eventLoop.makePromise(of: GlobalRequest.GenericResponse.self)
++        let box = NIOLoopBoundBox<Result<GlobalRequest.GenericResponse, Error>?>(
++            nil,
++            eventLoop: self.channel.client.eventLoop
++        )
++        promise.futureResult.whenComplete { box.value = $0 }
++        self.channel.clientSSHHandler?.sendGlobalRequest(
++            type: "keepalive@openssh.com",
++            payload: nil,
++            wantReply: wantReply,
++            promise: promise
++        )
++        return (promise.futureResult, box)
++    }
++
++    func testKeepaliveIsAnsweredWithFailureByNIOSSHServers() throws {
++        XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness()))
++        // Queued before the connection is up; sent once it is.
++        let (_, early) = self.keepalive()
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(try early.value?.get(), .failure)
++
++        // Unknown inbound requests are still refused, and the connection stays usable.
++        let (_, again) = self.keepalive()
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(try again.value?.get(), .failure)
++        let channelPromise = self.channel.client.eventLoop.makePromise(of: Channel.self)
++        self.channel.clientSSHHandler?.createChannel(channelPromise) { channel, _ in channel.eventLoop.makeSucceededVoidFuture() }
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNoThrow(try channelPromise.futureResult.wait())
++    }
++
++    func testRequestWithoutReplyCompletesOnceWritten() throws {
++        XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness()))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++
++        let (_, noReply) = self.keepalive(wantReply: false)
++        let (_, withReply) = self.keepalive(wantReply: true)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(try noReply.value?.get(), .success(ByteBuffer()))
++        // The server's single reply belongs to the second request.
++        XCTAssertEqual(try withReply.value?.get(), .failure)
++    }
++
++    func testRepliesAreMatchedInOrderWithForwardingRequests() throws {
++        var harness = TestHarness()
++        harness.serverGlobalRequestDelegate = AcceptingForwardingDelegate()
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++
++        let (_, first) = self.keepalive()
++        let forwarding = self.channel.client.eventLoop.makePromise(of: GlobalRequest.TCPForwardingResponse?.self)
++        self.channel.clientSSHHandler?.sendTCPForwardingRequest(.listen(host: "localhost", port: 0), promise: forwarding)
++        let (_, last) = self.keepalive()
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++
++        XCTAssertEqual(try first.value?.get(), .failure)
++        XCTAssertEqual(try forwarding.futureResult.wait(), .init(boundPort: 4242))
++        XCTAssertEqual(try last.value?.get(), .failure)
++    }
++
++    func testPendingRequestFailsWhenTheConnectionCloses() throws {
++        XCTAssertNoThrow(try self.channel.configureWithHarness(TestHarness()))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++
++        let (_, pending) = self.keepalive()
++        XCTAssertNil(pending.value)
++        self.channel.client.close(promise: nil)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        guard case .some(.failure(let error)) = pending.value else {
++            XCTFail("Expected a failure, got \(String(describing: pending.value))")
++            return
++        }
++        XCTAssertEqual(error as? ChannelError, .eof)
++    }
++
++    func testSuccessCarriesThePayload() {
++        let loop = EmbeddedEventLoop()
++        let promise = loop.makePromise(of: GlobalRequest.GenericResponse.self)
++        NIOSSHHandler.PendingGlobalRequestResponse.generic(promise)
++            .succeed(.init(buffer: ByteBuffer(bytes: [1, 2, 3])))
++        XCTAssertEqual(try promise.futureResult.wait(), .success(ByteBuffer(bytes: [1, 2, 3])))
++
++        let refused = loop.makePromise(of: GlobalRequest.GenericResponse.self)
++        NIOSSHHandler.PendingGlobalRequestResponse.generic(refused).refuse()
++        XCTAssertEqual(try refused.futureResult.wait(), .failure)
++        XCTAssertNoThrow(try loop.syncShutdownGracefully())
++    }
++}
