@@ -44,8 +44,10 @@ public nonisolated struct SSHLegacyAlgorithm: Sendable, Hashable, CustomStringCo
 /// SHA-1 原理上仍然更弱，所以结果不是悄悄发生的：`ConnectedClient.legacyAlgorithmsInUse` 报出用上了哪些，
 /// 日志里记一条警告。
 ///
-/// 规则：只在 `SSHClientError.noCommonAlgorithm` 时再试一次；知道卡在哪一类、服务器报了什么时，只在补上的旧算法
-/// 对得上服务器的报价时才再试，不知道时盲试一次。超时、没有协商结论的断开、主机密钥被拒、认证失败、取消都不再试。
+/// 规则（`legacyFallback: true` 的含义）：遇到类型化的「没有共同算法」（`SSHClientError.noCommonAlgorithm`）时，
+/// 用「配置的算法 + `.standard` 的现代算法 + 旧算法」（`retryAlgorithms`）再试一次。知道卡在哪一类、服务器报了什么时，
+/// 只在服务器这一类的报价与扩展出来的那些名字有交集时才试；不知道时盲试一次。超时、没有协商结论的断开、主机密钥被拒、
+/// 认证失败、取消都不再试。把自己的 `SSHAlgorithms` 当严格策略的调用方（例如明确只要 `.builtInOnly`）传 `legacyFallback: false`。
 /// 第一次在密钥交换里就失败了，还没到主机密钥那一步，所以不会问两次信任（另有守卫：第一次问过就不再试）。
 /// 跳板机与目标各自判断。
 nonisolated enum SSHLegacyFallback {
@@ -90,22 +92,12 @@ nonisolated enum SSHLegacyFallback {
         return result
     }
 
-    /// 第一次以 `failure` 失败后要不要再试：知道卡在哪一类时，只在服务器在这一类里报了 SHA-1 的旧算法（我们补上的
-    /// 那些）时才试——再试是为了退到旧算法，不是为了悄悄放宽调用方选的算法集（所以明确选了 `.builtInOnly` 的连接
-    /// 遇到只有 `rsa-sha2-*` 主机密钥的服务器照样不再试）。加密这一类没有旧算法，不再试。不知道时盲试一次。
-    static func shouldRetry(after failure: SSHAlgorithmNegotiationFailure) -> Bool {
+    /// 第一次（用 `first`）以 `failure` 失败后要不要用 `retry` 再试：知道卡在哪一类时，服务器这一类的报价与 `retry`
+    /// 比 `first` 多出来的名字有交集才试（再试才可能协商得成）；不知道卡在哪时盲试一次。
+    static func shouldRetry(after failure: SSHAlgorithmNegotiationFailure, first: SSHAlgorithms, retry: SSHAlgorithms) -> Bool {
         guard let category = failure.category else { return true }
-        return !Set(failure.serverOffer).isDisjoint(with: legacyNames(of: category))
-    }
-
-    /// 某类里我们补上的旧算法的名字。
-    static func legacyNames(of category: SSHAlgorithmNegotiationFailure.Category) -> Set<String> {
-        switch category {
-        case .keyExchange: return Set(SSHDiffieHellmanAlgorithm.legacy.map(\.name))
-        case .hostKey: return Set(SSHRSASignatureAlgorithm.legacy.map(\.name))
-        case .mac: return legacyMACNames
-        case .encryption, .compression: return []
-        }
+        let added = retry.names(of: category).subtracting(first.names(of: category))
+        return !Set(failure.serverOffer).isDisjoint(with: added)
     }
 
     static let legacyMACNames = Set(SSHTransportProtections.legacy.compactMap { $0.macName })

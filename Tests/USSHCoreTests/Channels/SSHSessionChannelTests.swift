@@ -1,5 +1,6 @@
 import NIOConcurrencyHelpers
 import NIOCore
+import NIOEmbedded
 import NIOSSH
 @testable import USSHCore
 import USSHTestServer
@@ -437,5 +438,22 @@ final class SSHSessionChannelTests: XCTestCase {
         }()
         let closed = await Harness.eventually { !channel.isActive && ended.value == 1 }
         XCTAssertTrue(closed)
+    }
+}
+
+/// 请求 handler 没能加进 pipeline（通道已经拆了）时，它手里的 exit-status promise 也要完成，不能漏
+/// （NIO 在 Debug 下发现漏完成的 promise 会直接让进程崩掉）。
+final class SSHChannelRequestHandlerLifecycleTests: XCTestCase {
+    func testPromiseIsCompletedWhenTheHandlerIsNeverAdded() throws {
+        let channel = EmbeddedChannel()
+        _ = try channel.finish(acceptAlreadyClosed: true)
+        var future: EventLoopFuture<SSHExitStatus?>?
+        do {
+            let handler = SSHChannelRequestHandler(eventLoop: channel.eventLoop)
+            future = handler.exitStatusArrival.futureResult
+            XCTAssertThrowsError(try channel.pipeline.syncOperations.addHandler(handler), "通道已经关了，加不进去")
+        }
+        // handler 已经释放；promise 在它的 deinit 里完成成 nil。
+        XCTAssertEqual(try future?.wait(), .some(nil))
     }
 }

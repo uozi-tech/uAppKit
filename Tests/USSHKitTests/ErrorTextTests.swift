@@ -84,11 +84,11 @@ final class ErrorTextTests: XCTestCase {
         XCTAssertEqual(SFTPError.status(code: .permissionDenied, message: "", languageTag: "").errorDescription,
                        localized("权限不足"))
         XCTAssertEqual(SFTPError.status(code: .failure, message: "Is a directory", languageTag: "").errorDescription,
-                       localized("服务器操作失败：\("Is a directory")"), "FAILURE 的具体原因在服务端原话里")
+                       localized("服务器操作失败：\(SSHPeerText.isolated("Is a directory"))"), "FAILURE 的具体原因在服务端原话里")
         XCTAssertEqual(SFTPError.status(code: .failure, message: " ", languageTag: "").errorDescription,
                        localized("服务器操作失败"))
         XCTAssertEqual(SFTPError.status(code: SFTPStatusCode(99), message: "odd", languageTag: "").errorDescription,
-                       localized("SFTP 错误（代码 \(String(99))）：\("odd")"))
+                       localized("SFTP 错误（代码 \(String(99))）：\(SSHPeerText.isolated("odd"))"))
         XCTAssertEqual(SFTPError.connectionClosed.errorDescription, localized("SFTP 通道已断开"))
         XCTAssertEqual(SFTPError.shortRead(expected: 100, actual: 40).errorDescription,
                        localized("文件在读取过程中变短了（应有 \(100) 字节，只读到 \(40) 字节）"))
@@ -102,7 +102,7 @@ final class ErrorTextTests: XCTestCase {
                        localized("命令以状态 \(String(2)) 退出"))
         XCTAssertEqual(SSHCommandError.nonZeroExit(.signaled(.init(name: "KILL", coreDumped: false, message: "")),
                                                    output: ByteBuffer()).errorDescription,
-                       localized("命令被信号 \("KILL") 终止"))
+                       localized("命令被信号 \(SSHPeerText.isolated("KILL")) 终止"))
         XCTAssertEqual(SSHCommandError.outputTooLarge(limit: 64_000).errorDescription,
                        localized("命令输出超过上限（\(64_000) 字节）"))
         XCTAssertEqual(SSHRSAError.unsupportedModulusSize(bits: 512).errorDescription,
@@ -121,13 +121,13 @@ final class ErrorTextTests: XCTestCase {
         let mac = localized("消息认证（MAC）")
         XCTAssertEqual(text(nil, []), handshake(localized("与服务器没有共同支持的算法")))
         XCTAssertEqual(text(.hostKey, ["rsa-sha2-512", "rsa-sha2-256"]),
-                       handshake(localized("这次连接没有启用服务器提供的任何\(hostKey)算法（服务器提供：\("rsa-sha2-512, rsa-sha2-256")）")))
+                       handshake(localized("这次连接没有启用服务器提供的任何\(hostKey)算法（服务器提供：\(SSHPeerText.isolated("rsa-sha2-512, rsa-sha2-256"))）")))
         XCTAssertEqual(text(.hostKey, ["ssh-rsa"]),
-                       handshake(localized("服务器只提供 SHA-1 时代的旧\(hostKey)算法（服务器提供：\("ssh-rsa")）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。")))
+                       handshake(localized("服务器只提供 SHA-1 时代的旧\(hostKey)算法（服务器提供：\(SSHPeerText.isolated("ssh-rsa"))）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。")))
         XCTAssertEqual(text(.keyExchange, ["diffie-hellman-group14-sha1"]),
-                       handshake(localized("服务器只提供 SHA-1 时代的旧\(keyExchange)算法（服务器提供：\("diffie-hellman-group14-sha1")）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。")))
+                       handshake(localized("服务器只提供 SHA-1 时代的旧\(keyExchange)算法（服务器提供：\(SSHPeerText.isolated("diffie-hellman-group14-sha1"))）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。")))
         XCTAssertEqual(text(.encryption, ["aes128-cbc"]),
-                       handshake(localized("本应用不支持服务器提供的任何\(encryption)算法（服务器提供：\("aes128-cbc")）")))
+                       handshake(localized("本应用不支持服务器提供的任何\(encryption)算法（服务器提供：\(SSHPeerText.isolated("aes128-cbc"))）")))
         XCTAssertEqual(text(.mac, []),
                        handshake(localized("本应用不支持服务器提供的任何\(mac)算法（服务器提供：\(localized("无"))）")))
         // 归到 `.handshakeFailed`（不是网络断开，重试也不会好；显示同 `.connectFailed`）。

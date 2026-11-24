@@ -5,8 +5,11 @@ import XCTest
 /// 对端给的文字进文案 / 日志之前先消毒：控制字符、双向覆盖、不可见字符去掉，换行变空格，超长截断。
 final class PeerTextTests: XCTestCase {
 
+    /// 没有控制字符、没有格式字符——成对的 FSI / PDI（`SSHPeerText.isolated` 加的）除外。
     private func assertClean(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
-        for scalar in text.unicodeScalars {
+        let opens = text.unicodeScalars.filter { $0.value == 0x2068 }.count
+        XCTAssertEqual(opens, text.unicodeScalars.filter { $0.value == 0x2069 }.count, "FSI / PDI 不成对", file: file, line: line)
+        for scalar in text.unicodeScalars where scalar.value != 0x2068 && scalar.value != 0x2069 {
             XCTAssertFalse(scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value),
                            "控制字符 U+\(String(scalar.value, radix: 16)) 漏了：\(text.debugDescription)", file: file, line: line)
             XCTAssertNotEqual(scalar.properties.generalCategory, .format,
@@ -67,7 +70,7 @@ final class PeerTextTests: XCTestCase {
         let failure = SSHChannelOpenFailure(reasonCode: 99, description: "go away\u{1B}[2J\r\n\u{202E}evil")
         let text = SSHErrorText.describe(failure)
         assertClean(text)
-        XCTAssertTrue(text.hasSuffix("go away[2J evil"), text)
+        XCTAssertTrue(text.hasSuffix(SSHPeerText.isolated("go away[2J evil")), text)
         let forwarding = SSHForwardingChannelFailure(classifying: SSHChannelError.openRejected(failure))
         assertClean(forwarding.detail)
         assertClean(forwarding.userMessage(targetHost: "h", targetPort: 1))
@@ -92,5 +95,56 @@ final class PeerTextTests: XCTestCase {
         let error = PrivateKeyImportError.unsupportedFormat(label: "OpenSSH \u{1B}]0;x\u{07}\u{202E}rsa")
         assertClean(error.errorDescription ?? "")
         assertClean(error.failureReason ?? "")
+    }
+
+    // MARK: 第三轮审查补上的
+
+    func testOutOfRangeLengthsDoNotTrap() {
+        XCTAssertEqual(SSHPeerText.sanitize("abc", maximumLength: -5), "…")
+        XCTAssertEqual(SSHPeerText.sanitize("", maximumLength: -5), "")
+        XCTAssertEqual(SSHPeerText.sanitize("abc", maximumLength: .max), "abc")
+        XCTAssertEqual(SSHPeerText.sanitize("abc", maximumLength: 0), "…")
+    }
+
+    /// 插进本地化句子时包在 FSI … PDI 里：从右往左的文字不会搅乱外面那句话。
+    func testIsolatedWrapsInFirstStrongIsolates() {
+        let hebrew = "שלום\u{202E}"
+        XCTAssertEqual(SSHPeerText.isolated(hebrew), "\u{2068}שלום\u{2069}")
+        let message = SFTPError.status(code: .failure, message: "אין הרשאה", languageTag: "he").errorDescription ?? ""
+        XCTAssertTrue(message.contains("\u{2068}אין הרשאה\u{2069}"), message)
+    }
+
+    func testRunsOfCombiningMarksAreCapped() {
+        let zalgo = "a" + String(repeating: "\u{0301}", count: 200) + "b"
+        let clean = SSHPeerText.sanitize(zalgo)
+        XCTAssertEqual(clean.unicodeScalars.filter { $0.value == 0x0301 }.count, SSHPeerText.maximumMarksPerCharacter)
+        XCTAssertTrue(clean.hasSuffix("b"))
+        XCTAssertEqual(SSHPeerText.sanitize("e\u{301}te\u{301}"), "e\u{301}te\u{301}", "正常的组合字符不动")
+        // 变体选择符同样算。
+        let selectors = "x" + String(repeating: "\u{FE0F}", count: 50)
+        XCTAssertEqual(SSHPeerText.sanitize(selectors).unicodeScalars.count, 1 + SSHPeerText.maximumMarksPerCharacter)
+    }
+
+    func testPrivateUseAndInvisibleFillersAreDropped() {
+        XCTAssertEqual(SSHPeerText.sanitize("a\u{E000}b\u{F8FF}c\u{115F}d\u{1160}e\u{3164}f\u{FFA0}g\u{100000}h"), "abcdefgh")
+    }
+
+    /// U+200D 只在两个 emoji 之间保留：家庭、职业之类的 emoji 序列完好，夹在普通文字里的零宽连接符去掉。
+    func testZeroWidthJoinerOnlyBetweenEmoji() {
+        let family = "👨\u{200D}👩\u{200D}👧"
+        XCTAssertEqual(SSHPeerText.sanitize(family), family)
+        let technologist = "🧑🏽\u{200D}💻"
+        XCTAssertEqual(SSHPeerText.sanitize(technologist), technologist)
+        XCTAssertEqual(SSHPeerText.sanitize("ab\u{200D}cd"), "abcd")
+        XCTAssertEqual(SSHPeerText.sanitize("1\u{200D}2"), "12", "ASCII 数字虽然也算 Emoji，不保留")
+    }
+
+    func testTransferErrorPathsAreIsolated() {
+        let error = SSHFileTransferError.uploadOutcomeUnknown(
+            temporaryPath: "/srv/\u{1B}]0;x\u{07}a.tmp", destination: "/srv/\u{202E}evil", reason: "r")
+        let text = error.errorDescription ?? ""
+        assertClean(text)
+        XCTAssertTrue(text.contains(SSHPeerText.isolated("/srv/evil")), text)
+        assertClean(SSHFileTransferError.localFileUnavailable("/tmp/\u{1B}[2Jx").errorDescription ?? "")
     }
 }

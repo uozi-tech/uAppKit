@@ -219,6 +219,7 @@ public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
     /// （`.authenticationFailed` / `.hostKeyRejected` / `.handshakeFailed` 是配置问题、重试不会好；`.connectFailed`
     /// 是网络问题；跳板机拒绝开到目标的通道、或开通道超时也归 `.connectFailed`）。app 判断要不要重连看 `cause`，
     /// 不看文字。只有本端以外的极少数情形 `cause` 为 nil。
+    /// 主机密钥库按类型拒绝的（`HostKeyStoreRejection`，哪一跳都一样）不包进这里，原样抛给调用方，类别由 app 自己的类型决定。
     case jumpHostFailed(String, cause: SSHConnectionError? = nil)
     case hostKeyRejected(String)
     case bindFailed(String)

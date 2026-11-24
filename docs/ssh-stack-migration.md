@@ -167,10 +167,11 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     （下一条）。它会触发进程级的旧算法登记，但不影响别的连接（接受与否按连接判断）。
   - USSHCore 自己的 `SSHClient.Configuration.algorithms` 默认仍是 `.builtInOnly`：协议层不替产品做选择，产品默认在 USSHKit。
 - **自动退到旧算法**（`legacyFallback: true`，默认；跳板机与目标各自判断，不按主机设置、不落盘、不同步）：
-  - 只在 `SSHClientError.noCommonAlgorithm` 时同一跳**再连一次**。知道卡在哪一类、服务器报了什么时，只在服务器在这一类里报了
-    SHA-1 的旧算法（`ssh-rsa` 主机密钥、`diffie-hellman-group14-sha1`、`hmac-sha1*`）时才再试——再试是为了退到旧算法，不是为了
-    放宽调用方选的算法集，所以明确选了 `.builtInOnly` 的连接遇到只有 `rsa-sha2-*` 的服务器照样不试；加密这一类没有旧算法，不试；
-    服务器只有 CBC、`hmac-md5` 之类我们根本不支持的也不试。不知道卡在哪时盲试一次。第二次也没有共同算法就报第二次的错。
+  - **`legacyFallback: true` 的含义**：遇到类型化的 `SSHClientError.noCommonAlgorithm` 时，同一跳用「配置的算法 + `.standard` 的
+    现代算法 + 旧算法」**再连一次**。知道卡在哪一类、服务器报了什么时，只在服务器这一类的报价与扩展出来的名字有交集时才试
+    （服务器只有 CBC、`hmac-md5` 之类我们根本不支持的就不试）；不知道卡在哪时盲试一次。第二次的错误原样报出。
+    所以 `.builtInOnly` 开着退级时，遇到只有 `rsa-sha2-*` 主机密钥或只有 AES-CTR 的服务器也会再试并连上；**把自己的 `SSHAlgorithms`
+    当严格策略的调用方传 `legacyFallback: false`**。
   - 再试用的算法：配置里的现代算法（原顺序）→ `.standard` 里有、配置里没有的现代算法 → 旧算法（配置里本来就列着的旧算法也挪到
     这里，不再原地打开、排在现代算法前面）。所以服务器同时有 SHA-2 与 SHA-1 的选项时（比如 group14-sha256 与 group14-sha1），
     再试协商到的是 SHA-2 的那个。对 `.standard` 再试的算法就是 `.legacyCompatible`。
@@ -223,14 +224,19 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   - 目标已经存在（普通文件）时，上传前先 stat 它，写完临时文件、改名之前把它的权限位（含 setuid / setgid / sticky）
     用 FSETSTAT 设到临时文件上，属主 / 属组不同时也试一次（换不了属主就只换属组）。全部尽力而为：服务端拒绝就算了，上传照样成功。
     以前改名换上去的是一个新文件，0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不存在时不设，照服务端默认。
-  - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`）、
-    独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而目标还完好时删掉它。
-  - 没有 `posix-rename` 时，只在第一次改名回 `SSH_FX_FAILURE` / `FILE_ALREADY_EXISTS`、**且目标确实存在**时才先删目标再改名；
-    别的失败（权限不足……）原样报出、不碰目标。删了目标之后最后的改名又失败：**留着临时文件**，抛新的
-    `SSHFileTransferError.uploadNotMovedIntoPlace(temporaryPath:destination:reason:)`（app 对 `SSHFileTransferError` 的 `switch`
-    要补这个 case）。以前这一步会把临时文件也删掉，两份都没了。
-  - 下载先写同目录的隐藏临时文件（`.<名字>.usshkit-download-<随机>`），读完才原子地换到目标；远程打不开、读到一半失败、
-    被取消时，本地原来的文件不动（以前一开始就删掉了本地文件，失败时还会在目标位置留下半截）。
+  - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`；原名太长时
+    截短，保证不超过 255 字节）、独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而
+    目标还完好时删掉它。
+  - 没有 `posix-rename` 时，只在第一次改名回 `SSH_FX_FAILURE` / `FILE_ALREADY_EXISTS`、**且目标确实存在**（`lstat`：悬空的符号
+    链接也算）时才先删目标再改名；别的失败（权限不足……）原样报出、不碰目标。目标是符号链接时替换的是链接本身（与
+    `posix-rename`、与迁移前的实现一样）。删目标的请求发出之后：服务器明确拒绝 → 目标完好、删临时文件、原样报错；删成了、
+    最后的改名被拒 → **留着临时文件**，抛 `SSHFileTransferError.uploadNotMovedIntoPlace(temporaryPath:destination:reason:)`；
+    删除或改名没有确定的回答（被取消、断线）→ 留着临时文件，抛新的
+    **`SSHFileTransferError.uploadOutcomeUnknown(temporaryPath:destination:reason:)`**（旧文件可能已删、新文件可能已就位；
+    这种情形下取消**不**抛 `CancellationError`）。app 对 `SSHFileTransferError` 的 `switch` 要补这两个 case。
+  - 下载先写临时文件（系统给的 `.itemReplacementDirectory`，沙盒里存储面板只授权了那一个文件时也能用；拿不到才退回目标旁边的
+    隐藏文件），读完才原子地换到目标（`replaceItemAt` / `rename(2)`）；远程打不开、读到一半失败、被取消时，本地原来的文件不动。
+  - 取消时远程句柄在后台关（不等回答），临时文件的删除最多等 3 秒（`cleanupDeadline`）：链路卡死时取消也马上返回。
 - `SFTPFile` 是 `Sendable` 的值，可以从多个任务并发 `read` / `write`；`close()` 等在途的请求都回来再关，关之后不会再往旧句柄发请求。
 
 ## 7. 错误怎么分类
@@ -302,16 +308,35 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **协商不成有自己的错误**：`SSHClientError.noCommonAlgorithm`（以前是 `.handshakeFailed`，或者在对端先关连接时变成「服务器关闭了
   连接」，两种随机出现）。现在无论先处理对端的关闭还是先处理 KEXINIT，结果都一样：USSHCore 在 NIOSSH 前面读双方的第一个 KEXINIT，
   按同样的规则自己算一遍，协商不出来就立刻报。
+- **私钥只解析一次、不占协作线程池**：一次 `connect` 里每份凭据只导入一次（退级再试、跳板机与目标用同一份凭据都复用），
+  在专门的队列上做（带口令的私钥要跑 bcrypt，1024 轮在 Mac 上约二十秒），开始前与结束后看取消。解析结果只活到这次
+  `connect` 结束。`USSHKitIntegration.makeAuthentication` / `makeConfiguration` 仍是同步的、每次调用都导入——app 若在
+  `async` 上下文里调它们，应自己挪到后台。
+- **私钥文件与 PEM 的上限**：整个私钥文件最多 64 KiB（`.malformedKey`「私钥文件过大」）；DER 里的整数原始编码最多 1025 字节
+  （8192 位加符号位），前导零一次切掉（以前逐个删，前面塞几兆字节的零就要卡几分钟）。PEM（PKCS#8 PBES2）的 PBKDF2 迭代次数
+  最多 200 万（以前 1000 万；200 万次 SHA-256 约 0.23 秒，SHA-512 约 0.6 秒），超过的报 `.unsupportedKDFCost`（与 bcrypt 同一种），
+  不再是 `.malformedKey`。
 - **私钥导入的上限**：带口令的 OpenSSH 容器 bcrypt 轮数最多 1024（`ssh-keygen -a` 默认 16；一轮约 20 ms，每次连接都要解一遍），
   更高的报新的 `PrivateKeyImportError.unsupportedKDFCost(rounds:maximum:)`（app 对这个 enum 的 `switch` 要补；建议文案让用户
   `ssh-keygen -p -a 100` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对
   尺寸（n 1024–8192 位、e ≤ 33 位、d < n、p·q = n），线格式的 string ≤ 64 KiB、整数 ≤ 1024 字节；缺素因子的容器改用确定性的
-  还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟）。
+  还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟；构造出来的最坏输入 Debug 下 1.4 秒，修之前 25 秒）。还原不了的只有
+  gcd(p − 1, q − 1) > 4096 的钥匙（按 λ 算 d 的钥匙里大约万分之二到万分之五），而且只涉及缺素因子的容器——OpenSSH 与
+  PuTTYgen 写的都带素因子。
 - **服务器给的文字先消毒再进文案**：SFTP 状态消息、开通道失败的说明、服务器报的算法列表、NIOSSH 错误里夹带的对端文本、
   退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
   换行变空格，截断到 300 个字符加「…」。app 自己把服务器原话（`SFTPError.status` 的 `message`、`SSHChannelOpenFailure.description`）
   直接拿去显示或写日志的地方，也应该这样处理（`SSHPeerText.sanitize` 是 public 的，直接用它，别抄一份规则）。
+  - `SSHPeerText` 现在定义在 **USSHCore**（USSHKit 照常能用；写成 `USSHKit.SSHPeerText` 的地方改成 `SSHPeerText`），
+    USSHCore 自己的调试日志（NIOSSH 的诊断文字）也过它。
+  - 规则补全：私用区字符、看不见的填充符（U+115F / U+1160 / U+3164 / U+FFA0 等）去掉；每个字符后面的组合字符 / 变体选择符
+    最多留 4 个（`maximumMarksPerCharacter`）；U+200D 只在两个 emoji 之间保留（emoji 组合序列不坏）；`maximumLength` 是负数或
+    极大值时不再崩。
+  - **新增 `SSHPeerText.isolated(_:)`**：消毒后包在 FSI … PDI（U+2068 … U+2069）里。USSHKit 把对端文字插进本地化句子时一律用它
+    （SFTP 状态消息、开通道失败的说明、算法报价、信号名、上传失败消息里的远程路径、私钥文件里的类型名……），从右往左的文字
+    不会搅乱整句话。**这些 `errorDescription` 里因此多了这两个不可见字符**；app 若拿文案做字符串比较（本来就不该），要改。
+    日志与给程序读的输出里别用 `isolated`。
 - **多步认证**（RFC 4252 §5.1 的部分成功，例如 sshd 的 `AuthenticationMethods publickey,password`）：部分通过的方式不再提交
   （RSA 私钥不再换签名算法重递，通过的算法记进 `SSHClient.rsaUserAuthenticationAlgorithm`，是 `ssh-rsa` 时
   `legacyAlgorithmsInUse` 照样报出）；下一个从配置的方式里从头挑服务器还要的（上一阶段被拒或跳过的方式还有一次机会）。

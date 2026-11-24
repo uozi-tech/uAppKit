@@ -384,21 +384,55 @@ final class LegacyFallbackTests: XCTestCase {
                        SSHAlgorithms.standard.hostKeyAlgorithms)
     }
 
-    func testShouldRetryOnlyWhenLegacyMatchesTheOffer() throws {
+    /// 再试的条件：服务器这一类的报价与扩展出来的名字有交集（不知道卡在哪时盲试一次）。
+    func testShouldRetryWhenTheExtensionMatchesTheOffer() throws {
         func failure(_ category: SSHAlgorithmNegotiationFailure.Category?, _ offer: [String]) -> SSHAlgorithmNegotiationFailure {
             SSHAlgorithmNegotiationFailure(category: category, clientOffer: [], serverOffer: offer)
         }
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["ssh-rsa"])))
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.keyExchange, ["diffie-hellman-group14-sha1"])))
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(.mac, ["hmac-md5", "hmac-sha1"])))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["ssh-dss"])))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.keyExchange, ["diffie-hellman-group1-sha1"])))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.encryption, ["aes128-cbc", "3des-cbc"])))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.compression, ["zlib@openssh.com"])))
-        XCTAssertTrue(SSHLegacyFallback.shouldRetry(after: failure(nil, [])), "不知道卡在哪：盲试一次")
-        // 再试是为了退到旧算法：服务器只是有 `.builtInOnly` 没有的现代算法（rsa-sha2-*、AES-CTR）时不再试。
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.hostKey, ["rsa-sha2-512", "rsa-sha2-256"])))
-        XCTAssertFalse(SSHLegacyFallback.shouldRetry(after: failure(.encryption, ["aes128-ctr"])))
+        func retries(_ first: SSHAlgorithms, _ failure: SSHAlgorithmNegotiationFailure) throws -> Bool {
+            SSHLegacyFallback.shouldRetry(after: failure, first: first,
+                                          retry: try XCTUnwrap(SSHLegacyFallback.retryAlgorithms(for: first)))
+        }
+        // 从 .standard 出发：扩展出来的只有旧算法。
+        XCTAssertTrue(try retries(.standard, failure(.hostKey, ["ssh-rsa"])))
+        XCTAssertTrue(try retries(.standard, failure(.keyExchange, ["diffie-hellman-group14-sha1"])))
+        XCTAssertTrue(try retries(.standard, failure(.mac, ["hmac-md5", "hmac-sha1"])))
+        XCTAssertFalse(try retries(.standard, failure(.hostKey, ["ssh-dss"])))
+        XCTAssertFalse(try retries(.standard, failure(.keyExchange, ["diffie-hellman-group1-sha1"])))
+        XCTAssertFalse(try retries(.standard, failure(.encryption, ["aes128-cbc", "3des-cbc"])))
+        XCTAssertFalse(try retries(.standard, failure(.compression, ["zlib@openssh.com"])))
+        XCTAssertTrue(try retries(.standard, failure(nil, [])), "不知道卡在哪：盲试一次")
+        // 从缺 AES-CTR / RSA 主机密钥的集合出发：扩展出来的现代算法也算。
+        XCTAssertTrue(try retries(.builtInOnly, failure(.encryption, ["aes128-ctr"])))
+        XCTAssertTrue(try retries(.builtInOnly, failure(.hostKey, ["rsa-sha2-512", "rsa-sha2-256"])))
+    }
+
+    /// 缺 AES-CTR 的集合对只有 AES-CTR + hmac-sha1 的服务器：第一次卡在加密（报价 aes128-ctr），扩展之后加密对上、
+    /// MAC 退到 hmac-sha1，连上（这一条以前退回过，现在照规则再试）。
+    func testEncryptionMismatchRetriesAndLandsOnLegacyMAC() async throws {
+        let server = try await TestSSH.startServer {
+            $0.transportProtectionSchemes = [SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self]
+        }
+        defer { Task { await server.stop() } }
+        var gcmOnly = SSHAlgorithms.standard
+        gcmOnly.transportProtectionSchemes = Constants.bundledTransportProtectionSchemes
+        let client = try await TestSSH.connect(server, algorithms: gcmOnly)
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [SSHLegacyAlgorithm(role: .mac, name: "hmac-sha1")])
+        await client.close()
+        XCTAssertEqual(server.events.acceptedConnections, 2)
+    }
+
+    /// 恰好两次，报的是第二次的错（进程内，不依赖本机 sshd）：第一次没有共同的主机密钥算法，再试时协商成了，
+    /// 但用户拒绝了主机密钥——不再有第三次，错误是第二次的「主机密钥被拒」。
+    func testExactlyTwoAttemptsThenTheRetrysError() async throws {
+        let server = try await TestSSH.startServer { $0.useRSAHostKey(Self.rsaHostKey, algorithms: [.sshRSA]) }
+        defer { Task { await server.stop() } }
+        let probe = ApproverProbe(.reject)
+        await assertConnectionError({
+            _ = try await TestSSH.connect(server, policy: .ask, approver: probe.approver)
+        }) { if case .hostKeyRejected(let message) = $0 { return message } else { return nil } }
+        XCTAssertEqual(server.events.acceptedConnections, 2)
+        XCTAssertEqual(probe.challenges.count, 1)
     }
 
     /// 再试的算法：配置里的现代算法 → `.standard` 补的现代算法 → 旧算法（配置里列在前面的旧算法也挪到最后）。
@@ -503,5 +537,67 @@ final class LegacyStatusTests: XCTestCase {
                                                legacyFallback: true, memory: memory)
         XCTAssertEqual(events.compactMap { $0.metadata["algorithms"] }, ["userauth=ssh-rsa"])
         XCTAssertEqual(events.count, 2)
+    }
+}
+
+/// 一次 `connect` 里每份凭据只解析一次：退级再试、两跳用同一份凭据时都不重新导入私钥（带口令的要跑 bcrypt）。
+final class CredentialResolutionTests: XCTestCase {
+    private func keyServer(_ keys: [String], customize: @escaping (inout SSHTestServer.Configuration) -> Void = { _ in })
+        async throws -> SSHTestServer {
+        let authorized = try keys.map { try TestSSH.publicKey(ofPrivateKey: $0) }
+        return try await TestSSH.startServer(
+            authentication: SSHTestAuthentication(authorizedKeys: [TestSSH.username: authorized]), customize: customize)
+    }
+
+    func testFallbackRetryImportsTheKeyOnce() async throws {
+        let key = SSHKeyGenerator.generateEd25519(comment: "k").privateKeyText
+        let rsa = try SSHRSAPrivateKey(pemRepresentation: KeyImportFixtures.rsaPKCS1)
+        let server = try await keyServer([key]) { $0.useRSAHostKey(rsa, algorithms: [.sshRSA]) }
+        defer { Task { await server.stop() } }
+        let before = SSHClientFactory.keyImports.value
+        let client = try await TestSSH.connect(server, credential: .privateKey(pem: key, passphrase: nil))
+        await client.close()
+        XCTAssertEqual(server.events.acceptedConnections, 2, "退级再试了一次")
+        XCTAssertEqual(SSHClientFactory.keyImports.value - before, 1)
+    }
+
+    func testJumpHostImportsEachDistinctCredentialOnce() async throws {
+        let shared = SSHKeyGenerator.generateEd25519(comment: "shared").privateKeyText
+        let other = SSHKeyGenerator.generateEd25519(comment: "other").privateKeyText
+        let target = try await keyServer([shared, other])
+        let bastion = try await keyServer([shared])
+        defer { Task { await target.stop(); await bastion.stop() } }
+        func jump(_ pem: String) -> SSHJumpHost {
+            SSHJumpHost(host: bastion.host, port: bastion.port, username: TestSSH.username,
+                        credential: .privateKey(pem: pem, passphrase: nil))
+        }
+        var before = SSHClientFactory.keyImports.value
+        let sameKey = try await TestSSH.connect(target, credential: .privateKey(pem: shared, passphrase: nil), jumpHost: jump(shared))
+        await sameKey.close()
+        XCTAssertEqual(SSHClientFactory.keyImports.value - before, 1, "两跳同一份凭据只解析一次")
+
+        before = SSHClientFactory.keyImports.value
+        let twoKeys = try await TestSSH.connect(target, credential: .privateKey(pem: other, passphrase: nil), jumpHost: jump(shared))
+        await twoKeys.close()
+        XCTAssertEqual(SSHClientFactory.keyImports.value - before, 2)
+    }
+
+    /// 取消了的任务不再开始解析（解析本身在专门的队列上跑，不占协作线程池）。
+    func testCancelledTaskDoesNotStartAnImport() async throws {
+        let key = SSHKeyGenerator.generateEd25519(comment: "k").privateKeyText
+        let resolver = SSHCredentialResolver()
+        let before = SSHClientFactory.keyImports.value
+        // 取消了的任务不再开始解析。
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await resolver.authentication(username: "u", credential: .privateKey(pem: key + " ", passphrase: nil))
+        }
+        do {
+            _ = try await cancelled.value
+            XCTFail("应当被取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertEqual(SSHClientFactory.keyImports.value, before)
     }
 }

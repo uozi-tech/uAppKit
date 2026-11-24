@@ -17,9 +17,10 @@ public nonisolated enum PrivateKeyImportError: Error, LocalizedError, Equatable 
     private var sanitized: PrivateKeyImportError {
         switch self {
         case .malformedPEM(let reason): return .malformedPEM(reason: SSHPeerText.sanitize(reason))
-        case .unsupportedFormat(let label): return .unsupportedFormat(label: SSHPeerText.sanitize(label))
-        case .unsupportedCipher(let name): return .unsupportedCipher(name: SSHPeerText.sanitize(name))
-        case .unsupportedKDF(let name): return .unsupportedKDF(name: SSHPeerText.sanitize(name))
+        // 这三项取自私钥文件，插进句子里：再包一层双向隔离。
+        case .unsupportedFormat(let label): return .unsupportedFormat(label: SSHPeerText.isolated(label))
+        case .unsupportedCipher(let name): return .unsupportedCipher(name: SSHPeerText.isolated(name))
+        case .unsupportedKDF(let name): return .unsupportedKDF(name: SSHPeerText.isolated(name))
         case .malformedKey(let reason): return .malformedKey(reason: SSHPeerText.sanitize(reason))
         case .dsaUnsupported, .encryptedKeyNeedsPassphrase, .incorrectPassphrase, .unsupportedKDFCost: return self
         }

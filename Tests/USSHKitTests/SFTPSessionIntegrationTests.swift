@@ -416,4 +416,169 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         XCTAssertEqual(localTemporaryFiles(), [])
         await session.close()
     }
+
+    // MARK: - 没有 posix-rename 时删除目标之后的各种结局（第三轮审查）
+
+    private func uploadWithoutPosixRename(_ faults: SFTPFaultInjector, existing: String = "old",
+                                          file name: String = "/target.txt") async throws -> (SSHTestServer, SSHFileTransferSession, URL) {
+        let server = try await startServer(extensions: withoutPosixRename(), faults: faults)
+        try Data(existing.utf8).write(to: URL(fileURLWithPath: fileSystem.hostPath(for: name)))
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("payload.txt")
+        try Data("precious".utf8).write(to: local)
+        return (server, session, local)
+    }
+
+    /// 删除目标的请求已经发出、还没回答时被取消：目标可能已删，临时文件留着，报「结果无法确定」并给出位置。
+    func testCancelWhileRemoveIsInFlightKeepsTheTemporaryFile() async throws {
+        let faults = SFTPFaultInjector()
+        let (server, session, local) = try await uploadWithoutPosixRename(faults)
+        defer { Task { await server.stop() } }
+        faults.delayResponses(of: .remove, by: .milliseconds(800))
+        let upload = Task { try await session.uploadAtomically(local, to: "/target.txt") }
+        while faults.requestCount(of: .remove) == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        upload.cancel()
+        do {
+            try await upload.value
+            XCTFail("应当失败")
+        } catch SSHFileTransferError.uploadOutcomeUnknown(let temporaryPath, let destination, _) {
+            XCTAssertEqual(destination, "/target.txt")
+            XCTAssertEqual(remote(temporaryPath), Data("precious".utf8))
+        }
+        try await Task.sleep(for: .milliseconds(1000))
+        XCTAssertEqual(remoteTemporaryFiles().count, 1, "新内容必须还在")
+        XCTAssertEqual(faults.requestCount(of: .remove), 1, "没有去删临时文件")
+        await session.close()
+    }
+
+    /// 删除目标时连接断了：同样留着临时文件。
+    func testDroppedConnectionDuringRemoveKeepsTheTemporaryFile() async throws {
+        let faults = SFTPFaultInjector()
+        let (server, session, local) = try await uploadWithoutPosixRename(faults)
+        defer { Task { await server.stop() } }
+        faults.dropConnection(on: .remove)
+        do {
+            try await session.uploadAtomically(local, to: "/target.txt")
+            XCTFail("应当失败")
+        } catch SSHFileTransferError.uploadOutcomeUnknown(let temporaryPath, _, _) {
+            XCTAssertEqual(remote(temporaryPath), Data("precious".utf8))
+        }
+        await session.close()
+    }
+
+    /// 服务器明确拒绝删除目标：目标完好，临时文件删掉，原样报错。
+    func testRefusedRemoveKeepsTheDestinationAndCleansUp() async throws {
+        let faults = SFTPFaultInjector()
+        let (server, session, local) = try await uploadWithoutPosixRename(faults)
+        defer { Task { await server.stop() } }
+        faults.fail(.remove, with: .permissionDenied)
+        do {
+            try await session.uploadAtomically(local, to: "/target.txt")
+            XCTFail("应当失败")
+        } catch let error as SFTPError {
+            XCTAssertEqual(error.statusCode, .permissionDenied)
+        }
+        XCTAssertEqual(remote("/target.txt"), Data("old".utf8))
+        XCTAssertEqual(remoteTemporaryFiles(), [])
+        await session.close()
+    }
+
+    /// 最后的改名发出去、还没回答时被取消：改名可能已经成了，不能说成「旧文件已删、没替换」。
+    func testCancelDuringFinalRenameIsReportedAsUnknown() async throws {
+        let faults = SFTPFaultInjector()
+        let (server, session, local) = try await uploadWithoutPosixRename(faults)
+        defer { Task { await server.stop() } }
+        faults.delayResponses(of: .rename, by: .milliseconds(300))
+        let upload = Task { try await session.uploadAtomically(local, to: "/target.txt") }
+        while faults.requestCount(of: .rename) < 2 { try await Task.sleep(for: .milliseconds(5)) }
+        upload.cancel()
+        do {
+            try await upload.value
+            XCTFail("应当失败")
+        } catch SSHFileTransferError.uploadOutcomeUnknown {
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertEqual(remote("/target.txt"), Data("precious".utf8), "这里改名其实成了")
+        await session.close()
+    }
+
+    /// 目标是悬空的符号链接：替换的是链接本身（与 posix-rename、与以前的实现一样），有没有 posix-rename 都一样。
+    func testDanglingSymlinkDestinationIsReplaced() async throws {
+        for extensions in [withoutPosixRename(), SFTPServer.defaultExtensions] {
+            let server = try await startServer(extensions: extensions)
+            let link = fileSystem.hostPath(for: "/link.txt")
+            try? FileManager.default.removeItem(atPath: link)
+            try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: "/nonexistent/target")
+            let session = try await open(server)
+            let local = localDirectory.appendingPathComponent("payload.txt")
+            try Data("new".utf8).write(to: local)
+            try await session.uploadAtomically(local, to: "/link.txt")
+            let type = try FileManager.default.attributesOfItem(atPath: link)[.type] as? FileAttributeType
+            XCTAssertEqual(type, .typeRegular, "链接本身被换成了普通文件")
+            XCTAssertEqual(remote("/link.txt"), Data("new".utf8))
+            await session.close()
+            await server.stop()
+        }
+    }
+
+    // MARK: - 连接卡死时取消马上返回
+
+    func testCancelDownloadOnAFrozenLinkReturnsPromptly() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        try pattern(4 << 20).write(to: URL(fileURLWithPath: fileSystem.hostPath(for: "/big.bin")))
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("frozen.bin")
+        try Data("keep".utf8).write(to: local)
+        faults.delayResponses(of: .read, by: .milliseconds(200))
+        let download = Task { try await session.download("/big.bin", to: local) }
+        while faults.requestCount(of: .read) == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        await server.freezeAllConnections()
+        let start = ContinuousClock.now
+        download.cancel()
+        _ = try? await download.value
+        XCTAssertLessThan(ContinuousClock.now - start, .seconds(2), "取消要马上返回")
+        XCTAssertEqual(try Data(contentsOf: local), Data("keep".utf8))
+        XCTAssertEqual(localTemporaryFiles(), [])
+    }
+
+    func testCancelUploadOnAFrozenLinkReturnsWithinTheCleanupDeadline() async throws {
+        let faults = SFTPFaultInjector()
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+        let local = localDirectory.appendingPathComponent("frozen-up.bin")
+        try pattern(2 << 20).write(to: local)
+        faults.delayResponses(of: .write, by: .milliseconds(200))
+        let upload = Task { try await session.uploadAtomically(local, to: "/frozen-up.bin") }
+        while faults.requestCount(of: .write) == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        await server.freezeAllConnections()
+        let start = ContinuousClock.now
+        upload.cancel()
+        _ = try? await upload.value
+        XCTAssertLessThan(ContinuousClock.now - start, SSHFileTransferSession.cleanupDeadline + .seconds(1))
+    }
+
+    // MARK: - 长文件名
+
+    /// 255 字节的名字：临时文件名截短原名，在本地和服务器上都合法。
+    func testMaximumLengthNamesRoundTrip() async throws {
+        let server = try await startServer(extensions: withoutPosixRename())
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+        let name = String(repeating: "名", count: 85)            // 85 × 3 = 255 字节
+        XCTAssertEqual(name.utf8.count, 255)
+        let local = localDirectory.appendingPathComponent(name)
+        try Data("long name".utf8).write(to: local)
+        try await session.uploadAtomically(local, to: "/" + name)
+        XCTAssertEqual(remote("/" + name), Data("long name".utf8))
+        let back = localDirectory.appendingPathComponent(String(repeating: "长", count: 85))
+        try Data("old".utf8).write(to: back)
+        try await session.download("/" + name, to: back)
+        XCTAssertEqual(try Data(contentsOf: back), Data("long name".utf8))
+        XCTAssertEqual(localTemporaryFiles(), [])
+        XCTAssertLessThanOrEqual(SSHFileTransferSession.temporaryPath(for: "/d/" + name).split(separator: "/").last!.utf8.count, 255)
+        await session.close()
+    }
 }

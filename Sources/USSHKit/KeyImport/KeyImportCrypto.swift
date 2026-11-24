@@ -35,9 +35,11 @@ nonisolated enum KeyImportCrypto {
     /// 防止 ~4GB 量级的内存分配。
     static let maxDerivedKeyLength = 1024
 
-    /// PBKDF2 迭代次数上限。防止不可信密钥文件指定天文数字的迭代次数导致 CPU DoS。
-    /// 1000 万次远超正常密钥（通常几千到几十万）所需。
-    static let maxPBKDF2Iterations = 10_000_000
+    /// PBKDF2 迭代次数上限：200 万。迭代次数读自密钥文件（不可信），而每次连接都会重新解一遍私钥。
+    /// 实测（2026-11，M5 Pro，CommonCrypto）1000 万次：SHA-1 2.6 秒、SHA-256 1.1 秒、SHA-512 3.2 秒，手机慢一倍左右；
+    /// 200 万次最坏约 0.6 秒。真实工具写的：OpenSSL `pkcs8` 默认 2048，OWASP 2023 的建议是 SHA-512 21 万、
+    /// SHA-256 60 万、SHA-1 130 万，都在上限以内。超过的报 `.unsupportedKDFCost`（与 bcrypt 同一种错误）。
+    static let maxPBKDF2Iterations = 2_000_000
 
     /// PBKDF2。
     static func pbkdf2(password: [UInt8], salt: [UInt8],

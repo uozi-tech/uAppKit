@@ -25,12 +25,13 @@ public enum USSHKitIntegration {
     ///     这是产品层（USSHKit）的默认；USSHCore 自己的 `SSHClient.Configuration` 默认仍是 `.builtInOnly`。
     ///   - keepAliveInterval: 认证成功后每隔这么久发一个 `keepalive@openssh.com`；连续 3 个没回应就断开，
     ///     断开原因是 `SSHDisconnectReason.keepAliveTimeout`。`nil`（默认）不发，和今天一样。跳板机两跳都设。
-    ///   - legacyFallback: 自动退到 SHA-1 的旧算法（默认开，跳板机与目标各自判断，规则与安全上的理由见
-    ///     `SSHLegacyFallback`）：服务器和 `algorithms` 没有共同算法、而补上旧算法就对得上时，同一跳再连一次；
+    ///   - legacyFallback: 自动退级（默认开，跳板机与目标各自判断，规则与安全上的理由见 `SSHLegacyFallback`）：
+    ///     遇到类型化的「没有共同算法」时，用 `algorithms` 加上 `.standard` 的现代算法、再加上旧算法同一跳再连一次——
+    ///     服务器这一类的报价与扩展出来的名字有交集时才试，不知道卡在哪时盲试一次；
     ///     RSA 用户私钥在服务器没宣告 `server-sig-algs`、SHA-2 签名都被拒时，同一条连接里最后试 `ssh-rsa`；
     ///     进程内记住需要旧算法的主机，重连时省掉注定失败的那一次。用上了哪些看
     ///     `ConnectedClient.legacyAlgorithmsInUse` / `bastionLegacyAlgorithmsInUse`，并经 `logger` 记一条警告。
-    ///     关掉时只用 `algorithms`，没有共同算法就报 `SSHConnectionError.connectFailed`。
+    ///     关掉时只用 `algorithms`（把它当严格策略的调用方这样传），没有共同算法就报 `SSHConnectionError.handshakeFailed`。
     ///   - logger: 记自动退级之类的事件。
     /// - Throws: `SSHConnectionError`；任务被取消时抛 `CancellationError`（连接已关闭）。
     public static func connect(

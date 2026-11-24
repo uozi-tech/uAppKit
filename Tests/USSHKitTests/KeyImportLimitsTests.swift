@@ -1,3 +1,5 @@
+import BigInt
+import Crypto
 import Foundation
 import XCTest
 @_spi(uTermIntegration) @testable import USSHKit
@@ -136,6 +138,77 @@ final class KeyImportLimitsTests: XCTestCase {
         }
     }
 
+    /// 构造出来的最坏输入：e = 3、d = (2n − 2s + 1) / 3（s ≈ 2√n）。k = 3d − 1 = 2(n − s)，每个 g 都给出同一个
+    /// φ = n − s，余数与范围检查都过。以前每个 g 都开一次 8194 位的方；现在同一个 φ 只判一次，判别式先过平方剩余筛子。
+    func testAdversarialRepeatedTotientStaysWithinBudget() throws {
+        let c = try Self.components8192()
+        let n = BigUInt(Data(c.modulus))
+        // s 取得让 (s + 1)² − 4n ≥ 0（判别式非负、要开方）而又在 φ 的范围里：s ≈ 2√n。
+        var s = 2 * n.squareRoot() + 10
+        while (2 * n - 2 * s + 1) % 3 != 0 { s += 1 }
+        let d = (2 * n - 2 * s + 1) / 3
+        let start = ContinuousClock.now
+        XCTAssertNil(try RSAKeyMaterial.recoverPrimes(modulus: c.modulus, publicExponent: [3],
+                                                      privateExponent: Array(d.serialize())))
+        let elapsed = ContinuousClock.now - start
+        XCTAssertLessThan(elapsed, Self.recoveryBudget, "构造的最坏输入用了 \(elapsed)")
+        print("8192 位构造最坏输入耗时 \(elapsed)")
+    }
+
+    static func components8192() throws -> SSHRSAPrivateKeyComponents {
+        let pkcs8 = try PEMDocument.parse(LargeRSAFixture.modulus8192PEM).der
+        let fields = try DERKeyDecoder.children(DERKeyDecoder.parse(pkcs8))
+        return try RSAKeyMaterial.componentsFromPKCS1DER(DERKeyDecoder.primitiveBytes(fields[2]))
+    }
+
+    /// 由 p、q、e 造一个 d 按 λ（或 φ）算的钥匙，看能不能只凭 n / e / d 还原。
+    private func assertRecovers(p: BigUInt, q: BigUInt, e: BigUInt, lambda: Bool,
+                                file: StaticString = #filePath, line: UInt = #line) throws {
+        let n = p * q
+        let phi = (p - 1) * (q - 1)
+        let modulus = lambda ? phi / (p - 1).greatestCommonDivisor(with: q - 1) : phi
+        let d = try XCTUnwrap(e.inverse(modulus), "e 与 λ 不互素", file: file, line: line)
+        let recovered = try XCTUnwrap(try RSAKeyMaterial.recoverPrimes(
+            modulus: Array(n.serialize()), publicExponent: Array(e.serialize()), privateExponent: Array(d.serialize())),
+            file: file, line: line)
+        XCTAssertEqual(Set([recovered.p, recovered.q]), Set([Array(p.serialize()), Array(q.serialize())]), file: file, line: line)
+    }
+
+    /// 512 位、p ≡ q ≡ 1 (mod 8) 的素数：gcd(p − 1, q − 1) 至少是 8。
+    private static func prime(congruentTo residue: BigUInt, modulo modulus: BigUInt, seed: UInt64) -> BigUInt {
+        var generator = SplitMix64(seed: seed)
+        while true {
+            var candidate = BigUInt(words: (0..<8).map { _ in UInt(generator.next()) })
+            candidate |= (BigUInt(3) << 510)                 // 最高两位都是 1：两个相乘正好 1024 位
+            candidate += (residue + modulus - candidate % modulus) % modulus
+            if candidate.isPrime(rounds: 6) { return candidate }
+        }
+    }
+
+    func testLambdaBasedKeyWithLargeGCDAndVariousExponents() throws {
+        let p = Self.prime(congruentTo: 1, modulo: 8, seed: 1)
+        let q = Self.prime(congruentTo: 1, modulo: 8, seed: 2)
+        XCTAssertGreaterThan((p - 1).greatestCommonDivisor(with: q - 1), 2)
+        for e in [BigUInt(65537), BigUInt(3), BigUInt((1 << 32) + 15)] {
+            let lambda = (p - 1) * (q - 1) / (p - 1).greatestCommonDivisor(with: q - 1)
+            guard e.greatestCommonDivisor(with: lambda) == 1 else { continue }
+            try assertRecovers(p: p, q: q, e: e, lambda: true)
+            try assertRecovers(p: p, q: q, e: e, lambda: false)
+        }
+    }
+
+    /// 文件里 p < q（OpenSSH 写的是 p > q）：照样能用，签名与公钥一致。
+    func testPrimesStoredSmallerFirstImport() throws {
+        let c = try OpenSSHRSADecoder.decodeComponents(openSSHText: KeyImportFixtures.rsaOpenSSH)
+        let (small, large) = BigUInt(Data(c.prime1)) < BigUInt(Data(c.prime2)) ? (c.prime1, c.prime2) : (c.prime2, c.prime1)
+        let pem = OpenSSHTestContainers.rsa(n: c.modulus, e: c.publicExponent, d: c.privateExponent,
+                                            iqmp: [1], p: small, q: large)
+        guard case .rsa(let key) = try PrivateKeyImporter.resolve(pem: pem, passphrase: nil) else { return XCTFail("应为 .rsa") }
+        let message = Array("p < q".utf8)
+        let signature = try key.signature(for: message, algorithm: .rsaSHA2_256)
+        XCTAssertTrue(key.publicKey.isValidSignature(signature, for: message, algorithm: .rsaSHA2_256))
+    }
+
     /// Debug 构建的上限（Release 快一个数量级）。迁移前的概率算法在这里要两三分钟。
     static let recoveryBudget: Duration = .seconds(5)
 }
@@ -222,5 +295,132 @@ final class BcryptLimitsTests: XCTestCase {
                 XCTAssertEqual($0 as? PrivateKeyImportError, .malformedKey(reason: ""), "\(item)")
             }
         }
+    }
+}
+
+/// 可复现的伪随机数（种子固定）。
+struct SplitMix64: RandomNumberGenerator {
+    private var state: UInt64
+    init(seed: UInt64) { state = seed }
+    mutating func next() -> UInt64 {
+        state &+= 0x9E37_79B9_7F4A_7C15
+        var z = state
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        return z ^ (z >> 31)
+    }
+}
+
+/// 线性的前导零处理、DER 整数与整个文件的大小上限、PBKDF2 迭代次数上限。
+final class KeyFileSizeAndKDFLimitsTests: XCTestCase {
+
+    private func der(_ tag: UInt8, _ content: [UInt8]) -> [UInt8] {
+        var length: [UInt8]
+        if content.count < 0x80 {
+            length = [UInt8(content.count)]
+        } else {
+            var n = content.count
+            var bytes: [UInt8] = []
+            while n > 0 { bytes.insert(UInt8(n & 0xFF), at: 0); n >>= 8 }
+            length = [0x80 | UInt8(bytes.count)] + bytes
+        }
+        return [tag] + length + content
+    }
+
+    private func integer(_ value: Int) -> [UInt8] {
+        var bytes: [UInt8] = []
+        var n = value
+        repeat { bytes.insert(UInt8(n & 0xFF), at: 0); n >>= 8 } while n > 0
+        if bytes[0] & 0x80 != 0 { bytes.insert(0, at: 0) }
+        return der(0x02, bytes)
+    }
+
+    private func armor(_ label: String, _ bytes: [UInt8]) -> String {
+        let base64 = Array(Data(bytes).base64EncodedString())
+        let lines = stride(from: 0, to: base64.count, by: 64).map { String(base64[$0..<min($0 + 64, base64.count)]) }
+        return (["-----BEGIN \(label)-----"] + lines + ["-----END \(label)-----"]).joined(separator: "\n") + "\n"
+    }
+
+    private func assertFastMalformed(_ pem: String, file: StaticString = #filePath, line: UInt = #line) {
+        let start = ContinuousClock.now
+        XCTAssertThrowsError(try PrivateKeyImporter.resolve(pem: pem, passphrase: nil), file: file, line: line) {
+            XCTAssertEqual($0 as? PrivateKeyImportError, .malformedKey(reason: ""), "\($0)", file: file, line: line)
+        }
+        XCTAssertLessThan(ContinuousClock.now - start, .milliseconds(300), file: file, line: line)
+    }
+
+    /// PKCS#1 的模数前面塞了几千字节的零：在任何处理之前就按「整数过长」拒绝。
+    func testDERIntegerWithLeadingZerosIsRejected() throws {
+        let c = try OpenSSHRSADecoder.decodeComponents(openSSHText: KeyImportFixtures.rsaOpenSSH)
+        func int(_ magnitude: [UInt8], padding: Int = 0) -> [UInt8] {
+            der(0x02, [UInt8](repeating: 0, count: padding + 1) + magnitude)
+        }
+        let body = integer(0) + int(c.modulus, padding: 40_000) + int(c.publicExponent) + int(c.privateExponent)
+            + int(c.prime1) + int(c.prime2) + int([1]) + int([1]) + int([1])
+        assertFastMalformed(armor("RSA PRIVATE KEY", der(0x30, body)))
+        XCTAssertEqual(DERKeyDecoder.maximumIntegerLength, 1025)
+    }
+
+    /// 整个文件超过 64 KiB：不是私钥，立刻拒绝。
+    func testOversizedFileIsRejectedBeforeParsing() {
+        let pem = "-----BEGIN OPENSSH PRIVATE KEY-----\n" + String(repeating: "A", count: 4 << 20) + "\n-----END OPENSSH PRIVATE KEY-----\n"
+        assertFastMalformed(pem)
+    }
+
+    /// 线格式里 64 KiB 的前导零：线性地去掉（以前逐个 removeFirst 是平方级的），再按长度上限判断。
+    func testWireIntegerLeadingZerosAreStrippedInLinearTime() throws {
+        var writer = SSHWireWriter()
+        writer.writeString([UInt8](repeating: 0, count: SSHWireReader.maximumStringLength - 1) + [0x7F])
+        var reader = SSHWireReader(writer.bytes)
+        let start = ContinuousClock.now
+        XCTAssertEqual(try reader.readMPInt(), [0x7F])
+        XCTAssertLessThan(ContinuousClock.now - start, .milliseconds(100))
+        XCTAssertEqual(SSHWireReader.strippingLeadingZeros([0, 0, 0]), [0])
+        XCTAssertEqual(SSHWireReader.strippingLeadingZeros([]), [])
+    }
+
+    // MARK: PBKDF2
+
+    /// 带口令的 PKCS#8（PBES2，PBKDF2-HMAC-SHA256，AES-256-CBC），迭代次数自定。
+    private func encryptedPKCS8(iterations: Int, password: String) throws -> (pem: String, key: P256.Signing.PrivateKey) {
+        let key = P256.Signing.PrivateKey()
+        let salt = [UInt8](repeating: 0x5A, count: 16)
+        let iv = [UInt8](repeating: 0x11, count: 16)
+        let derived = try KeyImportCrypto.pbkdf2(password: Array(password.utf8), salt: salt, iterations: iterations,
+                                                 keyLength: 32, prf: .sha256)
+        var plain = [UInt8](key.derRepresentation)
+        let pad = 16 - plain.count % 16
+        plain += [UInt8](repeating: UInt8(pad), count: pad)
+        let encrypted = try KeyImportCrypto.cbcCrypt(.aes, encrypt: true, key: derived, iv: iv, input: plain)
+        let pbkdf2OID: [UInt8] = [0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0C]
+        let pbes2OID: [UInt8] = [0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x05, 0x0D]
+        let hmacSHA256: [UInt8] = [0x06, 0x08, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x02, 0x09]
+        let aes256CBC: [UInt8] = [0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x01, 0x2A]
+        let kdf = der(0x30, pbkdf2OID + der(0x30, der(0x04, salt) + integer(iterations) + der(0x30, hmacSHA256 + [0x05, 0x00])))
+        let scheme = der(0x30, aes256CBC + der(0x04, iv))
+        let algorithm = der(0x30, pbes2OID + der(0x30, kdf + scheme))
+        return (armor("ENCRYPTED PRIVATE KEY", der(0x30, algorithm + der(0x04, encrypted))), key)
+    }
+
+    func testPBKDF2IterationsAboveTheCapAreATypedError() throws {
+        // 构造夹具本身要算一遍 200 万 + 1 次（约 0.2 秒）；导入时在派生之前就拒绝。
+        let tooMany = try encryptedPKCS8(iterations: KeyImportCrypto.maxPBKDF2Iterations + 1, password: "pw")
+        let start = ContinuousClock.now
+        XCTAssertThrowsError(try PrivateKeyImporter.resolve(pem: tooMany.pem, passphrase: "pw")) {
+            guard case PrivateKeyImportError.unsupportedKDFCost(let rounds, let maximum) = $0 else { return XCTFail("\($0)") }
+            XCTAssertEqual(rounds, KeyImportCrypto.maxPBKDF2Iterations + 1)
+            XCTAssertEqual(maximum, KeyImportCrypto.maxPBKDF2Iterations)
+        }
+        XCTAssertLessThan(ContinuousClock.now - start, .milliseconds(100))
+    }
+
+    func testPBKDF2AtTheCapStillImports() throws {
+        let (pem, key) = try encryptedPKCS8(iterations: KeyImportCrypto.maxPBKDF2Iterations, password: "pw")
+        let start = ContinuousClock.now
+        guard case .p256(let imported) = try PrivateKeyImporter.resolve(pem: pem, passphrase: "pw") else {
+            return XCTFail("应为 P-256")
+        }
+        print("PBKDF2-HMAC-SHA256 \(KeyImportCrypto.maxPBKDF2Iterations) 次耗时 \(ContinuousClock.now - start)")
+        XCTAssertEqual(imported.publicKey.rawRepresentation, key.publicKey.rawRepresentation)
     }
 }

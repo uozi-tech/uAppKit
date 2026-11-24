@@ -93,7 +93,7 @@ public nonisolated struct SSHForwardingChannelFailure: Sendable {
         case .resourceShortage:
             return String(localized: "跳板机暂时打不开到 \(target) 的通道（资源不足，可能是同时开着的通道太多）", bundle: ModuleBundle.bundle)
         case .other:
-            return String(localized: "转发到 \(target) 的通道打开失败：\(detail)", bundle: ModuleBundle.bundle)
+            return String(localized: "转发到 \(target) 的通道打开失败：\(SSHPeerText.isolated(detail))", bundle: ModuleBundle.bundle)
         }
     }
 }

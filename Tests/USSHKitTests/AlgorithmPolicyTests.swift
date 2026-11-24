@@ -79,8 +79,8 @@ final class AlgorithmPolicyTests: XCTestCase {
         XCTAssertEqual(server.events.acceptedConnections, 1)
     }
 
-    /// 明确传 `.builtInOnly`：不报、不接受 RSA 主机密钥，每次都是「没有共同的主机密钥算法」，没走到认证。
-    /// 自动退级补的只有 SHA-1 的 `ssh-rsa`，对不上服务器报的 `rsa-sha2-*`，所以也不再试。
+    /// 把 `.builtInOnly` 当严格策略（`legacyFallback: false`）：不报、不接受 RSA 主机密钥，每次都是「没有共同的主机
+    /// 密钥算法」，没走到认证，也不再试。开着自动退级时会扩展到 `.standard` 再试一次并连上（见下一条）。
     func testRSAOnlyHostKeyIsRefusedUnderExplicitBuiltInOnly() async throws {
         let hostKey = try rsaKey()
         let server = try await TestSSH.startServer { configuration in
@@ -91,13 +91,25 @@ final class AlgorithmPolicyTests: XCTestCase {
         let attempts = 5
         for _ in 0..<attempts {
             let message = await assertConnectionError({
-                _ = try await TestSSH.connect(server, algorithms: .builtInOnly)
+                _ = try await TestSSH.connect(server, algorithms: .builtInOnly, legacyFallback: false)
             }) { if case .handshakeFailed(let message) = $0 { return message } else { return nil } }
             XCTAssertEqual(message, noCommonAlgorithm(.hostKey, serverOffer: ["rsa-sha2-512", "rsa-sha2-256"]))
         }
         XCTAssertTrue(server.events.authAttempts.isEmpty)
         try await server.waitForEvents { $0.acceptedConnections == attempts }
         XCTAssertEqual(server.events.acceptedConnections, attempts, "一次也没有再试")
+    }
+
+    /// `.builtInOnly` 开着自动退级：扩展出来的 rsa-sha2-* 对得上服务器的报价，再试一次连上。
+    func testBuiltInOnlyWithFallbackExtendsToStandard() async throws {
+        let hostKey = try rsaKey()
+        let server = try await TestSSH.startServer { $0.useRSAHostKey(hostKey) }
+        defer { Task { await server.stop() } }
+        let client = try await TestSSH.connect(server, algorithms: .builtInOnly)
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.hostKey, "rsa-sha2-512")
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [])
+        await client.close()
+        XCTAssertEqual(server.events.acceptedConnections, 2)
     }
 
     /// 只有 SHA-1 的 `ssh-rsa` 主机签名：关掉自动退级时被拒（类别与报价都对），`.legacyCompatible` 能连。

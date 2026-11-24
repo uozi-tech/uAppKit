@@ -3,7 +3,14 @@ import Foundation
 /// 私钥导入编排器：把任意受支持格式的私钥文本解析为 `ParsedPrivateKey`。
 nonisolated enum PrivateKeyImporter {
 
+    /// 私钥文件最长这么多字节。8192 位 RSA 的 PEM / OpenSSH 容器约 6.5 KiB，留足注释与换行的余地取 64 KiB；
+    /// 更大的不是私钥，在做任何解析之前就拒绝。
+    static let maximumFileBytes = 64 * 1024
+
     static func resolve(pem rawText: String, passphrase: String?) throws -> ParsedPrivateKey {
+        guard rawText.utf8.count <= maximumFileBytes else {
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "私钥文件过大", bundle: ModuleBundle.bundle))
+        }
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let label = firstPEMLabel(in: text) else {
             throw PrivateKeyImportError.malformedPEM(reason: String(localized: "未找到 -----BEGIN ...----- 标记", bundle: ModuleBundle.bundle))
