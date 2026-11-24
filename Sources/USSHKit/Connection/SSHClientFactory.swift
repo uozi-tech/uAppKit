@@ -100,6 +100,8 @@ nonisolated enum SSHClientFactory {
         var legacyFallback: Bool = true
         var legacyMemory: SSHLegacyEndpointMemory = .shared
         var logger: any SSHLogger = NoOpSSHLogger()
+        /// 这一次 `connect` 里解析过的凭据（退级再试、两跳用同一份凭据时不再解析一遍）。
+        var credentials = SSHCredentialResolver()
     }
 
     static func connect(
@@ -148,8 +150,10 @@ nonisolated enum SSHClientFactory {
     ///
     /// `algorithms` 不给时用 `options.algorithms`；`legacyFallback` 开着、而这一跳在进程内记着需要旧算法时，
     /// 直接用补上旧算法的那一套。`legacyFallback` 开着时也打开同一条连接里 RSA 用户私钥的 `ssh-rsa` 回退。
-    static func makeConfiguration(_ hop: Hop, options: Options,
-                                  algorithms: SSHAlgorithms? = nil) throws -> SSHClient.Configuration {
+    ///
+    /// `authentication` 给了就用它（`connect` 里预先解析好的），否则在这里同步解析凭据。
+    static func makeConfiguration(_ hop: Hop, options: Options, algorithms: SSHAlgorithms? = nil,
+                                  authentication: SSHAuthentication? = nil) throws -> SSHClient.Configuration {
         let trust = HostKeyTrust(
             host: hop.host,
             port: hop.port,
@@ -158,7 +162,7 @@ nonisolated enum SSHClientFactory {
             approver: options.approver
         )
         var configuration = SSHClient.Configuration(
-            authentication: try makeAuthentication(username: hop.username, credential: hop.credential),
+            authentication: try authentication ?? makeAuthentication(username: hop.username, credential: hop.credential),
             hostKeyValidation: trust.validation,
             connectTimeout: options.connectTimeout,
             handshakeTimeout: options.connectTimeout,
@@ -193,6 +197,8 @@ nonisolated enum SSHClientFactory {
         options: Options,
         open: (SSHClient.Configuration) async throws -> SSHClient
     ) async throws -> SSHClient {
+        // 凭据只解析一次（带口令的私钥要跑 bcrypt，1024 轮在 Mac 上就要二十秒），在后台队列上做，不占协作线程池。
+        let authentication = try await options.credentials.authentication(username: hop.username, credential: hop.credential)
         let first = firstAttemptAlgorithms(hop, options: options)
         let fallback = options.legacyFallback && !first.allowsLegacyAlgorithms
             ? SSHLegacyFallback.retryAlgorithms(for: first) : nil
@@ -201,13 +207,16 @@ nonisolated enum SSHClientFactory {
         firstOptions.approver = watch.wrap(options.approver)
         let client: SSHClient
         do {
-            client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first))
+            client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first,
+                                                      authentication: authentication))
         } catch SSHClientError.noCommonAlgorithm(let failure) {
             guard let fallback, SSHLegacyFallback.shouldRetry(after: failure), !watch.wasCalled else {
                 throw SSHClientError.noCommonAlgorithm(failure)
             }
             // 第二次的错误（含又一次没有共同算法）原样交出去。
-            client = try await open(makeConfiguration(hop, options: options, algorithms: fallback))
+            try Task.checkCancellation()
+            client = try await open(makeConfiguration(hop, options: options, algorithms: fallback,
+                                                      authentication: authentication))
         }
         note(client, hop: hop, options: options)
         return client
@@ -327,6 +336,7 @@ nonisolated enum SSHClientFactory {
         case .password(let password):
             return .password(password, username: username)
         case .privateKey(let pem, let passphrase):
+            keyImports.increment()
             do {
                 let key = try PrivateKeyImporter.resolve(pem: pem, passphrase: passphrase)
                 return SSHAuthentication(username: username, methods: key.authenticationMethods)
@@ -341,4 +351,45 @@ nonisolated enum SSHClientFactory {
             throw SSHConnectionError.unsupportedAgentAuthentication
         }
     }
+}
+
+extension SSHClientFactory {
+    /// 解析私钥的次数（测试用：核对一次 `connect` 里每份凭据只解析一次）。
+    static let keyImports = SSHCounter()
+}
+
+/// 一次 `connect` 里的凭据缓存：同一份凭据（目标与跳板机相同、退级再试）只解析一次。只活到这次 `connect` 结束，
+/// 不把私钥留得比以前更久。解析在专门的队列上做（bcrypt 可能要几十秒，不能占着协作线程池），开始前、结束后各看
+/// 一次取消。
+nonisolated final class SSHCredentialResolver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var methods: [SSHCredential: [SSHAuthenticationMethod]] = [:]
+
+    private static let queue = DispatchQueue(label: "com.uozi.USSHKit.key-import", qos: .userInitiated,
+                                             attributes: .concurrent)
+
+    func authentication(username: String, credential: SSHCredential) async throws -> SSHAuthentication {
+        if let cached = lock.withLock({ methods[credential] }) {
+            return SSHAuthentication(username: username, methods: cached)
+        }
+        try Task.checkCancellation()
+        let resolved: [SSHAuthenticationMethod] = try await withCheckedThrowingContinuation { continuation in
+            Self.queue.async {
+                continuation.resume(with: Result {
+                    try SSHClientFactory.makeAuthentication(username: username, credential: credential).methods
+                })
+            }
+        }
+        try Task.checkCancellation()
+        lock.withLock { methods[credential] = resolved }
+        return SSHAuthentication(username: username, methods: resolved)
+    }
+}
+
+/// 线程安全的计数器。
+nonisolated final class SSHCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func increment() { lock.withLock { count += 1 } }
 }

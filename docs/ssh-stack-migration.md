@@ -291,6 +291,10 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **协商不成有自己的错误**：`SSHClientError.noCommonAlgorithm`（以前是 `.handshakeFailed`，或者在对端先关连接时变成「服务器关闭了
   连接」，两种随机出现）。现在无论先处理对端的关闭还是先处理 KEXINIT，结果都一样：USSHCore 在 NIOSSH 前面读双方的第一个 KEXINIT，
   按同样的规则自己算一遍，协商不出来就立刻报。
+- **私钥只解析一次、不占协作线程池**：一次 `connect` 里每份凭据只导入一次（退级再试、跳板机与目标用同一份凭据都复用），
+  在专门的队列上做（带口令的私钥要跑 bcrypt，1024 轮在 Mac 上约二十秒），开始前与结束后看取消。解析结果只活到这次
+  `connect` 结束。`USSHKitIntegration.makeAuthentication` / `makeConfiguration` 仍是同步的、每次调用都导入——app 若在
+  `async` 上下文里调它们，应自己挪到后台。
 - **私钥导入的上限**：带口令的 OpenSSH 容器 bcrypt 轮数最多 1024（`ssh-keygen -a` 默认 16；一轮约 20 ms，每次连接都要解一遍），
   更高的报新的 `PrivateKeyImportError.unsupportedKDFCost(rounds:maximum:)`（app 对这个 enum 的 `switch` 要补；建议文案让用户
   `ssh-keygen -p -a 100` 重新存）；salt 1–64 字节、kdfoptions 不能有多余字节，否则 `.malformedKey`。RSA 分量在做大数运算之前先核对

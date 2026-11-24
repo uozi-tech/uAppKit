@@ -505,3 +505,65 @@ final class LegacyStatusTests: XCTestCase {
         XCTAssertEqual(events.count, 2)
     }
 }
+
+/// 一次 `connect` 里每份凭据只解析一次：退级再试、两跳用同一份凭据时都不重新导入私钥（带口令的要跑 bcrypt）。
+final class CredentialResolutionTests: XCTestCase {
+    private func keyServer(_ keys: [String], customize: @escaping (inout SSHTestServer.Configuration) -> Void = { _ in })
+        async throws -> SSHTestServer {
+        let authorized = try keys.map { try TestSSH.publicKey(ofPrivateKey: $0) }
+        return try await TestSSH.startServer(
+            authentication: SSHTestAuthentication(authorizedKeys: [TestSSH.username: authorized]), customize: customize)
+    }
+
+    func testFallbackRetryImportsTheKeyOnce() async throws {
+        let key = SSHKeyGenerator.generateEd25519(comment: "k").privateKeyText
+        let rsa = try SSHRSAPrivateKey(pemRepresentation: KeyImportFixtures.rsaPKCS1)
+        let server = try await keyServer([key]) { $0.useRSAHostKey(rsa, algorithms: [.sshRSA]) }
+        defer { Task { await server.stop() } }
+        let before = SSHClientFactory.keyImports.value
+        let client = try await TestSSH.connect(server, credential: .privateKey(pem: key, passphrase: nil))
+        await client.close()
+        XCTAssertEqual(server.events.acceptedConnections, 2, "退级再试了一次")
+        XCTAssertEqual(SSHClientFactory.keyImports.value - before, 1)
+    }
+
+    func testJumpHostImportsEachDistinctCredentialOnce() async throws {
+        let shared = SSHKeyGenerator.generateEd25519(comment: "shared").privateKeyText
+        let other = SSHKeyGenerator.generateEd25519(comment: "other").privateKeyText
+        let target = try await keyServer([shared, other])
+        let bastion = try await keyServer([shared])
+        defer { Task { await target.stop(); await bastion.stop() } }
+        func jump(_ pem: String) -> SSHJumpHost {
+            SSHJumpHost(host: bastion.host, port: bastion.port, username: TestSSH.username,
+                        credential: .privateKey(pem: pem, passphrase: nil))
+        }
+        var before = SSHClientFactory.keyImports.value
+        let sameKey = try await TestSSH.connect(target, credential: .privateKey(pem: shared, passphrase: nil), jumpHost: jump(shared))
+        await sameKey.close()
+        XCTAssertEqual(SSHClientFactory.keyImports.value - before, 1, "两跳同一份凭据只解析一次")
+
+        before = SSHClientFactory.keyImports.value
+        let twoKeys = try await TestSSH.connect(target, credential: .privateKey(pem: other, passphrase: nil), jumpHost: jump(shared))
+        await twoKeys.close()
+        XCTAssertEqual(SSHClientFactory.keyImports.value - before, 2)
+    }
+
+    /// 取消了的任务不再开始解析（解析本身在专门的队列上跑，不占协作线程池）。
+    func testCancelledTaskDoesNotStartAnImport() async throws {
+        let key = SSHKeyGenerator.generateEd25519(comment: "k").privateKeyText
+        let resolver = SSHCredentialResolver()
+        let before = SSHClientFactory.keyImports.value
+        // 取消了的任务不再开始解析。
+        let cancelled = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await resolver.authentication(username: "u", credential: .privateKey(pem: key + " ", passphrase: nil))
+        }
+        do {
+            _ = try await cancelled.value
+            XCTFail("应当被取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertEqual(SSHClientFactory.keyImports.value, before)
+    }
+}
