@@ -115,7 +115,7 @@ public final class SSHClient: Sendable {
     /// 断开原因；还连着时是 `nil`。
     public var disconnectReason: SSHDisconnectReason? { lifecycle.disconnectReason }
 
-    /// 挂一个断开观察者，可以挂任意多个。回调在连接的 EventLoop 上同步执行，别在里面阻塞。
+    /// 挂一个断开观察者，可以挂任意多个。回调同步执行（通常在连接的 EventLoop 上），别在里面阻塞。
     /// 已经断开时立刻回调一次。
     @discardableResult
     public func onDisconnect(_ observer: @escaping @Sendable (SSHDisconnectReason) -> Void) -> SSHDisconnectObserverToken {

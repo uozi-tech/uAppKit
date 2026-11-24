@@ -129,8 +129,8 @@ final class SSHSessionChannelTests: XCTestCase {
     }
 
     func testEOFAfterPeerEOF() async throws {
-        // 远端先关 stdout，再读完我们的 stdin。NIOSSH 0.15.2 在「对端已 EOF」时发 EOF 会拆通道，
-        // 等 NIOSSH 那条线的补丁；补上之后这条期望失败会变成通过（nonStrict，不会报错）。
+        // 远端先关 stdout，再读完我们的 stdin。NIOSSH 0.15.2 在「对端已 EOF」时发 EOF 会拆通道
+        // （ChildChannelStateMachine.sendChannelEOF 的状态分支写反了），撞上就跳过；NIOSSH 补上之后这条照常跑。
         let (server, client) = try await start(SSHTestExecHandler { context in
             await context.sendEOF()
             var count = 0
@@ -141,15 +141,13 @@ final class SSHSessionChannelTests: XCTestCase {
         let handle = try await client.openExec("read-after-eof")
         try await Task.sleep(for: .milliseconds(200))
         try await handle.write(ByteBuffer(string: "12345"))
-        XCTExpectFailure("NIOSSH 0.15.2：sendChannelEOF 在 halfClosedRemote 状态下抛 protocolViolation",
-                         options: .nonStrict())
         do {
             try await handle.sendEOF()
-            let status = await handle.exitStatus()
-            XCTAssertEqual(status, .exited(0))
-        } catch {
-            XCTFail("sendEOF failed: \(error)")
+        } catch let error as NIOSSHError where error.type == .protocolViolation {
+            throw XCTSkip("NIOSSH 0.15.2 缺陷：对端 EOF 之后本端发 EOF 被判为乱序（\(error)），等 NIOSSH 的补丁")
         }
+        let status = await handle.exitStatus()
+        XCTAssertEqual(status, .exited(0))
     }
 
     func testEnvironmentRejectionIsNotFatal() async throws {
