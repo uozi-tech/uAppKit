@@ -192,9 +192,25 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     `legacyAlgorithmStatusKnown == false` 表示 USSHCore 没读懂服务器的 KEXINIT（嗅探器的解析与 NIOSSH 一样宽松、也跳过它之前的
     IGNORE / DEBUG，剩下的只有超过 256 KiB 之类 NIOSSH 多半也连不上的情形）：这时空的 `legacyAlgorithmsInUse` 只说明 RSA 用户认证
     没用 `ssh-rsa`，传输层**不知道**；日志里另有一条「无法确定」的警告，进程内的记录不动。
-  - **为什么不削弱能连现代服务器的安全性**：协商取的是客户端最偏好、服务器也支持的那个，补上的旧算法一律排在全部现代算法之后；
-    双方报的算法列表算进交换哈希、由主机密钥签名，中间人删掉服务器报的现代算法签名就对不上，所以对主机密钥已被信任的服务器，攻击者
-    没法把连接逼到旧算法上。于是退级只会发生在真的什么更好的都不支持的服务器上。SHA-1 原理上仍然更弱，所以结果要报出来、记日志。
+  - **安全上的保证（准确地说）**：
+    - 中间人**能**触发那一次再试：第一次连接的 KEXINIT 是明文，把服务器的报价换成只剩 SHA-1 的算法，客户端就会补上旧算法再连
+      一次（多一次连接）。
+    - 中间人**不能**因此让一台还支持任何现代算法的服务器用上旧算法：补上的旧算法排在全部现代算法之后，第二次照样协商到现代算法；
+      再去改第二次的 KEXINIT，两端的交换哈希就不同，主机签名验不过，**连接失败**而不是悄悄降级。进程内的「需要旧算法」记录只在
+      认证成功、协商结果里真有旧算法之后才写，被篡改的握手什么也不留下。
+    - 这依赖 SHA-1 的抗碰撞性：服务器自己也还支持 `ssh-rsa` 时，中间人得在握手超时之内现场造出 SHA-1 碰撞（选择前缀碰撞约 2^63 次
+      运算，密钥交换是 SHA-256 时约 2^80 次）才能让 SHA-1 签名验得过。服务器不支持 `ssh-rsa`（OpenSSH 8.8 起的默认）时没有这个前提。
+    - 主机密钥区分不了共用同一把钥匙的几台机器：中间人本来就能把连接转去另一台；那台只支持 SHA-1 时自动退级让这次转向也连得上。
+    - SHA-1 原理上仍然更弱，所以结果要报出来、记日志。以上每一条都有用例（`LegacyFallbackTamperingTests`：伪造的 KEXINIT 经本机
+      中间人打到主机密钥已被信任的服务器）。
+  - **RSA 用户签名的 SHA-1 回退第一次连接就开着**（`legacyFallback: true` 时）：为的是主机密钥与密钥交换都现代、却只认 `ssh-rsa`
+    用户签名又不发 `server-sig-algs` 的服务器（OpenSSH 6.5–7.1），它们第一次就连得上，没有再试可等。能拿到 SHA-1 用户签名的只有
+    主机密钥已经按 app 的策略验过的那个对端，而且要它没宣告 `server-sig-algs`（或只列了 `ssh-rsa`）、又先后拒绝了两种 SHA-2 签名；
+    `server-sig-algs` 是加密送来的，线路上的中间人删不掉；签名以这条会话的会话标识开头，换到别的会话用不了。
+  - **一台主机密钥已被信任、从没需要过旧算法的服务器突然要旧算法**：USSHKit 不会拦（它只在内存里记、不知道「以前」）。app 想拦的话，
+    要做的是：在自己的主机记录里持久化「这台需要旧算法」（连上后看 `legacyAlgorithmsInUse` 非空就记、为空就清）；对已信任、没这个记号
+    的主机先以 `legacyFallback: false` 连，得到「没有共同算法」（`.handshakeFailed`）时问用户（「这台服务器现在只支持 SHA-1 旧算法，
+    可能是服务器降级了，也可能有人在中间篡改」），同意了再以 `legacyFallback: true` 连并记上。这需要 app 的界面与存储，USSHKit 不替它做。
   - `legacyFallback: false`：只用 `algorithms`，没有共同算法就报 `.handshakeFailed`（文案说明是哪一类、服务器报了什么）。
 - **协商到的算法**：USSHCore 的 `SSHClient.negotiatedAlgorithms`（`SSHNegotiatedAlgorithms`：密钥交换、主机密钥、加密、商定的 MAC 名、
   `encryptionIsAEAD` / `macInUse`、压缩）与 `rsaUserAuthenticationAlgorithm`（RSA 用户私钥成功时用的签名算法）。NIOSSH 不公开它自己的
