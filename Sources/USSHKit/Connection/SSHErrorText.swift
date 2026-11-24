@@ -87,12 +87,38 @@ nonisolated enum SSHErrorText {
         }
     }
 
-    /// 握手失败的细节：协商不出共同的算法单独说（多半是对端只剩旧算法，要在 app 里放宽算法集）。
-    static func describeHandshake(_ error: any Error) -> String {
-        if let sshError = error as? NIOSSHError, sshError.type == .keyExchangeNegotiationFailure {
-            return String(localized: "与服务器没有共同支持的算法（服务器可能只支持旧算法）", bundle: ModuleBundle.bundle)
+    /// 双方没有共同算法：说是哪一类、服务器报了什么。
+    ///
+    /// 三种情况分开说：服务器报的算法在 `.standard` 里（这次连接用的算法集比默认的还窄）；只在
+    /// `.legacyCompatible` 里（SHA-1 时代的旧算法，很旧的设备才只剩这些——默认会自动退到它们，看到这句说明这次
+    /// 连接关掉了自动退级）；本应用根本不支持（例如 CBC 加密、`hmac-md5`），换算法集也没用。
+    /// app 没有按主机打开旧算法的设置，所以文案只陈述「这次连接没有启用兼容旧设备的算法」，不指向某个设置项。
+    static func describe(_ failure: SSHAlgorithmNegotiationFailure) -> String {
+        guard let category = failure.category else {
+            return String(localized: "与服务器没有共同支持的算法", bundle: ModuleBundle.bundle)
         }
-        return describe(error)
+        let name = describe(category)
+        let offer = failure.serverOffer.isEmpty
+            ? String(localized: "无", bundle: ModuleBundle.bundle, comment: "服务器在这一类里什么算法都没报")
+            : failure.serverOffer.joined(separator: ", ")
+        let server = Set(failure.serverOffer)
+        if !server.isDisjoint(with: SSHAlgorithms.standard.names(of: category)) {
+            return String(localized: "这次连接没有启用服务器提供的任何\(name)算法（服务器提供：\(offer)）", bundle: ModuleBundle.bundle)
+        }
+        if !server.isDisjoint(with: SSHAlgorithms.legacyCompatible.names(of: category)) {
+            return String(localized: "服务器只提供 SHA-1 时代的旧\(name)算法（服务器提供：\(offer)）。这类算法安全性较低，通常只有很旧的设备还在用；这次连接没有启用兼容旧设备的算法。", bundle: ModuleBundle.bundle)
+        }
+        return String(localized: "本应用不支持服务器提供的任何\(name)算法（服务器提供：\(offer)）", bundle: ModuleBundle.bundle)
+    }
+
+    static func describe(_ category: SSHAlgorithmNegotiationFailure.Category) -> String {
+        switch category {
+        case .keyExchange: return String(localized: "密钥交换", bundle: ModuleBundle.bundle, comment: "算法类别，嵌在「…的任何%@算法」里")
+        case .hostKey: return String(localized: "主机密钥", bundle: ModuleBundle.bundle, comment: "算法类别，嵌在「…的任何%@算法」里")
+        case .encryption: return String(localized: "加密", bundle: ModuleBundle.bundle, comment: "算法类别，嵌在「…的任何%@算法」里")
+        case .mac: return String(localized: "消息认证（MAC）", bundle: ModuleBundle.bundle, comment: "算法类别，嵌在「…的任何%@算法」里")
+        case .compression: return String(localized: "压缩", bundle: ModuleBundle.bundle, comment: "算法类别，嵌在「…的任何%@算法」里")
+        }
     }
 
     /// 认证失败的原因：按实际发出过的方式说；什么都没发出过、或发出过的方式服务器根本不收，
@@ -159,7 +185,9 @@ extension SSHClientError: LocalizedError {
         case .authenticationDelegateFailed(let error):
             return String(localized: "认证过程出错：\(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
         case .handshakeFailed(let error):
-            return String(localized: "SSH 握手失败：\(SSHErrorText.describeHandshake(error))", bundle: ModuleBundle.bundle)
+            return String(localized: "SSH 握手失败：\(SSHErrorText.describe(error))", bundle: ModuleBundle.bundle)
+        case .noCommonAlgorithm(let failure):
+            return String(localized: "SSH 握手失败：\(SSHErrorText.describe(failure))", bundle: ModuleBundle.bundle)
         case .connectionClosed(let reason):
             return SSHErrorText.describe(reason)
         }

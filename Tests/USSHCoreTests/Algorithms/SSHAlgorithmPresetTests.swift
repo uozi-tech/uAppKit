@@ -92,27 +92,48 @@ final class SSHAlgorithmPresetTests: XCTestCase {
 
     // MARK: RSA 用户认证的尝试顺序
 
+    /// 四种情形：宣告了且有 RSA、宣告了但没有 RSA、没宣告且允许 SHA-1、没宣告且不允许。
     func testRSAUserAuthPlanWithoutServerSigAlgs() {
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: false, serverSignatureAlgorithms: nil),
-                       [.rsaSHA2_512, .rsaSHA2_256])
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: true, serverSignatureAlgorithms: nil),
-                       [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
+        let plan = SSHRSAUserAuthenticationPlan.algorithms
+        XCTAssertEqual(plan(false, nil), [.rsaSHA2_512, .rsaSHA2_256], "没宣告、不允许 SHA-1：只试两个 SHA-2")
+        XCTAssertEqual(plan(true, nil), [.rsaSHA2_512, .rsaSHA2_256, .sshRSA], "没宣告、允许 SHA-1：SHA-2 都被拒才轮到 ssh-rsa")
     }
 
     func testRSAUserAuthPlanWithServerSigAlgsUsesOnlyListedAlgorithms() {
         let plan = SSHRSAUserAuthenticationPlan.algorithms
-        // OpenSSH 的典型宣告。
+        // 宣告了且有 RSA：OpenSSH 的典型宣告。
         let openSSH = ["ssh-ed25519", "ecdsa-sha2-nistp256", "rsa-sha2-512", "rsa-sha2-256"]
         XCTAssertEqual(plan(false, openSSH), [.rsaSHA2_512, .rsaSHA2_256])
         XCTAssertEqual(plan(true, openSSH), [.rsaSHA2_512, .rsaSHA2_256])
         // 只支持 256：第一次就用 256，不再试 512。
         XCTAssertEqual(plan(false, ["rsa-sha2-256"]), [.rsaSHA2_256])
-        // 只支持 ssh-rsa：允许旧算法时第一次就用它；不允许时不试 RSA。
+        // 同时列了 SHA-2 与 ssh-rsa：有更好的就永远不出 ssh-rsa。
+        XCTAssertEqual(plan(true, ["ssh-rsa", "rsa-sha2-256"]), [.rsaSHA2_256])
+        // 只列了 ssh-rsa：允许 SHA-1 时第一次就用它；不允许时不试 RSA。
         XCTAssertEqual(plan(true, ["ssh-rsa"]), [.sshRSA])
         XCTAssertEqual(plan(false, ["ssh-rsa"]), [])
-        // 宣告了但没有 RSA：不试 RSA。
+        // 宣告了但没有 RSA：不试 RSA，允不允许 SHA-1 都一样。
         XCTAssertEqual(plan(false, ["ssh-ed25519"]), [])
+        XCTAssertEqual(plan(true, ["ssh-ed25519"]), [])
         XCTAssertEqual(plan(true, []), [])
+    }
+
+    /// SHA-1 回退开关与旧算法开关相互独立：只开前者也会在最后试 `ssh-rsa`，成功的是哪一次记在
+    /// `lastOfferedRSAAlgorithm`。
+    func testSHA1FallbackSwitchIsIndependentOfLegacyAlgorithms() throws {
+        let key = try SSHRSAPrivateKey(pemRepresentation: RSAFixtures.keys[1].pkcs1PEM)
+        let loop = EmbeddedEventLoop()
+        let delegate = SSHClientAuthDelegate(
+            authentication: SSHAuthentication(username: "u", methods: [.rsaPrivateKey(key)]),
+            allowsLegacyAlgorithms: false, allowsSHA1Fallback: true)
+        for _ in 0..<3 {
+            let promise = loop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
+            delegate.nextAuthenticationType(availableMethods: [.publicKey], serverSignatureAlgorithms: nil,
+                                            nextChallengePromise: promise)
+            XCTAssertNotNil(try promise.futureResult.wait())
+        }
+        XCTAssertEqual(delegate.attemptedRSAAlgorithms, [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
+        XCTAssertEqual(delegate.lastOfferedRSAAlgorithm, .sshRSA)
     }
 
     /// 认证 delegate 按计划一次一个算法地出价，服务器不再接受公钥就跳到下一个方式。

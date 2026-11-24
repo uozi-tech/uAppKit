@@ -207,6 +207,7 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
     private var methods: [SSHAuthenticationMethod]
     private let allowsLegacyAlgorithms: Bool
+    private let allowsSHA1Fallback: Bool
     private var index = 0
     private var activeDelegate: (any NIOSSHClientUserAuthenticationDelegate & Sendable)?
     /// 正在逐个算法尝试的 RSA 用户私钥与还没试的算法。
@@ -214,6 +215,8 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private(set) var attempted: [SSHAuthenticationMethod.Kind] = []
     /// 依次试过的 RSA 签名算法（测试用）。
     private(set) var attemptedRSAAlgorithms: [SSHRSASignatureAlgorithm] = []
+    /// 最近一次出价是 RSA 用户私钥时用的签名算法，别的方式时为 nil。认证成功时它就是成功的那一次。
+    private(set) var lastOfferedRSAAlgorithm: SSHRSASignatureAlgorithm?
     /// 服务器最后一次声明还接受的方式。
     private var lastAvailable: NIOSSHAvailableUserAuthenticationMethods = .all
 
@@ -221,10 +224,11 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     /// `nextAuthenticationType`）；没宣告时 `nil`。EXT_INFO 早于 SERVICE_ACCEPT，第一次被问时就已经在了。
     private(set) var serverSignatureAlgorithms: [String]?
 
-    init(authentication: SSHAuthentication, allowsLegacyAlgorithms: Bool) {
+    init(authentication: SSHAuthentication, allowsLegacyAlgorithms: Bool, allowsSHA1Fallback: Bool = false) {
         self.username = authentication.username
         self.methods = authentication.methods
         self.allowsLegacyAlgorithms = allowsLegacyAlgorithms
+        self.allowsSHA1Fallback = allowsSHA1Fallback
     }
 
     /// 认证失败的详情（列表用完时）。
@@ -255,6 +259,7 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     ) {
         lastAvailable = availableMethods
         self.serverSignatureAlgorithms = serverSignatureAlgorithms
+        lastOfferedRSAAlgorithm = nil
         if let delegate = activeDelegate {
             ask(delegate, availableMethods: availableMethods, promise: nextChallengePromise)
         } else if availableMethods.contains(.publicKey), let next = nextRSAAttempt() {
@@ -271,6 +276,7 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
         rsaAttempts = attempts
         attempted.append(.publicKey)
         attemptedRSAAlgorithms.append(algorithm)
+        lastOfferedRSAAlgorithm = algorithm
         let key = NIOSSHPrivateKey(rsaPrivateKey: attempts.key, algorithm: algorithm)
         return .init(username: username, serviceName: "", offer: .privateKey(.init(privateKey: key)))
     }
@@ -300,7 +306,7 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
             case .rsaPrivateKey(let key):
                 guard availableMethods.contains(.publicKey) else { continue }
                 let plan = SSHRSAUserAuthenticationPlan.algorithms(
-                    allowsLegacyAlgorithms: allowsLegacyAlgorithms,
+                    allowsSHA1: allowsLegacyAlgorithms || allowsSHA1Fallback,
                     serverSignatureAlgorithms: serverSignatureAlgorithms)
                 rsaAttempts = (key, plan[...])
                 guard let offer = nextRSAAttempt() else { continue }
@@ -348,18 +354,23 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
 
 /// RSA 用户私钥按哪些签名算法、以什么顺序尝试（每个算法一次认证尝试）。
 enum SSHRSAUserAuthenticationPlan {
-    /// 候选按偏好：`rsa-sha2-512`、`rsa-sha2-256`，允许旧算法时最后是 `ssh-rsa`。
+    /// 候选按偏好：`rsa-sha2-512`、`rsa-sha2-256`，`allowsSHA1` 时最后是 `ssh-rsa`。
     ///
-    /// - Parameter serverSignatureAlgorithms: 服务器的 `server-sig-algs`。
-    ///   - 宣告了：只试其中有的，按我们的偏好顺序，第一次就用最好的那个；一个 RSA 算法都没有就不试 RSA
-    ///     （OpenSSH 7.2 起都发这个列表，没列的它不会接受，试了只是白占认证次数）。
-    ///   - 没宣告（`nil`，老服务器）：按候选顺序逐个试。
+    /// - Parameters:
+    ///   - allowsSHA1: 连接允许旧算法，或打开了 `allowsSHA1RSAUserAuthenticationFallback`。
+    ///   - serverSignatureAlgorithms: 服务器的 `server-sig-algs`。
+    ///     - 宣告了：严格照它。只试其中有的 SHA-2 算法，按我们的偏好，第一次就用最好的那个；`ssh-rsa` 只在它被列出、
+    ///       又没有任何 SHA-2 的 RSA 算法时才用；一个 RSA 算法都没有就不试 RSA（OpenSSH 7.2 起都发这个列表，
+    ///       没列的它不会接受，试了只是白占认证次数）。
+    ///     - 没宣告（`nil`，老服务器）：按候选顺序逐个试，SHA-2 都被拒了才轮到 `ssh-rsa`。
     static func algorithms(
-        allowsLegacyAlgorithms: Bool,
+        allowsSHA1: Bool,
         serverSignatureAlgorithms: [String]?
     ) -> [SSHRSASignatureAlgorithm] {
-        let candidates = SSHRSASignatureAlgorithm.modern + (allowsLegacyAlgorithms ? SSHRSASignatureAlgorithm.legacy : [])
-        guard let serverSignatureAlgorithms else { return candidates }
-        return candidates.filter { serverSignatureAlgorithms.contains($0.name) }
+        let sha1 = allowsSHA1 ? SSHRSASignatureAlgorithm.legacy : []
+        guard let serverSignatureAlgorithms else { return SSHRSASignatureAlgorithm.modern + sha1 }
+        let modern = SSHRSASignatureAlgorithm.modern.filter { serverSignatureAlgorithms.contains($0.name) }
+        guard modern.isEmpty else { return modern }
+        return sha1.filter { serverSignatureAlgorithms.contains($0.name) }
     }
 }

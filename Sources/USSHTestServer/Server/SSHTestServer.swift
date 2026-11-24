@@ -157,6 +157,8 @@ public struct SSHTestServerEvents: Sendable {
     public var cancelledRemoteForwards: [String] = []
     /// 断开过的连接数。
     public var closedConnections = 0
+    /// 接受过的 TCP 连接数（含已断开的）。
+    public var acceptedConnections = 0
 }
 
 /// 服务端共享的状态（所有连接共用）。
@@ -197,6 +199,7 @@ final class SSHTestServerState: Sendable {
         try channel.pipeline.syncOperations.addHandler(freezer)
         let boundFreezer = NIOLoopBound(freezer, eventLoop: channel.eventLoop)
         connections.withLockedValue { $0[id] = Connection(channel: channel, freezer: boundFreezer, handler: nil) }
+        record { $0.acceptedConnections += 1 }
         channel.closeFuture.whenComplete { [self] _ in
             _ = connections.withLockedValue { $0.removeValue(forKey: id) }
             record { $0.closedConnections += 1 }

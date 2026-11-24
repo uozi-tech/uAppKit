@@ -36,7 +36,8 @@ extension SSHClient {
         /// NIOSSH 里又能再收一窗。默认 8 MiB 窗口即每条通道约 16 MiB。
         public var maximumPacketSize: Int
 
-        /// 额外的算法。默认只有 NIOSSH 自带的那些。
+        /// 用哪些算法。这里默认 `.builtInOnly`（只有 NIOSSH 自带的那些），协议层不替产品做选择；
+        /// 产品层的默认在 USSHKit（`USSHKitIntegration.connect` 默认 `.standard`）。
         public var algorithms: SSHAlgorithms
 
         /// 跑这条连接的 EventLoopGroup。`nil` 用 `MultiThreadedEventLoopGroup.singleton`。
@@ -58,6 +59,14 @@ extension SSHClient {
         /// 什么时候自动重新交换密钥（任一方向在当前密钥下的加密包数或字节数到达上限）。默认与 NIOSSH 相同：
         /// 2^31 个包或 1 GiB。重新交换时主机密钥按第一次交换钉住，不会再调主机密钥回调。
         public var rekeyLimits: NIOSSHRekeyLimits = .default
+
+        /// RSA 用户私钥在服务器**没有**宣告 `server-sig-algs` 时，`rsa-sha2-512` / `rsa-sha2-256` 都被拒之后，
+        /// 在同一条连接上最后再试一次 SHA-1 的 `ssh-rsa`（OpenSSH 7.2 以前的服务器只认它）。默认关。
+        ///
+        /// 与 `algorithms` 的旧算法开关相互独立：那一项管主机密钥 / 密钥交换 / 加密 / MAC，这一项只管用户认证的签名。
+        /// 服务器宣告了 `server-sig-algs` 时严格照它：只有它列了 `ssh-rsa`、又没列任何 SHA-2 的 RSA 算法时才用 `ssh-rsa`
+        /// （这一项或 `algorithms.allowsLegacyAlgorithms` 打开其一即可）。实际用了哪个看 `SSHClient.rsaUserAuthenticationAlgorithm`。
+        public var allowsSHA1RSAUserAuthenticationFallback = false
 
         public init(
             authentication: SSHAuthentication,
@@ -137,11 +146,13 @@ public enum SSHAuthenticationMethod: Sendable {
     case password(String)
     /// 公钥（RFC 4252 §7）：ed25519、ECDSA P-256/384/521，以及以后经 NIOSSH 扩展接口注册的类型。
     case privateKey(NIOSSHPrivateKey)
-    /// RSA 用户私钥（RFC 8332）。依次以 `rsa-sha2-512`、`rsa-sha2-256` 签名尝试，连接允许旧算法时最后再试
+    /// RSA 用户私钥（RFC 8332）。依次以 `rsa-sha2-512`、`rsa-sha2-256` 签名尝试，连接允许旧算法
+    /// （`SSHAlgorithms.allowsLegacyAlgorithms`）或打开了 `allowsSHA1RSAUserAuthenticationFallback` 时最后再试
     /// SHA-1 的 `ssh-rsa`；每个算法算服务器的一次认证尝试，第一次成功就停。
     ///
-    /// 服务器宣告了 `server-sig-algs`（RFC 8308，OpenSSH 7.2 起都发）时只试其中有的、第一次就用最好的那个，
-    /// 一个 RSA 算法都没列就跳过这把钥匙；没宣告时按上面的顺序逐个试（`SSHRSAUserAuthenticationPlan`）。
+    /// 服务器宣告了 `server-sig-algs`（RFC 8308，OpenSSH 7.2 起都发）时只试其中有的 SHA-2 算法、第一次就用最好的那个；
+    /// `ssh-rsa` 只在它被列出、又没有任何 SHA-2 的 RSA 算法时才用；一个 RSA 算法都没列就跳过这把钥匙
+    /// （`SSHRSAUserAuthenticationPlan`）。
     case rsaPrivateKey(SSHRSAPrivateKey)
     /// 带 OpenSSH 证书的公钥。
     case certifiedPrivateKey(NIOSSHPrivateKey, certificate: NIOSSHCertifiedPublicKey)
@@ -215,7 +226,8 @@ public struct SSHUntrustedHostKey: Error, Sendable, Hashable {
 ///
 /// 四个列表都按偏好排序，NIOSSH 按这个顺序报给服务器、取第一个双方都支持的。
 /// `allowsLegacyAlgorithms == false` 时列表里的 SHA-1 旧算法（`hmac-sha1*`、`diffie-hellman-group14-sha1`、
-/// `ssh-rsa` 主机密钥）一律被去掉，RSA 用户密钥也不会以 `ssh-rsa` 尝试——放进列表不等于启用，必须同时打开开关。
+/// `ssh-rsa` 主机密钥）一律被去掉，RSA 用户密钥也不会以 `ssh-rsa` 尝试（除非连接另外打开了
+/// `SSHClient.Configuration.allowsSHA1RSAUserAuthenticationFallback`）——放进列表不等于启用，必须同时打开开关。
 ///
 /// 只管「用哪些算法」；什么时候重新交换密钥（`rekeyLimits`）在 `SSHClient.Configuration` 上，不在这里。
 public struct SSHAlgorithms: Sendable {
@@ -282,7 +294,8 @@ public struct SSHAlgorithms: Sendable {
     )
 
     /// ⚠️ 只为连老设备（旧的网络设备、嵌入式 sshd）：`.standard` 再加 SHA-1 的 `ssh-rsa`（主机密钥与用户认证）、
-    /// `diffie-hellman-group14-sha1`、AES-CTR + `hmac-sha1`（ETM 在前）。要用户明确选用；它会触发进程级的
+    /// `diffie-hellman-group14-sha1`、AES-CTR + `hmac-sha1`（ETM 在前）。USSHCore 里要调用方明确选用（USSHKit 在服务器
+    /// 什么更好的都不支持时自动退到它，见 USSHKit 的 `SSHLegacyFallback`）；它会触发进程级的
     /// `SSHAlgorithms.registerLegacyAlgorithms()`（不影响别的连接，见那里的说明）。
     public static let legacyCompatible = SSHAlgorithms(
         transportProtectionSchemes: standard.transportProtectionSchemes

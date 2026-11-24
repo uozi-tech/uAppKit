@@ -39,13 +39,17 @@ final class ConnectionConfigurationTests: XCTestCase {
                        SSHClient.maximumPacketSizeRange.upperBound)
     }
 
-    func testDefaultsToTodaysAlgorithmsAndPacketSize() throws {
+    func testDefaultsToStandardAlgorithmsAndTodaysPacketSize() throws {
         let configuration = try configuration()
         XCTAssertEqual(configuration.maximumPacketSize, SSHClient.defaultMaximumPacketSize)
+        // USSHKit 的默认是 `.standard`（NIOSSH 自带的在前，后面补 SHA-2 时代的算法），不含 SHA-1。
         XCTAssertEqual(configuration.algorithms.transportProtectionSchemes.map { $0.cipherName },
-                       SSHAlgorithms.builtInOnly.transportProtectionSchemes.map { $0.cipherName },
-                       "默认只用 NIOSSH 自带的算法")
-        XCTAssertEqual(configuration.algorithms.hostKeyAlgorithms, SSHAlgorithms.builtInOnly.hostKeyAlgorithms)
+                       SSHAlgorithms.standard.transportProtectionSchemes.map { $0.cipherName })
+        XCTAssertEqual(configuration.algorithms.hostKeyAlgorithms, SSHAlgorithms.standard.hostKeyAlgorithms)
+        XCTAssertEqual(configuration.algorithms.keyExchangeAlgorithms, SSHAlgorithms.standard.keyExchangeAlgorithms)
+        XCTAssertFalse(configuration.algorithms.allowsLegacyAlgorithms)
+        XCTAssertEqual(Array(configuration.algorithms.hostKeyAlgorithms.prefix(SSHAlgorithms.builtInHostKeyAlgorithms.count)),
+                       SSHAlgorithms.builtInHostKeyAlgorithms, "自带的排在前面：今天连得上的服务器协商结果不变")
     }
 
     /// TCP 建连与握手各给 connectTimeout；等主机密钥只有 `.ask` 给审批时限。
