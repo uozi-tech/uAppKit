@@ -159,7 +159,8 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     不会再在死连接上开通道），正在转发的连接随各自的 SSH 通道结束，关掉连接，然后调一次 `onDisconnect(reason)`（收完才调）。
     `isConnected` 从此为 false、`disconnectReason` 是那个原因；隧道不会自己重连，app 要换一条新的。本端 `close()` 不回调。
   - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。它们也看 SFTP 通道：
-    服务端的 `sftp-server` 退出（崩溃、被杀、闲置超时）而 sshd 还留着 SSH 连接时，`isConnected` 同样变成 false，`disconnectReason`
+    服务端的 `sftp-server` 退出（崩溃、被杀、闲置超时）而 sshd 还留着 SSH 连接时，`isConnected` 同样变成 false（通道关掉后约
+    200 ms：整条连接在断时子通道先关、原因差一拍才定，先等一下，免得把连接的断开说成只是通道关了），`disconnectReason`
     是 `.transportError(SFTPError.connectionClosed)`（`userDescription`：「连接中断：SFTP 通道已断开」）。以前只看 SSH 连接，
     这种会话一直显示活着、请求却都失败。
 - **算法预设**（`SSHAlgorithms`）：

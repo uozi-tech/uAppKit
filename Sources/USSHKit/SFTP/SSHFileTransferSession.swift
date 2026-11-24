@@ -52,10 +52,22 @@ public actor SSHFileTransferSession {
     private let sftp: SFTPClient
     /// 本端调过 `close()`（之后 `disconnectReason` 为 nil）。`nonisolated` 的属性要读它，所以不放在 actor 的状态里。
     private let closedLocally = SessionFlag()
+    /// SFTP 通道关了、SSH 连接却还在（服务端的 sftp-server 退出了）。
+    private let sftpChannelLost = SessionFlag()
+
+    /// 通道关了之后等这么久再看 SSH 连接：连接本身在断时，子通道比连接的断开原因先一步关掉，原因差一拍才落定。
+    static let channelLossSettle: Duration = .milliseconds(200)
 
     private init(connected: ConnectedClient, sftp: SFTPClient) {
         self.connected = connected
         self.sftp = sftp
+        let lost = sftpChannelLost
+        sftp.closeFuture.whenComplete { _ in
+            Task {
+                try? await Task.sleep(for: Self.channelLossSettle)
+                if connected.isConnected { lost.set() }
+            }
+        }
     }
 
     /// Inbound window of the SFTP channel this session opens. The window, not
@@ -126,18 +138,21 @@ public actor SSHFileTransferSession {
     /// still open. The server's `sftp-server` process can exit (crash, killed,
     /// idle timeout) while sshd keeps the SSH connection: the session is then
     /// just as dead. Once false the session never recovers: open a new one.
-    public nonisolated var isConnected: Bool { connected.isConnected && sftp.isActive }
+    public nonisolated var isConnected: Bool { connected.isConnected && !sftpChannelLost.isSet }
 
     /// Why the session went away, or nil while it is up or after a local
     /// `close()`. The SSH connection's reason when it is lost; when only the SFTP
     /// channel closed (the SSH connection is still up) it is
-    /// `.transportError(SFTPError.connectionClosed)`.
+    /// `.transportError(SFTPError.connectionClosed)`. The channel-only case is
+    /// recognised `channelLossSettle` (200 ms) after the channel closes: when the
+    /// whole connection is going down the channel closes a moment before the
+    /// connection's reason is known, and that reason wins.
     public nonisolated var disconnectReason: SSHDisconnectReason? {
         if closedLocally.isSet { return nil }
         let reason = connected.target.disconnectReason ?? connected.bastion?.disconnectReason
         if let reason { return reason.isLocalClose ? nil : reason }
-        // 连接还在（或原因还差一拍才落定），SFTP 通道却已经关了：服务端的 sftp-server 退出了。
-        return sftp.isActive ? nil : .transportError(SFTPError.connectionClosed)
+        // 连接还在，SFTP 通道却已经关了：服务端的 sftp-server 退出了。
+        return sftpChannelLost.isSet ? .transportError(SFTPError.connectionClosed) : nil
     }
 
     /// `stat(2)` the remote file, returning size and modification date.
