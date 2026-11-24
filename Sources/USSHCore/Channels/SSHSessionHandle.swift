@@ -133,7 +133,7 @@ public final class SSHSessionHandle: Sendable {
     /// 写到远端的标准输入。返回时数据已交给连接（对端窗口满时会等）。任务被取消时立刻抛
     /// `CancellationError`（数据可能已经排进去了）。
     public func write(_ buffer: ByteBuffer) async throws {
-        guard !closed.isClosed else { throw SSHChannelError.channelClosed }
+        guard !abandonedLocally else { throw SSHChannelError.channelClosed }
         let promise = channel.eventLoop.makePromise(of: Void.self)
         channel.writeAndFlush(SSHChannelData(type: .channel, data: .byteBuffer(buffer)), promise: promise)
         try await awaitWrite(promise.futureResult)
@@ -146,7 +146,7 @@ public final class SSHSessionHandle: Sendable {
 
     /// 发 EOF（关掉远端的标准输入）。之后不能再写。对端先发过 EOF 也没关系（RFC 4254 §5.3）。
     public func sendEOF() async throws {
-        guard !closed.isClosed else { throw SSHChannelError.channelClosed }
+        guard !abandonedLocally else { throw SSHChannelError.channelClosed }
         let promise = channel.eventLoop.makePromise(of: Void.self)
         channel.close(mode: .output, promise: promise)
         try await awaitWrite(promise.futureResult)
@@ -208,11 +208,15 @@ public final class SSHSessionHandle: Sendable {
         closed.markClosed()
     }
 
+    /// 本端 `close()` 等过了宽限、在本端收了尾，NIOSSH 却还留着这条通道。这时的写入直接报通道已关；通道真的关了
+    /// （对端关、连接断了）照旧走下面的错误归类（连接断了报 `connectionClosed` 及原因）。
+    private var abandonedLocally: Bool { closed.isClosed && channel.isActive }
+
     /// 通道是否还开着（本端关过、等过了宽限的也算关了）。
     public var isActive: Bool { channel.isActive && !closed.isClosed }
 
     func sendRequest(_ event: any Sendable, kind: SSHChannelRequestKind, wantReply: Bool) async throws {
-        guard !closed.isClosed else { throw SSHChannelError.channelClosed }
+        guard !abandonedLocally else { throw SSHChannelError.channelClosed }
         let requests = self.requests
         let future = channel.eventLoop.flatSubmit {
             requests.value.send(event, kind: kind, wantReply: wantReply)
