@@ -132,12 +132,11 @@ let result = try kex.complete(
 
 `Tests/USSHCoreTests/Algorithms/`：
 
-- **证明线上兼容的**：`TransportProtectionOpenSSHInteropTests`（本机真实 sshd，每种加密方式登录、exec、收 300 KB、核对 sshd 自己的协商日志
-  与至少一次换钥）；`SSHRSATests` 里 ssh-keygen 产出的公钥 blob 逐字节往返、`ssh-keygen -Y sign` 的签名 blob 与我们签出的
+- **证明线上兼容的**：`Interop/OpenSSHAlgorithmInteropTests`（本机真实 sshd，经 `SSHClient`：每种加密方式 × 内置 / DH 密钥交换
+  登录、exec、收 300 KB、核对 sshd 自己的协商日志、strict KEX 与至少一次换钥；RSA 主机 / 用户密钥；每种 DH）；`SSHRSATests` 里 ssh-keygen 产出的公钥 blob 逐字节往返、`ssh-keygen -Y sign` 的签名 blob 与我们签出的
   逐字节相同、openssl 三种摘要的签名逐字节相同、与 Security.framework 双向互验。
 - **独立实现对照（算法正确，但没经过真实对端）**：NIST SP 800-38A、RFC 4231 / 2202 已知答案；CommonCrypto 参考实现逐字节
   比对整包；逐块 AES 参考实现核对 2^32 / 2^64 / 2^128 进位；python3 独立算的 DH 向量；Machin 公式现算 π 核对 RFC 3526 素数。
-  DH、RSA 主机 / 用户密钥经扩展接口与真实 sshd 的互通在 `Interop/OpenSSHAlgorithmInteropTests`。
 - **自洽**：NIOSSH 客户端 / 服务端内存背靠背协商与换钥；篡改、截断、畸形 blob、越界公开值。
 
 夹具由 `Tests/USSHCoreTests/Algorithms/Fixtures/generate-fixtures.sh` 用 ssh-keygen / openssl / python3 重新生成。
