@@ -45,6 +45,11 @@ public struct SSHClientConfiguration {
     /// tests turn it off to play a peer that predates it.
     internal var offersStrictKeyExchange = true
 
+    /// When to start a key re-exchange automatically: once either direction has carried this many packets or
+    /// bytes under the current keys. Defaults to 2^31 packets or 1 GiB; `.disabled` never rekeys on its own.
+    /// `NIOSSHHandler.rekey()` starts one on demand.
+    public var rekeyLimits: NIOSSHRekeyLimits = .default
+
     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17` (128 KiB).

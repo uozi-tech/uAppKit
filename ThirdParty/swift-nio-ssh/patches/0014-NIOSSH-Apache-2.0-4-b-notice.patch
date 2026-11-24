@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
-Date: Tue, 24 Nov 2026 13:26:01 +0800
-Subject: [PATCH 12/12] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
+Date: Tue, 24 Nov 2026 13:25:31 +0800
+Subject: [PATCH 14/14] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
  =?UTF-8?q?=E7=9A=84=E6=96=87=E4=BB=B6=E5=8A=A0=E4=BF=AE=E6=94=B9=E5=A3=B0?=
  =?UTF-8?q?=E6=98=8E=EF=BC=88Apache-2.0=20=C2=A74(b)=20notice=EF=BC=89?=
 MIME-Version: 1.0
@@ -10,7 +10,8 @@ Content-Transfer-Encoding: 8bit
 
 Apache-2.0 第 4(b) 条要求被修改的文件带有显著的修改声明。前面补丁改过的 23 个上游源文件和
 1 个上游测试文件（ChildChannelMultiplexerTests.swift）头部各加一行。补丁新增的文件（CustomKeys、CustomKeyExchange、
-SSHKeyDerivation、ExtensionNegotiation、GenericGlobalRequest 与十个测试文件）文件头本身写明出自 uAppKit，不用再加。
+SSHKeyDerivation、ExtensionNegotiation、GenericGlobalRequest、RekeyLimits 与十一个测试文件）文件头本身写明出自
+uAppKit，不用再加。
 
 以后的补丁改到别的上游文件，就在这个补丁里给那个文件也加一行；这个补丁始终排在最后。
 ---
@@ -106,7 +107,7 @@ index 2a4de99..cd92048 100644
  
  import NIOCore
 diff --git a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift
-index dc89cff..f84e38b 100644
+index ed5fe55..5d19a9a 100644
 --- a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
 +++ b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
 @@ -10,6 +10,8 @@
@@ -210,7 +211,7 @@ index 51a7ba4..665ec32 100644
  
  /// An error thrown by NIOSSH.
 diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
-index 44b9014..331ae95 100644
+index 5b307ae..d16325e 100644
 --- a/Sources/NIOSSH/NIOSSHHandler.swift
 +++ b/Sources/NIOSSH/NIOSSHHandler.swift
 @@ -10,6 +10,8 @@
@@ -223,7 +224,7 @@ index 44b9014..331ae95 100644
  
  import NIOCore
 diff --git a/Sources/NIOSSH/SSHClientConfiguration.swift b/Sources/NIOSSH/SSHClientConfiguration.swift
-index 2c82cda..6f9db24 100644
+index 3b686de..bfea2e1 100644
 --- a/Sources/NIOSSH/SSHClientConfiguration.swift
 +++ b/Sources/NIOSSH/SSHClientConfiguration.swift
 @@ -10,6 +10,8 @@
@@ -249,7 +250,7 @@ index a4da4c6..c3266eb 100644
  
  import NIOCore
 diff --git a/Sources/NIOSSH/SSHPacketParser.swift b/Sources/NIOSSH/SSHPacketParser.swift
-index b975e9c..a7984f4 100644
+index 1573448..cfc3781 100644
 --- a/Sources/NIOSSH/SSHPacketParser.swift
 +++ b/Sources/NIOSSH/SSHPacketParser.swift
 @@ -10,6 +10,8 @@
@@ -262,7 +263,7 @@ index b975e9c..a7984f4 100644
  
  import NIOCore
 diff --git a/Sources/NIOSSH/SSHPacketSerializer.swift b/Sources/NIOSSH/SSHPacketSerializer.swift
-index e9a6272..34ccd06 100644
+index 49577c0..a93d356 100644
 --- a/Sources/NIOSSH/SSHPacketSerializer.swift
 +++ b/Sources/NIOSSH/SSHPacketSerializer.swift
 @@ -10,6 +10,8 @@
@@ -275,7 +276,7 @@ index e9a6272..34ccd06 100644
  
  import NIOCore
 diff --git a/Sources/NIOSSH/SSHServerConfiguration.swift b/Sources/NIOSSH/SSHServerConfiguration.swift
-index d23bace..fddc329 100644
+index fff622c..b0dbeed 100644
 --- a/Sources/NIOSSH/SSHServerConfiguration.swift
 +++ b/Sources/NIOSSH/SSHServerConfiguration.swift
 @@ -10,6 +10,8 @@

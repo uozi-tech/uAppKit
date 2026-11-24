@@ -65,6 +65,9 @@ public final class NIOSSHHandler {
 
     private var pendingGlobalRequestResponses: CircularBuffer<PendingGlobalRequestResponse?>
 
+    // Messages from child channels written while a key exchange forbids channel messages; sent in order afterwards.
+    private var queuedChildMessages = CircularBuffer<(SSHMessage, EventLoopPromise<Void>?)>(initialCapacity: 4)
+
     /// Construct a new ``NIOSSHHandler``.
     ///
     /// - parameters:
@@ -157,6 +160,9 @@ extension NIOSSHHandler: ChannelDuplexHandler {
 
         self.dropAllPendingGlobalRequests(ChannelError.eof)
         self.dropUnsatisfiedGlobalRequests(ChannelError.eof)
+        while let next = self.queuedChildMessages.popFirst() {
+            next.1?.fail(ChannelError.eof)
+        }
         while let next = self.pendingChannelInitializations.popFirst() {
             next.promise?.fail(ChannelError.eof)
         }
@@ -196,6 +202,9 @@ extension NIOSSHHandler: ChannelDuplexHandler {
                 loop: context.eventLoop
             ) {
                 try self.processInboundMessageResult(result, context: context)
+                // Our NEWKEYS may just have gone out: release channel messages held during the key exchange.
+                self.sendQueuedChildMessagesIfPossible()
+                self.rekeyIfTrafficLimitReached()
             }
         } catch {
             context.fireErrorCaught(error)
@@ -213,6 +222,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
 
         self.createPendingChannelsIfPossible()
         self.sendGlobalRequestsIfPossible()
+        self.sendQueuedChildMessagesIfPossible()
     }
 
     private func writeMessage(
@@ -233,6 +243,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
         }
 
         context.write(self.wrapOutboundOut(self.outboundFrameBuffer), promise: promise)
+        self.rekeyIfTrafficLimitReached()
     }
 
     private func processInboundMessageResult(
@@ -253,6 +264,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
                         try self.writeMessage(message, context: context)
                         self.pendingWrite = false
                         context.flush()
+                        self.sendQueuedChildMessagesIfPossible()
                     } catch {
                         context.fireErrorCaught(error)
                     }
@@ -529,6 +541,42 @@ extension NIOSSHHandler {
 // MARK: Initiate rekeying
 
 extension NIOSSHHandler {
+    /// Starts a key re-exchange now.
+    ///
+    /// Does nothing and returns `false` unless the connection is established and no key exchange is in flight
+    /// (one we or the peer started). Channel writes made during the exchange are held and sent once it is done.
+    /// Key re-exchanges also start automatically after `rekeyLimits` worth of traffic.
+    ///
+    /// This function is **not** thread-safe: it may only be called from on the channel.
+    @discardableResult
+    public func rekey() -> Bool {
+        guard let context = self.context, self.stateMachine.isActive else {
+            return false
+        }
+        do {
+            try self._rekey()
+            return true
+        } catch {
+            context.fireErrorCaught(error)
+            return false
+        }
+    }
+
+    /// Starts a key re-exchange if the traffic under the current keys reached the configured limits.
+    func rekeyIfTrafficLimitReached() {
+        guard let traffic = self.stateMachine.trafficSinceKeyExchange else {
+            // Not established, or a key exchange is already in flight.
+            return
+        }
+        let limits = self.stateMachine.role.rekeyLimits
+        if limits.isReached(by: traffic.inbound) || limits.isReached(by: traffic.outbound) {
+            self.rekey()
+        }
+    }
+}
+
+
+extension NIOSSHHandler {
     // This function mostly exists for testing purposes: we don't initiate re-keying today because it's not
     // well-supported by evidence. But we want to be able to test against implementations who do, so we have support for
     // kicking it off.
@@ -564,10 +612,36 @@ extension NIOSSHHandler: SSHMultiplexerDelegate {
             return
         }
 
+        // A key exchange is in flight: hold the message (behind any already held) until our NEWKEYS is out.
+        guard self.queuedChildMessages.isEmpty, self.stateMachine.canSendChannelMessages else {
+            self.queuedChildMessages.append((message, promise))
+            return
+        }
+
         do {
             try self.writeMessage(SSHMultiMessage(message), context: context, promise: promise)
         } catch {
             promise?.fail(error)
+        }
+    }
+
+    /// Sends child channel messages held during a key exchange, once channel messages are allowed again.
+    fileprivate func sendQueuedChildMessagesIfPossible() {
+        guard let context = self.context, !self.queuedChildMessages.isEmpty else {
+            return
+        }
+        var wrote = false
+        while self.stateMachine.canSendChannelMessages, let next = self.queuedChildMessages.popFirst() {
+            wrote = true
+            do {
+                try self.writeMessage(SSHMultiMessage(next.0), context: context, promise: next.1)
+            } catch {
+                next.1?.fail(error)
+            }
+        }
+        if wrote, !self.expectingChannelReadComplete {
+            self.pendingWrite = false
+            context.flush()
         }
     }
 

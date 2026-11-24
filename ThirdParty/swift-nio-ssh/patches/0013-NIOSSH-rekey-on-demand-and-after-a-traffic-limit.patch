@@ -1,0 +1,485 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 13:25:19 +0800
+Subject: [PATCH 13/14] =?UTF-8?q?NIOSSH:=20=E6=8C=89=E9=9C=80=E4=B8=8E?=
+ =?UTF-8?q?=E6=8C=89=E6=B5=81=E9=87=8F=E8=87=AA=E5=8A=A8=E9=87=8D=E6=96=B0?=
+ =?UTF-8?q?=E5=AF=86=E9=92=A5=E4=BA=A4=E6=8D=A2=EF=BC=88rekey=20on=20deman?=
+ =?UTF-8?q?d=20and=20after=20a=20traffic=20limit=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+NIOSSH 从不主动重新交换密钥（_rekey 只给测试用）。对端也不发起时，包序号（32 位，参与 hmac-* / *-etm 的
+MAC 计算）会在同一把密钥下回绕；RFC 4253 §9 也建议每 1 GB 或每小时换一次密钥。
+
+- 按需：NIOSSHHandler.rekey() -> Bool（@discardableResult）。连接已建立且没有进行中的密钥交换（我方或对端
+  发起的）时发出 KEXINIT 并返回 true，否则什么也不做、返回 false。
+- 自动：SSHClientConfiguration / SSHServerConfiguration 新增 rekeyLimits: NIOSSHRekeyLimits，默认 .default
+  （2^31 个包或 1 GiB，先到为准：序号空间的一半，以及 OpenSSH 对小分组密码的数据上限），.disabled 永不自动
+  交换，任一项设 nil 即不按它算。任一方向在当前密钥下收发的加密包数或字节数到达上限，就发起一次重新交换。
+- 计数在 SSHPacketParser / SSHPacketSerializer 里（只数加密之后的流量），每次 addEncryption（换密钥）清零，与
+  strict KEX 的序号归零同在一处。handler 在每处理一条入站消息、每写出一次之后检查；只有状态机处于 .active
+  时才会发起，所以密钥交换进行中（不论谁发起的）不会再发起一次。双方同时发起时，按 RFC 两份 KEXINIT 合成
+  一次交换（状态机原本就支持）。交换期间的 channel 写入由上一个补丁排队。
+
+测试（RekeyTests）：按需交换且交换中重复请求无效；包数上限触发多次交换、两个方向的数据都完整到达；字节上限
+触发交换；双方同时到达上限；双方同时请求只做一次交换；关闭后永不自动交换；每次交换后计数清零（不清零就会
+多交换一次）；默认值。
+
+行为变化：默认开启，超过 1 GiB 的连接现在会自动重新交换一次。可以提给上游。
+---
+ .../SSHConnectionStateMachine.swift           |   9 +
+ Sources/NIOSSH/NIOSSHHandler.swift            |  38 ++++
+ Sources/NIOSSH/RekeyLimits.swift              |  71 +++++++
+ Sources/NIOSSH/SSHClientConfiguration.swift   |   5 +
+ Sources/NIOSSH/SSHPacketParser.swift          |   6 +
+ Sources/NIOSSH/SSHPacketSerializer.swift      |   5 +
+ Sources/NIOSSH/SSHServerConfiguration.swift   |   5 +
+ Tests/NIOSSHTests/RekeyTests.swift            | 176 ++++++++++++++++++
+ 8 files changed, 315 insertions(+)
+ create mode 100644 Sources/NIOSSH/RekeyLimits.swift
+
+diff --git a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift
+index 12299e1..ed5fe55 100644
+--- a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
++++ b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
+@@ -1264,6 +1264,15 @@ extension SSHConnectionStateMachine {
+         }
+     }
+ 
++    /// Encrypted traffic in each direction since the last key exchange. Only while active: the one state a key
++    /// re-exchange can be started from.
++    var trafficSinceKeyExchange: (inbound: SSHTrafficCounter, outbound: SSHTrafficCounter)? {
++        guard case .active(let state) = self.state else {
++            return nil
++        }
++        return (state.parser.trafficSinceNewKeys, state.serializer.trafficSinceNewKeys)
++    }
++
+     /// Whether channel messages may be sent now. During a key exchange they may not, from our KEXINIT until our
+     /// NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
+     var canSendChannelMessages: Bool {
+diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
+index 89457a6..5b307ae 100644
+--- a/Sources/NIOSSH/NIOSSHHandler.swift
++++ b/Sources/NIOSSH/NIOSSHHandler.swift
+@@ -202,6 +202,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+                 try self.processInboundMessageResult(result, context: context)
+                 // Our NEWKEYS may just have gone out: release channel messages held during the key exchange.
+                 self.sendQueuedChildMessagesIfPossible()
++                self.rekeyIfTrafficLimitReached()
+             }
+         } catch {
+             context.fireErrorCaught(error)
+@@ -240,6 +241,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
+         }
+ 
+         context.write(self.wrapOutboundOut(self.outboundFrameBuffer), promise: promise)
++        self.rekeyIfTrafficLimitReached()
+     }
+ 
+     private func processInboundMessageResult(
+@@ -536,6 +538,42 @@ extension NIOSSHHandler {
+ 
+ // MARK: Initiate rekeying
+ 
++extension NIOSSHHandler {
++    /// Starts a key re-exchange now.
++    ///
++    /// Does nothing and returns `false` unless the connection is established and no key exchange is in flight
++    /// (one we or the peer started). Channel writes made during the exchange are held and sent once it is done.
++    /// Key re-exchanges also start automatically after `rekeyLimits` worth of traffic.
++    ///
++    /// This function is **not** thread-safe: it may only be called from on the channel.
++    @discardableResult
++    public func rekey() -> Bool {
++        guard let context = self.context, self.stateMachine.isActive else {
++            return false
++        }
++        do {
++            try self._rekey()
++            return true
++        } catch {
++            context.fireErrorCaught(error)
++            return false
++        }
++    }
++
++    /// Starts a key re-exchange if the traffic under the current keys reached the configured limits.
++    func rekeyIfTrafficLimitReached() {
++        guard let traffic = self.stateMachine.trafficSinceKeyExchange else {
++            // Not established, or a key exchange is already in flight.
++            return
++        }
++        let limits = self.stateMachine.role.rekeyLimits
++        if limits.isReached(by: traffic.inbound) || limits.isReached(by: traffic.outbound) {
++            self.rekey()
++        }
++    }
++}
++
++
+ extension NIOSSHHandler {
+     // This function mostly exists for testing purposes: we don't initiate re-keying today because it's not
+     // well-supported by evidence. But we want to be able to test against implementations who do, so we have support for
+diff --git a/Sources/NIOSSH/RekeyLimits.swift b/Sources/NIOSSH/RekeyLimits.swift
+new file mode 100644
+index 0000000..b5d370f
+--- /dev/null
++++ b/Sources/NIOSSH/RekeyLimits.swift
+@@ -0,0 +1,71 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++
++// Key re-exchange on demand and after a traffic limit (RFC 4253 §9: "It is RECOMMENDED that the keys be changed
++// after each gigabyte of transmitted data or after each hour of connection time"). Packet sequence numbers are
++// 32 bits and feed the MAC of `hmac-*` and `*-etm` transports: without a rekey they wrap under the same key.
++
++/// Encrypted traffic in one direction since the last key exchange.
++struct SSHTrafficCounter: Equatable {
++    var packets: UInt64 = 0
++    var bytes: UInt64 = 0
++
++    mutating func record(bytes: Int) {
++        self.packets &+= 1
++        self.bytes &+= UInt64(bytes)
++    }
++}
++
++/// When to start a key re-exchange automatically.
++public struct NIOSSHRekeyLimits: Hashable, Sendable {
++    /// Rekey once either direction has carried this many packets under the current keys; `nil`: no packet limit.
++    public var packets: UInt64?
++
++    /// Rekey once either direction has carried this many bytes under the current keys; `nil`: no byte limit.
++    public var bytes: UInt64?
++
++    public init(packets: UInt64?, bytes: UInt64?) {
++        self.packets = packets
++        self.bytes = bytes
++    }
++
++    /// 2^31 packets or 1 GiB, whichever comes first: half the sequence number space, and OpenSSH's data limit for
++    /// ciphers with small blocks.
++    public static let `default` = NIOSSHRekeyLimits(packets: 1 << 31, bytes: 1 << 30)
++
++    /// Never rekey automatically (NIOSSH's behaviour before this option existed).
++    public static let disabled = NIOSSHRekeyLimits(packets: nil, bytes: nil)
++
++    func isReached(by traffic: SSHTrafficCounter) -> Bool {
++        if let packets = self.packets, traffic.packets >= packets {
++            return true
++        }
++        if let bytes = self.bytes, traffic.bytes >= bytes {
++            return true
++        }
++        return false
++    }
++}
++
++extension SSHConnectionRole {
++    internal var rekeyLimits: NIOSSHRekeyLimits {
++        switch self {
++        case .client(let configuration):
++            return configuration.rekeyLimits
++        case .server(let configuration):
++            return configuration.rekeyLimits
++        }
++    }
++}
+diff --git a/Sources/NIOSSH/SSHClientConfiguration.swift b/Sources/NIOSSH/SSHClientConfiguration.swift
+index 2c82cda..3b686de 100644
+--- a/Sources/NIOSSH/SSHClientConfiguration.swift
++++ b/Sources/NIOSSH/SSHClientConfiguration.swift
+@@ -43,6 +43,11 @@ public struct SSHClientConfiguration {
+     /// tests turn it off to play a peer that predates it.
+     internal var offersStrictKeyExchange = true
+ 
++    /// When to start a key re-exchange automatically: once either direction has carried this many packets or
++    /// bytes under the current keys. Defaults to 2^31 packets or 1 GiB; `.disabled` never rekeys on its own.
++    /// `NIOSSHHandler.rekey()` starts one on demand.
++    public var rekeyLimits: NIOSSHRekeyLimits = .default
++
+     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
+     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
+     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17` (128 KiB).
+diff --git a/Sources/NIOSSH/SSHPacketParser.swift b/Sources/NIOSSH/SSHPacketParser.swift
+index b975e9c..1573448 100644
+--- a/Sources/NIOSSH/SSHPacketParser.swift
++++ b/Sources/NIOSSH/SSHPacketParser.swift
+@@ -85,6 +85,9 @@ struct SSHPacketParser {
+     /// number at zero (OpenSSH PROTOCOL §1.10).
+     private var resetsSequenceNumberWithNewKeys = false
+ 
++    /// Encrypted packets and bytes received under the current keys (for automatic rekeying).
++    private(set) var trafficSinceNewKeys = SSHTrafficCounter()
++
+     /// Encryption schemes can be added to a packet parser whenever encryption is negotiated.
+     /// They must be added monotonically, and may only be added once, while the parser is in an
+     /// idle state.
+@@ -93,6 +96,7 @@ struct SSHPacketParser {
+         if self.resetsSequenceNumberWithNewKeys {
+             self.sequenceNumber = 0
+         }
++        self.trafficSinceNewKeys = SSHTrafficCounter()
+         switch self.state {
+         case .cleartextWaitingForLength:
+             self.state = .encryptedWaitingForLength(protection)
+@@ -144,6 +148,7 @@ struct SSHPacketParser {
+             if let message = try self.parseCiphertext(length: length, protection: protection) {
+                 self.state = .encryptedWaitingForLength(protection)
+                 self.sequenceNumber &+= 1
++                self.trafficSinceNewKeys.record(bytes: Int(length) + 4)
+                 return message
+             }
+             self.state = .encryptedWaitingForBytes(length, protection)
+@@ -152,6 +157,7 @@ struct SSHPacketParser {
+             if let message = try self.parseCiphertext(length: length, protection: protection) {
+                 self.state = .encryptedWaitingForLength(protection)
+                 self.sequenceNumber &+= 1
++                self.trafficSinceNewKeys.record(bytes: Int(length) + 4)
+                 return message
+             }
+             return nil
+diff --git a/Sources/NIOSSH/SSHPacketSerializer.swift b/Sources/NIOSSH/SSHPacketSerializer.swift
+index e9a6272..49577c0 100644
+--- a/Sources/NIOSSH/SSHPacketSerializer.swift
++++ b/Sources/NIOSSH/SSHPacketSerializer.swift
+@@ -28,12 +28,16 @@ struct SSHPacketSerializer {
+     /// number at zero (OpenSSH PROTOCOL §1.10).
+     private var resetsSequenceNumberWithNewKeys = false
+ 
++    /// Encrypted packets and bytes sent under the current keys (for automatic rekeying).
++    private(set) var trafficSinceNewKeys = SSHTrafficCounter()
++
+     /// Encryption schemes can be added to a packet serializer whenever encryption is negotiated.
+     mutating func addEncryption(_ protection: NIOSSHTransportProtection, strictKeyExchange: Bool = false) {
+         self.resetsSequenceNumberWithNewKeys = self.resetsSequenceNumberWithNewKeys || strictKeyExchange
+         if self.resetsSequenceNumberWithNewKeys {
+             self.sequenceNumber = 0
+         }
++        self.trafficSinceNewKeys = SSHTrafficCounter()
+         switch self.state {
+         case .cleartext:
+             self.state = .encrypted(protection)
+@@ -66,6 +70,7 @@ struct SSHPacketSerializer {
+                 blockSize: protection.cipherBlockSize
+             )
+             try protection.encryptPacket(&buffer, sequenceNumber: self.sequenceNumber)
++            self.trafficSinceNewKeys.record(bytes: buffer.readableBytes)
+             buffer.moveReaderIndex(to: index)
+             self.sequenceNumber &+= 1
+         }
+diff --git a/Sources/NIOSSH/SSHServerConfiguration.swift b/Sources/NIOSSH/SSHServerConfiguration.swift
+index d23bace..fff622c 100644
+--- a/Sources/NIOSSH/SSHServerConfiguration.swift
++++ b/Sources/NIOSSH/SSHServerConfiguration.swift
+@@ -44,6 +44,11 @@ public struct SSHServerConfiguration {
+     /// the server sends SSH_MSG_EXT_INFO right after its first SSH_MSG_NEWKEYS. `nil` (the default) sends nothing.
+     public var serverSignatureAlgorithms: [String]? = nil
+ 
++    /// When to start a key re-exchange automatically: once either direction has carried this many packets or
++    /// bytes under the current keys. Defaults to 2^31 packets or 1 GiB; `.disabled` never rekeys on its own.
++    /// `NIOSSHHandler.rekey()` starts one on demand.
++    public var rekeyLimits: NIOSSHRekeyLimits = .default
++
+     /// The maximum size, in bytes, of a channel data payload this peer is willing to receive (the
+     /// "maximum packet size" of an SSH channel, RFC 4254 §5.1). It is advertised to the remote peer
+     /// when opening channels and bounds inbound encrypted packets. Defaults to `1 << 17`  (128 KiB).
+diff --git a/Tests/NIOSSHTests/RekeyTests.swift b/Tests/NIOSSHTests/RekeyTests.swift
+index fb17550..3df34fc 100644
+--- a/Tests/NIOSSHTests/RekeyTests.swift
++++ b/Tests/NIOSSHTests/RekeyTests.swift
+@@ -159,4 +159,180 @@ final class RekeyTests: XCTestCase {
+         XCTAssertNotNil(failure.value)
+         XCTAssertEqual(self.serverReceived.bytes.readableBytes, 0)
+     }
++
++    // MARK: Rekeying on demand and after a traffic limit
++
++    private func keyExchangeCount() -> Int {
++        // One protection instance per side per key exchange.
++        KeyCheckingTransportProtection.instances.count / 2
++    }
++
++    private func useKeyCheckingProtection(_ configuration: inout SSHClientConfiguration) {
++        configuration.transportProtectionSchemes = [KeyCheckingTransportProtection.self]
++    }
++
++    private func useKeyCheckingProtection(_ configuration: inout SSHServerConfiguration) {
++        configuration.transportProtectionSchemes = [KeyCheckingTransportProtection.self]
++    }
++
++    private func exchange(_ count: Int, client: Channel, prefix: String = "") throws {
++        let serverChild = try XCTUnwrap(self.serverChild)
++        for i in 0..<count {
++            _ = self.send("c\(prefix)\(i);", on: client)
++            _ = self.send("s\(prefix)\(i);", on: serverChild)
++            try self.channel.interactInMemory()
++        }
++    }
++
++    private func expected(_ side: String, _ count: Int, prefix: String = "") -> String {
++        (0..<count).map { "\(side)\(prefix)\($0);" }.joined()
++    }
++
++    func testRekeyOnDemand() throws {
++        let (client, clientReceived) = try self.connect(
++            client: { self.useKeyCheckingProtection(&$0) },
++            server: { self.useKeyCheckingProtection(&$0) }
++        )
++        XCTAssertEqual(self.keyExchangeCount(), 1)
++        XCTAssertTrue(self.channel.clientSSHHandler!.rekey())
++        // A second request while the first is in flight does nothing.
++        XCTAssertFalse(self.channel.clientSSHHandler!.rekey())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(self.keyExchangeCount(), 2)
++        XCTAssertNoThrow(try self.exchange(3, client: client))
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), self.expected("c", 3))
++        XCTAssertEqual(String(buffer: clientReceived.bytes), self.expected("s", 3))
++    }
++
++    func testPacketLimitTriggersRekeysAndDataKeepsFlowing() throws {
++        let (client, clientReceived) = try self.connect(
++            client: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .init(packets: 10, bytes: nil)
++            },
++            server: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .disabled
++            }
++        )
++        XCTAssertNoThrow(try self.exchange(40, client: client))
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), self.expected("c", 40))
++        XCTAssertEqual(String(buffer: clientReceived.bytes), self.expected("s", 40))
++        // 40 packets each way at a limit of 10: a handful of rekeys, each resetting the count.
++        XCTAssertGreaterThanOrEqual(self.keyExchangeCount(), 4)
++        XCTAssertLessThanOrEqual(self.keyExchangeCount(), 10)
++    }
++
++    func testByteLimitTriggersARekey() throws {
++        let (client, clientReceived) = try self.connect(
++            client: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .disabled
++            },
++            server: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .init(packets: nil, bytes: 4096)
++            }
++        )
++        let serverChild = try XCTUnwrap(self.serverChild)
++        let chunk = String(repeating: "x", count: 1000)
++        for _ in 0..<10 {
++            _ = self.send(chunk, on: serverChild)
++            XCTAssertNoThrow(try self.channel.interactInMemory())
++        }
++        XCTAssertEqual(clientReceived.bytes.readableBytes, 10_000)
++        XCTAssertGreaterThanOrEqual(self.keyExchangeCount(), 2)
++        _ = client
++    }
++
++    func testBothSidesRekeyingAtOnce() throws {
++        let (client, clientReceived) = try self.connect(
++            client: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .init(packets: 8, bytes: nil)
++            },
++            server: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .init(packets: 8, bytes: nil)
++            }
++        )
++        // Both sides cross their limits on the same packets and send KEXINIT before seeing the other's.
++        let serverChild = try XCTUnwrap(self.serverChild)
++        for i in 0..<30 {
++            _ = self.send("c\(i);", on: client)
++            _ = self.send("s\(i);", on: serverChild)
++            XCTAssertNoThrow(try self.channel.interactInMemory())
++        }
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), self.expected("c", 30))
++        XCTAssertEqual(String(buffer: clientReceived.bytes), self.expected("s", 30))
++        XCTAssertGreaterThanOrEqual(self.keyExchangeCount(), 3)
++    }
++
++    func testSimultaneousRekeyRequests() throws {
++        let (client, clientReceived) = try self.connect(
++            client: { self.useKeyCheckingProtection(&$0) },
++            server: { self.useKeyCheckingProtection(&$0) }
++        )
++        // Both KEXINITs are on the wire before either side has read the other's.
++        XCTAssertTrue(self.channel.clientSSHHandler!.rekey())
++        XCTAssertTrue(self.channel.serverSSHHandler!.rekey())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(self.keyExchangeCount(), 2, "one exchange, not two")
++        XCTAssertNoThrow(try self.exchange(3, client: client))
++        XCTAssertEqual(String(buffer: clientReceived.bytes), self.expected("s", 3))
++    }
++
++    func testDisabledLimitsNeverRekey() throws {
++        let (client, _) = try self.connect(
++            client: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .disabled
++            },
++            server: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .disabled
++            }
++        )
++        XCTAssertNoThrow(try self.exchange(50, client: client))
++        XCTAssertEqual(self.keyExchangeCount(), 1)
++        XCTAssertEqual(String(buffer: self.serverReceived.bytes), self.expected("c", 50))
++    }
++
++    func testCountersRestartWithEveryKeyExchange() throws {
++        // Connection setup sends 3 packets each way; 12 writes more would cross 20 without a reset in between.
++        let (client, _) = try self.connect(
++            client: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .init(packets: 20, bytes: nil)
++            },
++            server: {
++                self.useKeyCheckingProtection(&$0)
++                $0.rekeyLimits = .disabled
++            }
++        )
++        XCTAssertNoThrow(try self.exchange(9, client: client))
++        XCTAssertEqual(self.keyExchangeCount(), 1)
++        XCTAssertTrue(self.channel.clientSSHHandler!.rekey())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertNoThrow(try self.exchange(15, client: client, prefix: "b"))
++        XCTAssertEqual(self.keyExchangeCount(), 2)
++        XCTAssertEqual(
++            String(buffer: self.serverReceived.bytes),
++            self.expected("c", 9) + self.expected("c", 15, prefix: "b")
++        )
++    }
++
++    func testDefaultLimits() {
++        let client = SSHClientConfiguration(
++            userAuthDelegate: InfinitePasswordDelegate(),
++            serverAuthDelegate: AcceptAllHostKeysDelegate()
++        )
++        XCTAssertEqual(client.rekeyLimits, NIOSSHRekeyLimits(packets: 1 << 31, bytes: 1 << 30))
++        let server = SSHServerConfiguration(hostKeys: [], userAuthDelegate: DenyAllServerAuthDelegate())
++        XCTAssertEqual(server.rekeyLimits, .default)
++        XCTAssertFalse(NIOSSHRekeyLimits.disabled.isReached(by: .init(packets: .max, bytes: .max)))
++        XCTAssertTrue(NIOSSHRekeyLimits.default.isReached(by: .init(packets: 1 << 31, bytes: 0)))
++        XCTAssertTrue(NIOSSHRekeyLimits.default.isReached(by: .init(packets: 0, bytes: 1 << 30)))
++        XCTAssertFalse(NIOSSHRekeyLimits.default.isReached(by: .init(packets: (1 << 31) - 1, bytes: (1 << 30) - 1)))
++    }
+ }
