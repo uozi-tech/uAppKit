@@ -10,7 +10,7 @@
 
 顺序：先是能单独提给上游的修复（0001–0004），然后两个扩展接口（0005 / 0006），再是两项协议扩展
 （0007 / 0008，它们用到 0006 加的 `keyExchangeAlgorithms` 配置），然后客户端层要的三处小改动（0009–0011），
-修改声明（0012）**始终排在最后**。
+再是重新密钥交换的修复与自动触发（0012 / 0013），修改声明（0014）**始终排在最后**。
 
 | 补丁 | 内容 | 类别 |
 |---|---|---|
@@ -25,7 +25,9 @@
 | 0009 | 公开发送任意全局请求（keepalive） | 公开 API |
 | 0010 | 公开 CHANNEL_OPEN_FAILURE 原因码 | 公开 API |
 | 0011 | 认证委托用完了立即报错 | 修 bug（行为变化） |
-| 0012 | 修改声明 | 许可证 |
+| 0012 | 重新密钥交换期间 channel 写入排队 | 修 bug |
+| 0013 | 按需与按流量自动重新密钥交换 | 新功能（默认开启） |
+| 0014 | 修改声明 | 许可证 |
 
 ## 0001 对端先关（`.closedRemotely`）时也不回 window-adjust
 
@@ -105,8 +107,17 @@ NIOSSH 只带 ed25519 与 ECDSA，Apple 维护者表态只接受扩展接口、�
 - 内置密钥的行为一字不变（内部判断 `isUsable(withAlgorithm:signature:)` 对内置密钥就是原来的
   「算法名 == 密钥前缀」）。自定义密钥要求 (类型, 算法) 已登记，签名也必须是那个算法的（防止协商了
   `rsa-sha2-512` 却回 SHA-1 的 `ssh-rsa` 签名）。主机密钥校验、userauth 请求、PK_OK 都按算法名走。
-- 客户端 KEXINIT 的 `server_host_key_algorithms` = 内置算法 + 已登记算法（登记顺序）。
+- 客户端 KEXINIT 的 `server_host_key_algorithms` 默认 = 内置算法 + 已登记算法（登记顺序）；
+  `SSHClientConfiguration.hostKeyAlgorithms` 可按连接挑选、排序（未知名字丢弃），报出的、协商的、验签接受的
+  都只来自它——为一台老主机登记 SHA-1 `ssh-rsa` 不会让所有连接都接受它。
 - 自定义密钥不能当被证书认证的公钥（构造证书时抛 `invalidCertificate`），可以当 CA。
+  `NIOSSHCertifiedPublicKey.validate` 新增 `allowedSignatureAlgorithms`：CA 签名的算法必须属于 CA 密钥（自定义
+  密钥要对其类型登记过）且在给定集合里。
+- 不能登记内置密钥类型名，也不能登记 4 个 `*-cert-v01@openssh.com` 证书类型名：自定义类型先于证书解析查找，
+  登记了就会顶掉 NIOSSH 自己的证书解析器。
+
+（`hostKeyAlgorithms`、`allowedSignatureAlgorithms` 与证书类型名的保留是安全审查之后补的。测试
+`CustomKeyPolicyTests`。）
 
 **去掉的时机 / 上游**：接口可以提给 Apple。上游合入某种扩展接口后，按它的形状改 USSHCore 的算法实现，
 再删这个补丁。
@@ -123,6 +134,12 @@ NIOSSH 只带 ed25519 与 ECDSA，Apple 维护者表态只接受扩展接口、�
 用主机密钥签名 / 验签（含 0005 的算法一致检查），按 RFC 4253 §7.2 派生密钥（用 0003 的续长）。内置算法的
 代码一行没动；状态机从配置读算法列表（原先读静态列表的 4 处），协商到自定义名字时由内部适配器驱动实现。
 测试里把 `curve25519-sha256` 照接口重写一遍，与内置实现互为两端，交换哈希输入和六把会话密钥逐一相同。
+
+安全审查之后补的两点：
+- **每次密钥交换只读一次注册表**：状态机创建时对我方的密钥交换算法列表和主机密钥算法列表各取一份快照，KEXINIT、
+  协商、抢先发包的判断都用它。原先 KEXINIT 与协商分别读注册表，中间正好有登记时客户端会协商出自己没报过的算法。
+- **对端值兜底**：两种编码都拒绝空的对端值，`.mpint` 还拒绝 0 与 1，共享秘密 K 为 0 或 1 都拒绝。上界 p-1 NIOSSH
+  不知道 p，仍由实现检查。
 
 **去掉的时机 / 上游**：同 0005。
 
@@ -199,15 +216,45 @@ RSA 用户密钥有三个算法，客户端事先不知道服务端接受哪个�
 
 **去掉的时机 / 上游**：可以提给 Apple。注意是行为变化：以前挂住的连接现在报错（客户端层不用再自己检测用完）。
 
-## 0012 修改声明（始终最后）
+## 0012 重新密钥交换期间 child channel 的写入排队
 
-Apache-2.0 第 4(b) 条：0001–0011 改过的 23 个上游源文件和 1 个上游测试文件
+RFC 4253 §7.1：发出 KEXINIT 之后、发出 NEWKEYS 之前只能发密钥交换消息。状态机守着这一条，但 `NIOSSHHandler`
+把 child channel 的写入直接交给它：重新交换进行中（不论谁发起），任何 channel 数据、窗口调整、EOF、CLOSE 都以
+`protocolViolation("Sent unexpected message type")` 失败，数据丢失。OpenSSH 服务端按 RekeyLimit 重新交换时，
+正在传输的 channel 就会在那一刻出错；上游的重新交换测试只在交换完成后才开 channel，没测到。
+
+`SSHConnectionStateMachine.canSendChannelMessages`（`.active` / `.rekeyingSentNewKeysState`）；`writeFromChildChannel`
+不能发时按顺序排进 `queuedChildMessages`，处理完每条入站消息、密钥交换的异步结果写出后与 `channelReadComplete`
+时再发；handler 被移除时以 `ChannelError.eof` 失败。测试 `RekeyTests`（前 3 个）。
+
+**去掉的时机 / 上游**：通用 bug，可以提给 Apple。0013 的自动重新交换依赖它。
+
+## 0013 按需与按流量自动重新密钥交换
+
+NIOSSH 从不主动重新交换（`_rekey` 只给测试）；对端也不发起时，32 位包序号会在同一把 MAC 密钥下回绕（`hmac-*`、
+`*-etm` 用序号算 MAC）。新增：
+
+- `NIOSSHHandler.rekey() -> Bool`：连接已建立且没有进行中的交换时发起，否则什么也不做、返回 false。
+- `SSHClientConfiguration` / `SSHServerConfiguration.rekeyLimits: NIOSSHRekeyLimits`，默认 `.default`（2^31 个包或
+  1 GiB，先到为准），`.disabled` 关闭，单项可设 nil。任一方向在当前密钥下的加密包数或字节数到达上限就发起一次。
+- 计数在 `SSHPacketParser` / `SSHPacketSerializer`（只数加密流量），每次换密钥（`addEncryption`）清零，与 strict KEX
+  的序号归零同处。只有状态机处于 `.active` 时才会发起，交换进行中不会再发起；双方同时发起时两份 KEXINIT 合成一次
+  交换（状态机原本支持）。
+
+测试 `RekeyTests`（后 8 个）：按需与重复请求、包数上限触发多次交换且两个方向数据完整、字节上限、双方同时到达上限、
+双方同时请求只做一次交换、关闭后从不自动交换、每次交换后计数清零、默认值。
+
+**去掉的时机 / 上游**：可以提给 Apple。行为变化：默认开启，超过 1 GiB 的连接会自动重新交换。
+
+## 0014 修改声明（始终最后）
+
+Apache-2.0 第 4(b) 条：0001–0013 改过的 23 个上游源文件和 1 个上游测试文件
 （`ChildChannelMultiplexerTests.swift`）头部各加一行 `Modified by uAppKit`。补丁新加的文件文件头写明出自
 uAppKit，不用再加。新补丁插在它前面；改到别的上游文件，就在这个补丁里给那个文件也加一行。
 
 ## 验证
 
-- `swift test --filter NIOSSHTests`：上游的 347 个用例加补丁的 59 个（共 406），全过才算补丁打对。
+- `swift test --filter NIOSSHTests`：上游的 347 个用例加补丁的 79 个（共 426），全过才算补丁打对。
 - 0001 / 0002 的线上崩溃只在 `-L` / `-D` / 长连接**远端先断**时出现。改这几个补丁之后，发版前要在真机上做
   断网 smoke，编译和测试通过不等于修好。
 - 0005 / 0006 只用测试专用的玩具算法验证了接口本身；0007 / 0008 只在 NIOSSH 两端之间验证过。RSA、DH 接上之后，

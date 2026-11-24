@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
 Date: Tue, 24 Nov 2026 12:45:53 +0800
-Subject: [PATCH 08/12] =?UTF-8?q?NIOSSH:=20=E6=89=A9=E5=B1=95=E5=8D=8F?=
+Subject: [PATCH 08/14] =?UTF-8?q?NIOSSH:=20=E6=89=A9=E5=B1=95=E5=8D=8F?=
  =?UTF-8?q?=E5=95=86=EF=BC=88RFC=208308=20ext-info=20/=20server-sig-algs?=
  =?UTF-8?q?=EF=BC=89?=
 MIME-Version: 1.0
@@ -187,10 +187,10 @@ index 0000000..e09cffc
 +    }
 +}
 diff --git a/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift b/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift
-index bdd0e9b..15acc6f 100644
+index f9f0f6c..73b9358 100644
 --- a/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift	
 +++ b/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift	
-@@ -97,6 +97,9 @@ struct SSHKeyExchangeStateMachine {
+@@ -103,6 +103,9 @@ struct SSHKeyExchangeStateMachine {
      /// (OpenSSH `PROTOCOL` §1.10, the Terrapin mitigation). Decided when the peer's KEXINIT arrives.
      private(set) var isStrictKeyExchange = false
  
@@ -200,7 +200,7 @@ index bdd0e9b..15acc6f 100644
      init(
          allocator: ByteBufferAllocator,
          loop: EventLoop,
-@@ -149,6 +152,9 @@ struct SSHKeyExchangeStateMachine {
+@@ -157,6 +160,9 @@ struct SSHKeyExchangeStateMachine {
  
      mutating func handle(keyExchange message: SSHMessage.KeyExchangeMessage) throws -> SSHMultiMessage? {
          self.isStrictKeyExchange = self.peerAgreesToStrictKeyExchange(message)
@@ -210,7 +210,7 @@ index bdd0e9b..15acc6f 100644
  
          switch self.state {
          case .keyExchangeSent(message: let ourMessage):
-@@ -696,7 +702,10 @@ extension SSHKeyExchangeStateMachine {
+@@ -709,7 +715,10 @@ extension SSHKeyExchangeStateMachine {
      /// Pseudo-algorithms that announce protocol extensions in the KEXINIT algorithm list. They are never
      /// negotiated: our own configured list never contains them.
      static var keyExchangeExtensionMarkerNames: [Substring] {
@@ -222,7 +222,7 @@ index bdd0e9b..15acc6f 100644
      }
  
      /// Whether we announce strict key exchange at all (tests turn it off to play an old peer).
-@@ -711,10 +720,31 @@ extension SSHKeyExchangeStateMachine {
+@@ -724,10 +733,31 @@ extension SSHKeyExchangeStateMachine {
  
      /// The markers appended to our KEXINIT: only in the first one of the connection.
      private var keyExchangeExtensionMarkers: [Substring] {
@@ -386,7 +386,7 @@ index e5f7582..10f08d0 100644
          // The explicit capture list is here to force a copy of the buffer, rather than capturing self.
          return promise.futureResult.flatMapThrowing { [sessionID = self.sessionID] request in
 diff --git a/Tests/NIOSSHTests/CustomKeyExchangeTests.swift b/Tests/NIOSSHTests/CustomKeyExchangeTests.swift
-index ee9c247..6c794ab 100644
+index 199e847..be68ddb 100644
 --- a/Tests/NIOSSHTests/CustomKeyExchangeTests.swift
 +++ b/Tests/NIOSSHTests/CustomKeyExchangeTests.swift
 @@ -220,8 +220,8 @@ final class CustomKeyExchangeTests: CustomAlgorithmTestCase {
