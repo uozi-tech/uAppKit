@@ -1,25 +1,21 @@
 import Foundation
-@preconcurrency import Citadel
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
-import NIOSSH
 
 /// `-L` 本地转发监听器。
 ///
-/// 在 `client.eventLoop`（NIOSSH 单 EventLoop，与所有 channel 操作同环）上用
+/// 在 `client.eventLoop`（SSH 连接的 EventLoop，与它所有子通道同环）上用
 /// `ServerBootstrap` 绑定 `listenHost:listenPort`。每个 accept 的本地 socket：
-///   1. `createDirectTCPIPChannel` 经 SSH 连接到 `destHost:destPort`
-///      （Citadel 已在该通道加好 `DataToBufferCodec`）；
-///   2. 把本地 socket 与 direct-tcpip 通道都包成 `NIOAsyncChannel<ByteBuffer,ByteBuffer>`；
+///   1. `ConnectedClient.openDirectTCPIP` 经 SSH 连接到 `destHost:destPort`
+///      （USSHCore 在通道激活前就包好 `NIOAsyncChannel<ByteBuffer,ByteBuffer>`）；
+///   2. 本地 socket 在 accept 时同样包好；
 ///   3. `TunnelGlue.pipe` 双向泵。
 ///
 /// 保留绑定后的监听 `Channel` 句柄，`close()` 时显式关闭 —— 否则端口占用泄漏。
 /// `bind` 失败（端口被占 / 权限不足）通过 `start()` 抛出，由上层 `ForwardingError.classify` 归类。
 ///
-/// 持有 `ConnectedClient`（`@unchecked Sendable`）以在每次 accept 时开 direct-tcpip
-/// 通道 —— 与 `SFTPSession` 持有 `connected` 的做法一致。`SSHClient` 非 `Sendable`，
-/// 仅经 `ConnectedClient` 在本类作用域内触碰，不跨隔离域并发使用。
+/// 持有 `ConnectedClient`（`Sendable`）以在每次 accept 时开 direct-tcpip 通道。
 @_spi(uTermIntegration)
 public actor LocalForwardListener {
     private let connected: ConnectedClient

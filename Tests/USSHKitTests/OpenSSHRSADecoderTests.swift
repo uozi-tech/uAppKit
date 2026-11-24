@@ -1,18 +1,15 @@
-import Crypto
 import XCTest
 @testable import USSHKit
 
-/// OpenSSH 容器里的 RSA 私钥。修的是这条路：容器格式的 RSA 原先一律交给 Citadel，
-/// 只能以 `ssh-rsa`（SHA-1）签名，而 OpenSSH 8.8+ 服务端默认拒收 SHA-1 公钥签名 ——
-/// 同一把密钥 `ssh` 连得上、uTerm 却报 `allAuthenticationOptionsFailed`。
+/// OpenSSH 容器里的 RSA 私钥。容器格式的 RSA 自己解出分量，交给 USSHCore 的 `SSHRSAPrivateKey`
+/// 以 rsa-sha2-512 / -256 签名（OpenSSH 8.8+ 服务端默认拒收 SHA-1 的 `ssh-rsa` 签名）。
 final class OpenSSHRSADecoderTests: XCTestCase {
 
-    /// 同一把密钥的两种落盘格式必须解出同一组分量 —— PKCS#1 那条路已被
-    /// `RSASHA512Signer` 长期使用，拿它当基准。
+    /// 同一把密钥的两种落盘格式必须解出同一组分量 —— 拿 PKCS#1 那条路当基准。
     func testOpenSSHComponentsMatchSameKeyInPKCS1() throws {
         let fromContainer = try OpenSSHRSADecoder.decodeComponents(
             openSSHText: KeyImportFixtures.rsaOpenSSH)
-        let fromPEM = try RSAKeyComponents.fromPKCS1DER(
+        let fromPEM = try RSAKeyMaterial.componentsFromPKCS1DER(
             PEMDocument.parse(KeyImportFixtures.rsaPKCS1).der)
 
         XCTAssertEqual(fromContainer.modulus, fromPEM.modulus)
@@ -24,22 +21,20 @@ final class OpenSSHRSADecoderTests: XCTestCase {
         XCTAssertEqual(fromContainer.modulus.count, 256, "2048 位模数应为 256 字节")
     }
 
-    /// 端到端：容器解出的分量能造出可用的 rsa-sha2-512 签名并被自身公钥验过。
-    /// p/q 错了的话 `_RSA.Signing.PrivateKey` 要么构造失败、要么签出的名验不过。
-    func testComponentsFromContainerProduceVerifiableRSASHA512Signature() throws {
+    /// 端到端：容器解出的分量能造出可用的 rsa-sha2-512 / -256 签名并被自身公钥验过。
+    /// p/q 错了的话 `SSHRSAPrivateKey` 要么构造失败、要么签出的名验不过。
+    func testComponentsFromContainerProduceVerifiableRSASHA2Signatures() throws {
         let components = try OpenSSHRSADecoder.decodeComponents(
             openSSHText: KeyImportFixtures.rsaOpenSSH)
-        let signer = try RSASHA512Signer(components: components)
-        let message = Array("uterm rsa-sha2-512 round trip".utf8)
+        let key = try RSAKeyMaterial.makeKey(components)
+        let message = Array("uterm rsa-sha2 round trip".utf8)
 
-        let signature = try signer.sign(message)
-
-        XCTAssertTrue(RSASHA512Signer.isValidSignature(
-            signature, for: message,
-            modulus: components.modulus, publicExponent: components.publicExponent))
-        XCTAssertFalse(RSASHA512Signer.isValidSignature(
-            signature, for: Array("tampered".utf8),
-            modulus: components.modulus, publicExponent: components.publicExponent))
+        for algorithm in [SSHRSASignatureAlgorithm.rsaSHA2_512, .rsaSHA2_256] {
+            let signature = try key.signature(for: message, algorithm: algorithm)
+            XCTAssertTrue(key.publicKey.isValidSignature(signature, for: message, algorithm: algorithm))
+            XCTAssertFalse(key.publicKey.isValidSignature(
+                signature, for: Array("tampered".utf8), algorithm: algorithm))
+        }
     }
 
     /// 带口令的容器：bcrypt_pbkdf + aes-ctr 就地解密，同样解出分量。
@@ -50,13 +45,11 @@ final class OpenSSHRSADecoderTests: XCTestCase {
             passphrase: KeyImportFixtures.passphrase)
         XCTAssertEqual(components.modulus.count, 256, "2048 位模数应为 256 字节")
 
-        let signer = try RSASHA512Signer(components: components)
+        let key = try RSAKeyMaterial.makeKey(components)
         let message = Array("uterm encrypted container round trip".utf8)
-        let signature = try signer.sign(message)
+        let signature = try key.signature(for: message, algorithm: .rsaSHA2_512)
 
-        XCTAssertTrue(RSASHA512Signer.isValidSignature(
-            signature, for: message,
-            modulus: components.modulus, publicExponent: components.publicExponent))
+        XCTAssertTrue(key.publicKey.isValidSignature(signature, for: message, algorithm: .rsaSHA2_512))
     }
 
     func testEncryptedContainerWithoutPassphraseReportsNeedsPassphrase() {

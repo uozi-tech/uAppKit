@@ -60,7 +60,7 @@ public nonisolated enum SSHKeyGenerator {
         let der = [UInt8](derCF as Data)
 
         let pem = pemWrap(der: der, label: "RSA PRIVATE KEY")
-        let comps = try RSAKeyComponents.fromPKCS1DER(der)
+        let comps = try RSAKeyMaterial.componentsFromPKCS1DER(der)
         let pubBlob = SSHPublicMaterial.rsaBlob(e: comps.publicExponent, n: comps.modulus)
         return GeneratedKey(
             privateKeyText: pem,

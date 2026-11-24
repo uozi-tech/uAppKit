@@ -8,7 +8,7 @@ import Crypto
 ///  - **OpenSSH 容器**（`-----BEGIN OPENSSH PRIVATE KEY-----`）：公钥 blob 以明文
 ///    嵌在文件里，直接抽出来即可——对任何算法（含加口令的）都成立，无需私钥分量。
 ///  - **PEM**：无内嵌公钥，从 `ParsedPrivateKey` 反推（ed25519 用公钥原始字节，
-///    RSA 用 `RSAKeyComponents` 的 e/n，ECDSA 用 X9.63 公钥点）。
+///    RSA 用公钥的 e/n，ECDSA 用 X9.63 公钥点）。
 ///
 /// 密钥库模型表达 ed25519 / rsa / ecdsa；DSA 等旧算法抛 `unsupportedAlgorithm`，
 /// 由调用方提示用户。
@@ -52,9 +52,10 @@ public nonisolated enum KeyImportInspector {
         case .ed25519(let key):
             let blob = SSHPublicMaterial.ed25519Blob(pub: [UInt8](key.publicKey.rawRepresentation))
             return material(type: .ed25519, bits: 256, blob: blob, comment: comment)
-        case .rsa(let comps):
-            let blob = SSHPublicMaterial.rsaBlob(e: comps.publicExponent, n: comps.modulus)
-            return material(type: .rsa, bits: comps.modulus.count * 8, blob: blob, comment: comment)
+        case .rsa(let key):
+            let publicKey = key.publicKey
+            let blob = SSHPublicMaterial.rsaBlob(e: publicKey.publicExponent, n: publicKey.modulus)
+            return material(type: .rsa, bits: publicKey.modulusByteCount * 8, blob: blob, comment: comment)
         case .p256(let key):
             let blob = SSHPublicMaterial.ecdsaBlob(
                 algorithm: "ecdsa-sha2-nistp256",
@@ -73,9 +74,6 @@ public nonisolated enum KeyImportInspector {
                 curve: "nistp521",
                 publicKey: [UInt8](key.publicKey.x963Representation))
             return material(type: .ecdsaP521, bits: 521, blob: blob, comment: comment)
-        case .legacyOpenSSHRSA:
-            // OpenSSH RSA 应已走容器内嵌公钥路径。
-            throw InspectError.unsupportedAlgorithm
         }
     }
 

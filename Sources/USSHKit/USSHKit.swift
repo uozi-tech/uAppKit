@@ -1,4 +1,6 @@
 import Foundation
+// 客户端层整个转出去：app 只要 `import USSHKit` 就能用 `SSHClient`、`SFTPClient`、通道句柄与它们的错误类型。
+@_exported import USSHCore
 
 /// A network address used by an SSH endpoint or forwarding destination.
 public struct SSHHostAddress: Hashable, Sendable {
@@ -138,8 +140,9 @@ public enum SSHPrivateKeyKind: String, CaseIterable, Hashable, Codable, Sendable
     case ecdsaP521
 }
 
-/// An immutable parsed private key. Concrete Citadel and swift-crypto key types stay internal.
-public struct SSHPrivateKey: @unchecked Sendable {
+/// An immutable parsed private key. The concrete key types (USSHCore's RSA key, swift-crypto's
+/// Ed25519 / ECDSA keys) stay internal.
+public struct SSHPrivateKey: Sendable {
     public let kind: SSHPrivateKeyKind
     let parsed: ParsedPrivateKey
 
@@ -153,20 +156,7 @@ public struct SSHPrivateKey: @unchecked Sendable {
 public enum SSHPrivateKeyParser {
     public static func parse(pem: String, passphrase: String? = nil) throws -> SSHPrivateKey {
         let parsed = try PrivateKeyImporter.resolve(pem: pem, passphrase: passphrase)
-        let kind: SSHPrivateKeyKind
-        switch parsed {
-        case .rsa, .legacyOpenSSHRSA:
-            kind = .rsa
-        case .ed25519:
-            kind = .ed25519
-        case .p256:
-            kind = .ecdsaP256
-        case .p384:
-            kind = .ecdsaP384
-        case .p521:
-            kind = .ecdsaP521
-        }
-        return SSHPrivateKey(kind: kind, parsed: parsed)
+        return SSHPrivateKey(kind: parsed.kind, parsed: parsed)
     }
 }
 
@@ -268,15 +258,4 @@ public protocol SSHLogger: Sendable {
 public struct NoOpSSHLogger: SSHLogger {
     public init() {}
     public func log(_ event: SSHLogEvent) {}
-}
-
-enum USSHKitInternalError: Error, LocalizedError {
-    case authenticationFailed(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .authenticationFailed(let message):
-            return message
-        }
-    }
 }

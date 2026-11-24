@@ -9,9 +9,9 @@ import PackageDescription
 /// 历史发版才能复现。
 ///
 /// 注意：本包按 tag 被消费，因此**不能有任何 path 依赖**——SwiftPM 会拒绝
-/// 「stable-version 的包依赖 unstable-version 的包」。USSHKit 要的 Citadel 与
-/// swift-nio-ssh 带着补丁，所以不作为依赖引用，而是把上游源码作为本包的 target
-/// 编进来（见下方 `NIOSSH` / `Citadel`），补丁与来源记在 `ThirdParty/`。
+/// 「stable-version 的包依赖 unstable-version 的包」。SSH 栈底下的 swift-nio-ssh 带着补丁，
+/// 所以不作为依赖引用，而是把上游源码作为本包的 target 编进来（见下方 `NIOSSH`），
+/// 补丁与来源记在 `ThirdParty/`。客户端层 `USSHCore` 与产品层 `USSHKit` 是我们自己写的。
 let package = Package(
     name: "uAppKit",
     // 包内文案的源语言。每个带面向用户文案的 target 有自己的 `Localizable.xcstrings`，
@@ -25,8 +25,7 @@ let package = Package(
         .library(name: "UDesignKit", targets: ["UDesignKit"]),
         .library(name: "UAppKitBridge", targets: ["UAppKitBridge"]),
         .library(name: "AgentKit", targets: ["AgentKit"]),
-        // SSH-STACK-WIP: 重写期间 USSHKit 暂时停编（它还依赖 Citadel），接到 USSHCore 上之后恢复。
-        // .library(name: "USSHKit", targets: ["USSHKit"]),
+        .library(name: "USSHKit", targets: ["USSHKit"]),
         .library(name: "USSHCore", targets: ["USSHCore"]),
         .library(name: "USSHTestServer", targets: ["USSHTestServer"]),
         .library(name: "UPaneTree", targets: ["UPaneTree"]),
@@ -36,8 +35,6 @@ let package = Package(
         .library(name: "AgentRuntime", targets: ["AgentRuntime"]),
         .library(name: "AgentRuntimeUI", targets: ["AgentRuntimeUI"]),
         .library(name: "UControlKitUI", targets: ["UControlKitUI"]),
-        // SSH-STACK-WIP: Citadel 停编，重写完成后连同 Sources/Citadel 一起删掉。
-        // .library(name: "Citadel", targets: ["Citadel"]),
     ],
     dependencies: [
         // 依赖一律写 https：上游包之间互相引用都是 https，同一个包写成两种地址（https 与 SSH 形式）
@@ -46,8 +43,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-crypto.git", "3.12.3"..<"5.0.0"),
         .package(url: "https://github.com/apple/swift-asn1.git", from: "1.3.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
-        // 下面两个只有包内的 Citadel / NIOSSH 用。
+        // BigInt：USSHCore 的 DH 与 RSA 分量运算、USSHKit 从 n / e / d 还原素因子。
         .package(url: "https://github.com/attaswift/BigInt.git", "5.2.0"..<"7.0.0"),
+        // 只有包内的 NIOSSH 用。
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.2"),
     ],
     targets: [
@@ -93,12 +91,11 @@ let package = Package(
         // 纯展示 agent 视图上。
         .target(name: "AgentRuntimeUI", dependencies: ["AgentRuntime", "AgentKit", "UDesignKit"],
                 resources: [.process("Localizable.xcstrings")]),
-        // ---- SSH 栈的两个上游（源码来自上游 tag + ThirdParty/<名字>/patches/）----
-        // Sources/NIOSSH、Sources/Citadel、Sources/CCitadelBcrypt 由
-        // `Tools/ssh-stack/sync.sh apply` 生成，**别直接改**：改动写成补丁放进
-        // ThirdParty/，`sync.sh check` 会核对两者一致。来源、补丁清单与升级步骤见
-        // ThirdParty/README.md。模块名保持上游原名，所以同一个构建图里不能再出现
-        // 上游的 Citadel / swift-nio-ssh 包（模块会重名）。
+        // ---- SSH 栈：NIOSSH（上游源码 + 补丁）→ USSHCore（客户端层）→ USSHKit（产品层）----
+        // Sources/NIOSSH 与 Tests/NIOSSHTests 由 `Tools/ssh-stack/sync.sh apply` 生成，**别直接改**：
+        // 改动写成补丁放进 ThirdParty/，`sync.sh check` 会核对两者一致。来源、补丁清单与升级步骤见
+        // ThirdParty/README.md。模块名保持上游原名，所以同一个构建图里不能再出现上游的
+        // swift-nio-ssh 包（模块会重名）。
         //
         // apple/swift-nio-ssh 0.15.2 + 我们的 14 个补丁（ThirdParty/swift-nio-ssh/PATCHES.md）：
         // child channel 的三处 bug、会话密钥续长、「自定义密钥 / 签名」「自定义密钥交换」两个扩展接口、
@@ -126,7 +123,6 @@ let package = Package(
             name: "USSHCore",
             dependencies: [
                 "NIOSSH",
-                "CCitadelBcrypt",
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
@@ -151,45 +147,31 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
-        // orlandos-nl/Citadel 0.12.1。bcrypt_pbkdf 的 C 实现（OpenBSD）。
-        .target(name: "CCitadelBcrypt"),
-        // SSH-STACK-WIP: Citadel 与 USSHKit 两个 target 暂时停编，见 products 一节的说明。
-        // .target(
-        //     name: "Citadel",
-        //     dependencies: [
-        //         "CCitadelBcrypt",
-        //         "NIOSSH",
-        //         .product(name: "NIO", package: "swift-nio"),
-        //         .product(name: "Crypto", package: "swift-crypto"),
-        //         .product(name: "_CryptoExtras", package: "swift-crypto"),
-        //         .product(name: "BigInt", package: "BigInt"),
-        //         .product(name: "Logging", package: "swift-log"),
-        //     ],
-        //     swiftSettings: [.swiftLanguageMode(.v5)]
-        // ),
-        // // 同上：原先也是 5.10。
-        // .target(
-        //     name: "USSHKit",
-        //     dependencies: [
-        //         "Citadel",
-        //         // bcrypt_pbkdf。解密带口令的 OpenSSH 私钥容器要用，整个 SSH 栈里
-        //         // 只有这个 C target 有实现。
-        //         "CCitadelBcrypt",
-        //         "NIOSSH",
-        //         .product(name: "NIOCore", package: "swift-nio"),
-        //         .product(name: "NIOPosix", package: "swift-nio"),
-        //         .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
-        //         .product(name: "Crypto", package: "swift-crypto"),
-        //         .product(name: "_CryptoExtras", package: "swift-crypto"),
-        //         .product(name: "SwiftASN1", package: "swift-asn1"),
-        //         .product(name: "Logging", package: "swift-log"),
-        //     ],
-        //     resources: [.process("Localizable.xcstrings")],
-        //     swiftSettings: [.swiftLanguageMode(.v5)],
-        //     linkerSettings: [
-        //         .linkedFramework("Security"),
-        //     ]
-        // ),
+        // OpenBSD 的 bcrypt_pbkdf（BSD 许可，各文件头部保留原声明）。解密带口令的 OpenSSH 私钥容器要用。
+        // 来源：Citadel 0.12.1（`ae8562f8`）里随包带的那份，改名并作为我们自己的 target 维护，见 THIRD_PARTY_NOTICES.md。
+        .target(name: "CBcryptPBKDF"),
+        // 产品层：主机密钥库与策略、凭据与私钥导入、`-L` 转发隧道、SFTP 文件传输、面向用户的错误文案。
+        // 客户端协议在 USSHCore（`@_exported`，app 只要 `import USSHKit`）。原先是 5.10，即 Swift 5 语言模式。
+        .target(
+            name: "USSHKit",
+            dependencies: [
+                "USSHCore",
+                "CBcryptPBKDF",
+                "NIOSSH",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+                .product(name: "BigInt", package: "BigInt"),
+            ],
+            resources: [.process("Localizable.xcstrings")],
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .linkedFramework("Security"),
+            ]
+        ),
         .testTarget(name: "UDesignKitTests", dependencies: ["UDesignKit"]),
         .testTarget(name: "UAppKitBridgeTests", dependencies: ["UAppKitBridge"]),
         .testTarget(name: "UPaneTreeTests", dependencies: ["UPaneTree"]),
@@ -201,16 +183,18 @@ let package = Package(
         .testTarget(name: "AgentProvidersTests", dependencies: ["AgentProviders", "AgentKit"]),
         .testTarget(name: "AgentRuntimeTests", dependencies: ["AgentRuntime", "AgentProviders", "AgentKit"]),
         .testTarget(name: "AgentRuntimeUITests", dependencies: ["AgentRuntimeUI", "AgentRuntime", "UDesignKit"]),
-        // SSH-STACK-WIP: 同上。
-        // .testTarget(
-        //     name: "USSHKitTests",
-        //     dependencies: [
-        //         "USSHKit",
-        //         .product(name: "NIOCore", package: "swift-nio"),
-        //         .product(name: "NIOEmbedded", package: "swift-nio"),
-        //     ],
-        //     swiftSettings: [.swiftLanguageMode(.v5)]
-        // ),
+        .testTarget(
+            name: "USSHKitTests",
+            dependencies: [
+                "USSHKit",
+                "USSHTestServer",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // apple/swift-nio-ssh 自己的测试，和 Sources/NIOSSH 一起由 sync.sh 生成（别直接改），
         // 我们补丁带的回归测试也写在这里。升级上游后先跑它：`swift test --filter NIOSSHTests`。
         // 依赖照抄上游 manifest。

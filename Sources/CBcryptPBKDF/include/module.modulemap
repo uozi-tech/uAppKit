@@ -1,0 +1,4 @@
+module CBcryptPBKDF [system][extern_c] {
+ header "../bcrypt-kdf.h"
+ export *
+}

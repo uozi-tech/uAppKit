@@ -1,21 +1,18 @@
 import Foundation
+import USSHCore
 
 /// 解析 OpenSSH 容器里的 `ssh-rsa` 私钥分量。
 ///
-/// 存在的理由是**签名算法**，不是格式：容器里的 RSA 若交给 Citadel 解析，拿到的
-/// `Insecure.RSA.PrivateKey` 只会以 `ssh-rsa`（SHA-1）签名，而 OpenSSH 8.8 起服务端
-/// 默认不再接受 SHA-1 的公钥签名 —— 同一把密钥用 `ssh` 能登录、在这里却以
-/// `allAuthenticationOptionsFailed` 失败。自己读出 n/e/d/p/q 就能走 `rsa-sha2-512`
-/// （`RSASHA512AuthDelegate`），与 PEM 私钥同一条路。
-///
-/// 带口令的容器同理，只是先解密一层（见 `OpenSSHKeyDecryption`）。
+/// 自己读出 n / e / d / p / q 交给 USSHCore 的 `SSHRSAPrivateKey`，以 `rsa-sha2-512` / `-256` 签名
+/// （OpenSSH 8.8 起服务端默认不再接受 SHA-1 的 `ssh-rsa` 签名）。带口令的容器先解密一层
+/// （见 `OpenSSHKeyDecryption`）。私钥段里缺 p / q 的（只有 n / e / d）由 `RSAKeyMaterial.recoverPrimes` 补上。
 nonisolated enum OpenSSHRSADecoder {
 
     /// - Parameter passphrase: 容器带口令时必须给，否则抛 `.encryptedKeyNeedsPassphrase`。
     /// - Throws: `.encryptedKeyNeedsPassphrase` / `.incorrectPassphrase`、容器结构损坏，
     ///   或声明的算法不是 `ssh-rsa`。
     static func decodeComponents(openSSHText: String,
-                                 passphrase: String? = nil) throws -> RSAKeyComponents {
+                                 passphrase: String? = nil) throws -> SSHRSAPrivateKeyComponents {
         switch try OpenSSHContainer.openPrivateSection(
             text: openSSHText, passphrase: passphrase) {
         case .encrypted:
@@ -29,14 +26,25 @@ nonisolated enum OpenSSHRSADecoder {
             let n = try body.readMPInt()
             let e = try body.readMPInt()
             let d = try body.readMPInt()
-            _ = try body.readMPInt()                   // iqmp：由 p/q 可推，不取
-            let p = try body.readMPInt()
-            let q = try body.readMPInt()
-            guard !n.isEmpty, !e.isEmpty, !d.isEmpty, !p.isEmpty, !q.isEmpty else {
+            _ = try body.readMPInt()                   // iqmp：由 p/q 现算（与 PKCS#1 那条路一致）
+            var p = try body.readMPInt()
+            var q = try body.readMPInt()
+            guard !n.isEmpty, !e.isEmpty, !d.isEmpty else {
                 throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: ModuleBundle.bundle))
             }
-            return RSAKeyComponents(
+            if p.isEmpty || q.isEmpty {
+                guard let recovered = RSAKeyMaterial.recoverPrimes(
+                    modulus: n, publicExponent: e, privateExponent: d) else {
+                    throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: ModuleBundle.bundle))
+                }
+                (p, q) = recovered
+            }
+            return SSHRSAPrivateKeyComponents(
                 modulus: n, publicExponent: e, privateExponent: d, prime1: p, prime2: q)
         }
+    }
+
+    static func decode(openSSHText: String, passphrase: String?) throws -> ParsedPrivateKey {
+        .rsa(try RSAKeyMaterial.makeKey(decodeComponents(openSSHText: openSSHText, passphrase: passphrase)))
     }
 }
