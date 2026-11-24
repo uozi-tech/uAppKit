@@ -156,7 +156,10 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   - SSH 连接（任一跳）不是本端关的而断了（服务器关闭、传输出错、保活判死）：隧道收掉本地监听（之后连本地端口立刻被拒，
     不会再在死连接上开通道），正在转发的连接随各自的 SSH 通道结束，关掉连接，然后调一次 `onDisconnect(reason)`（收完才调）。
     `isConnected` 从此为 false、`disconnectReason` 是那个原因；隧道不会自己重连，app 要换一条新的。本端 `close()` 不回调。
-  - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。
+  - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。它们也看 SFTP 通道：
+    服务端的 `sftp-server` 退出（崩溃、被杀、闲置超时）而 sshd 还留着 SSH 连接时，`isConnected` 同样变成 false，`disconnectReason`
+    是 `.transportError(SFTPError.connectionClosed)`（`userDescription`：「连接中断：SFTP 通道已断开」）。以前只看 SSH 连接，
+    这种会话一直显示活着、请求却都失败。
 - **算法预设**（`SSHAlgorithms`）：
   - `.standard`（**USSHKit 默认**）：NIOSSH 自带的算法排在最前（AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥），后面只补 SHA-2
     时代的：RSA 主机密钥（`rsa-sha2-512/256`）、DH group16-sha512 / group14-sha256、AES-CTR + hmac-sha2（ETM 在前）。所以以前连得上的

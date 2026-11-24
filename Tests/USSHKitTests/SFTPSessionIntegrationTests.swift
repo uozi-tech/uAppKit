@@ -62,6 +62,35 @@ final class SFTPSessionIntegrationTests: XCTestCase {
         await session.close()
     }
 
+    /// 服务端的 sftp-server 退出、SSH 连接还在（测试服务端只关掉 SFTP 子通道）：`isConnected` 变成 false（以前只看 SSH
+    /// 连接，调用方以为会话还活着、永远不重开），`disconnectReason` 说是 SFTP 通道关了；本端 `close()` 之后为 nil。
+    func testSFTPChannelClosingAloneMakesTheSessionDisconnected() async throws {
+        let faults = SFTPFaultInjector()
+        faults.dropConnection(on: .stat)
+        let server = try await startServer(faults: faults)
+        defer { Task { await server.stop() } }
+        let session = try await open(server)
+        XCTAssertTrue(session.isConnected)
+        XCTAssertNil(session.disconnectReason)
+
+        do {
+            _ = try await session.stat("/anything")
+            XCTFail("the dropped request succeeded")
+        } catch {}
+        let deadline = ContinuousClock.now + .seconds(5)
+        while session.isConnected, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(session.isConnected)
+        guard case .transportError(let error) = session.disconnectReason, error as? SFTPError == .connectionClosed else {
+            return XCTFail("\(String(describing: session.disconnectReason))")
+        }
+        XCTAssertTrue(session.disconnectReason?.userDescription.contains("SFTP") == true,
+                      session.disconnectReason?.userDescription ?? "")
+
+        await session.close()
+        XCTAssertNil(session.disconnectReason)
+        XCTAssertFalse(session.isConnected)
+    }
+
     /// 目标已存在：有 posix-rename 时原子替换。
     func testUploadReplacesExistingFile() async throws {
         let server = try await startServer()

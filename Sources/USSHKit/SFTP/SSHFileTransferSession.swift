@@ -50,6 +50,8 @@ public enum SSHFileTransferError: Error, LocalizedError, Sendable {
 public actor SSHFileTransferSession {
     private let connected: ConnectedClient
     private let sftp: SFTPClient
+    /// 本端调过 `close()`（之后 `disconnectReason` 为 nil）。`nonisolated` 的属性要读它，所以不放在 actor 的状态里。
+    private let closedLocally = SessionFlag()
 
     private init(connected: ConnectedClient, sftp: SFTPClient) {
         self.connected = connected
@@ -120,17 +122,22 @@ public actor SSHFileTransferSession {
         }
     }
 
-    /// Every hop of the SSH connection is still up. Once the connection is lost
-    /// (server closed it, transport error, keepalive timeout) the session never
-    /// recovers: open a new one.
-    public nonisolated var isConnected: Bool { connected.isConnected }
+    /// Every hop of the SSH connection is still up **and** the SFTP channel is
+    /// still open. The server's `sftp-server` process can exit (crash, killed,
+    /// idle timeout) while sshd keeps the SSH connection: the session is then
+    /// just as dead. Once false the session never recovers: open a new one.
+    public nonisolated var isConnected: Bool { connected.isConnected && sftp.isActive }
 
-    /// Why the SSH connection went away, or nil while it is up or after a local
-    /// `close()`.
+    /// Why the session went away, or nil while it is up or after a local
+    /// `close()`. The SSH connection's reason when it is lost; when only the SFTP
+    /// channel closed (the SSH connection is still up) it is
+    /// `.transportError(SFTPError.connectionClosed)`.
     public nonisolated var disconnectReason: SSHDisconnectReason? {
+        if closedLocally.isSet { return nil }
         let reason = connected.target.disconnectReason ?? connected.bastion?.disconnectReason
-        if let reason, reason.isLocalClose { return nil }
-        return reason
+        if let reason { return reason.isLocalClose ? nil : reason }
+        // 连接还在（或原因还差一拍才落定），SFTP 通道却已经关了：服务端的 sftp-server 退出了。
+        return sftp.isActive ? nil : .transportError(SFTPError.connectionClosed)
     }
 
     /// `stat(2)` the remote file, returning size and modification date.
@@ -495,6 +502,7 @@ public actor SSHFileTransferSession {
     }
 
     public func close() async {
+        closedLocally.set()
         await sftp.close()
         await connected.close()
     }
@@ -506,6 +514,14 @@ public actor SSHFileTransferSession {
         guard let size else { return 0 }
         return size > UInt64(Int64.max) ? Int64.max : Int64(size)
     }
+}
+
+/// 只能从假变真的标志，任意线程读写。
+private final class SessionFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }
 
 /// 只恢复一次的 continuation（收尾做完与时限到了，谁先到算谁）。
