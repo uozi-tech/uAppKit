@@ -340,6 +340,122 @@ final class CustomKeyExchangeTests: CustomAlgorithmTestCase {
         try run(client: &builtInClient, server: &seamServer)
     }
 
+    func testDegeneratePeerValuesAndSecretsAreRejected() throws {
+        let role = SSHConnectionRole.client(
+            .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
+        )
+        let hostKey = NIOSSHPrivateKey(ed25519Key: self.ed25519)
+        let signature = try hostKey.sign(digest: SHA256.hash(data: [UInt8]()))
+        func receive<Algorithm: NIOSSHKeyExchangeAlgorithmProtocol>(_: Algorithm.Type, _ value: [UInt8]) throws {
+            var exchange = CustomKeyExchange<Algorithm>(ourRole: role, previousSessionIdentifier: nil)
+            var exchangeBytes = ByteBuffer()
+            _ = try exchange.receiveServerKeyExchangePayload(
+                serverKeyExchangeMessage: .init(
+                    hostKey: hostKey.publicKey,
+                    publicKey: ByteBuffer(bytes: value),
+                    signature: signature
+                ),
+                initialExchangeBytes: &exchangeBytes,
+                allocator: ByteBufferAllocator(),
+                expectedKeySizes: AES256GCMOpenSSHTransportProtection.keySizes
+            )
+        }
+        // mpint peer values: empty, zero (with or without leading zeros) and one.
+        for value: [UInt8] in [[], [0x00], [0x00, 0x00], [0x01], [0x00, 0x01]] {
+            XCTAssertThrowsError(try receive(HighBitKeyExchange.self, value), "\(value)") { error in
+                XCTAssertEqual((error as? NIOSSHError)?.type, .invalidSSHMessage)
+            }
+        }
+        // An empty string peer value.
+        XCTAssertThrowsError(try receive(ZeroSecretKeyExchange.self, [])) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidSSHMessage)
+        }
+        // A valid peer value but K = 1 (LeadingZerosKeyExchange always returns 1).
+        XCTAssertThrowsError(try receive(LeadingZerosKeyExchange.self, [0x02])) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .weakSharedSecret)
+        }
+    }
+
+    // MARK: Registry snapshot
+
+    func testKeyExchangeUsesTheAlgorithmsItOffered() throws {
+        // The client's configuration names a method that is not registered yet when its KEXINIT goes out.
+        NIOSSHAlgorithms._unregisterAllKeyExchangeAlgorithms()
+        var clientConfiguration = SSHClientConfiguration(
+            userAuthDelegate: InfinitePasswordDelegate(),
+            serverAuthDelegate: AcceptAllHostKeysDelegate()
+        )
+        clientConfiguration.keyExchangeAlgorithms = [Self.toyMPInt, "curve25519-sha256"]
+        var client = SSHKeyExchangeStateMachine(
+            allocator: ByteBufferAllocator(),
+            loop: EmbeddedEventLoop(),
+            role: .client(clientConfiguration),
+            remoteVersion: Constants.version,
+            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
+            previousSessionIdentifier: nil
+        )
+        let clientMessage = client.createKeyExchangeMessage()
+        client.send(keyExchange: clientMessage)
+        XCTAssertFalse(clientMessage.keyExchangeAlgorithms.contains(Substring(Self.toyMPInt)))
+
+        // It is registered before the server's KEXINIT arrives, and the server prefers it.
+        NIOSSHAlgorithms.register(keyExchangeAlgorithm: ToyMPIntKeyExchange.self)
+        var serverConfiguration = SSHServerConfiguration(
+            hostKeys: [.init(ed25519Key: self.ed25519)],
+            userAuthDelegate: DenyAllServerAuthDelegate()
+        )
+        serverConfiguration.keyExchangeAlgorithms = [Self.toyMPInt, "curve25519-sha256"]
+        let server = SSHKeyExchangeStateMachine(
+            allocator: ByteBufferAllocator(),
+            loop: EmbeddedEventLoop(),
+            role: .server(serverConfiguration),
+            remoteVersion: Constants.version,
+            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
+            previousSessionIdentifier: nil
+        )
+        let serverMessage = server.createKeyExchangeMessage()
+        XCTAssertTrue(serverMessage.keyExchangeAlgorithms.contains(Substring(Self.toyMPInt)))
+
+        // The client negotiates from what it offered: curve25519, not the method it never announced.
+        toyKeyExchangeInstances.withLockedValue { $0 = 0 }
+        XCTAssertNotNil(try client.handle(keyExchange: serverMessage))
+        XCTAssertEqual(toyKeyExchangeInstances.withLockedValue { $0 }, 0)
+    }
+
+    func testHostKeyAlgorithmsAreSnapshottedToo() throws {
+        NIOSSHAlgorithms._unregisterAllPublicKeyAlgorithms()
+        var client = SSHKeyExchangeStateMachine(
+            allocator: ByteBufferAllocator(),
+            loop: EmbeddedEventLoop(),
+            role: .client(
+                .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
+            ),
+            remoteVersion: Constants.version,
+            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
+            previousSessionIdentifier: nil
+        )
+        client.send(keyExchange: client.createKeyExchangeMessage())
+
+        // Registered only after our KEXINIT: a server offering nothing but this algorithm must not be accepted.
+        NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToySignature.self)
+        let server = SSHKeyExchangeStateMachine(
+            allocator: ByteBufferAllocator(),
+            loop: EmbeddedEventLoop(),
+            role: .server(
+                .init(
+                    hostKeys: [NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))],
+                    userAuthDelegate: DenyAllServerAuthDelegate()
+                )
+            ),
+            remoteVersion: Constants.version,
+            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
+            previousSessionIdentifier: nil
+        )
+        XCTAssertThrowsError(try client.handle(keyExchange: server.createKeyExchangeMessage())) { error in
+            XCTAssertEqual((error as? NIOSSHError)?.type, .keyExchangeNegotiationFailure)
+        }
+    }
+
     // MARK: End to end
 
     func testCustomKeyExchangeHandshakeAndRekey() throws {

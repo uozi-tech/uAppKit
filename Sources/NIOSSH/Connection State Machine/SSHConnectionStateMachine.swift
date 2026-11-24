@@ -1266,6 +1266,28 @@ extension SSHConnectionStateMachine {
         }
     }
 
+    /// Encrypted traffic in each direction since the last key exchange. Only while active: the one state a key
+    /// re-exchange can be started from.
+    var trafficSinceKeyExchange: (inbound: SSHTrafficCounter, outbound: SSHTrafficCounter)? {
+        guard case .active(let state) = self.state else {
+            return nil
+        }
+        return (state.parser.trafficSinceNewKeys, state.serializer.trafficSinceNewKeys)
+    }
+
+    /// Whether channel messages may be sent now. During a key exchange they may not, from our KEXINIT until our
+    /// NEWKEYS (RFC 4253 §7.1); `NIOSSHHandler` queues them meanwhile.
+    var canSendChannelMessages: Bool {
+        switch self.state {
+        case .active, .rekeyingSentNewKeysState:
+            return true
+        case .idle, .sentVersion, .keyExchange, .receivedNewKeys, .sentNewKeys, .userAuthentication,
+            .receivedKexInitWhenActive, .sentKexInitWhenActive, .rekeying, .rekeyingReceivedNewKeysState,
+            .receivedDisconnect, .sentDisconnect:
+            return false
+        }
+    }
+
     var disconnected: Bool {
         switch self.state {
         case .receivedDisconnect, .sentDisconnect:
