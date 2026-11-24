@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 @preconcurrency import Crypto
@@ -41,6 +43,8 @@ extension NIOSSHSignature {
         case ecdsaP384(P384.Signing.ECDSASignature)
 
         case ecdsaP521(P521.Signing.ECDSASignature)
+
+        case custom(any NIOSSHSignatureProtocol)  // See `CustomKeys.swift`.
 
         internal enum RawBytes {
             case byteBuffer(ByteBuffer)
@@ -93,10 +97,14 @@ extension NIOSSHSignature.BackingSignature: Equatable {
             return lhs.rawRepresentation == rhs.rawRepresentation
         case (.ecdsaP521(let lhs), .ecdsaP521(let rhs)):
             return lhs.rawRepresentation == rhs.rawRepresentation
+        case (.custom(let lhs), .custom(let rhs)):
+            return type(of: lhs).signaturePrefix == type(of: rhs).signaturePrefix
+                && lhs.rawRepresentation == rhs.rawRepresentation
         case (.ed25519, _),
             (.ecdsaP256, _),
             (.ecdsaP384, _),
-            (.ecdsaP521, _):
+            (.ecdsaP521, _),
+            (.custom, _):
             return false
         }
     }
@@ -117,6 +125,10 @@ extension NIOSSHSignature.BackingSignature: Hashable {
         case .ecdsaP521(let sig):
             hasher.combine(3)
             hasher.combine(sig.rawRepresentation)
+        case .custom(let sig):
+            hasher.combine(4)
+            hasher.combine(type(of: sig).signaturePrefix)
+            hasher.combine(sig.rawRepresentation)
         }
     }
 }
@@ -134,6 +146,10 @@ extension ByteBuffer {
             return self.writeECDSAP384Signature(baseSignature: sig)
         case .ecdsaP521(let sig):
             return self.writeECDSAP521Signature(baseSignature: sig)
+        case .custom(let sig):
+            var writtenLength = self.writeSSHString(type(of: sig).signaturePrefix.utf8)
+            writtenLength += sig.write(to: &self)
+            return writtenLength
         }
     }
 
@@ -229,6 +245,8 @@ extension ByteBuffer {
                 return try buffer.readECDSAP384Signature()
             } else if bytesView.elementsEqual(NIOSSHSignature.ecdsaP521SignaturePrefix) {
                 return try buffer.readECDSAP521Signature()
+            } else if let customType = NIOSSHAlgorithms.signatureType(forPrefix: bytesView) {
+                return NIOSSHSignature(backingSignature: .custom(try customType.read(from: &buffer)))
             } else {
                 // We don't know this signature type.
                 let signature =

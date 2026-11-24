@@ -1,0 +1,165 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 12:08:49 +0800
+Subject: [PATCH 1/5] =?UTF-8?q?NIOSSH:=20=E5=AF=B9=E7=AB=AF=E5=85=88?=
+ =?UTF-8?q?=E5=85=B3=EF=BC=88.closedRemotely=EF=BC=89=E6=97=B6=E4=B9=9F?=
+ =?UTF-8?q?=E4=B8=8D=E5=9B=9E=20window-adjust?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SSHChildChannel.deliverSingleRead 排空缓冲读时，只用 !state.sentClose 判断能不能回
+CHANNEL_WINDOW_ADJUST。sentClose 只对 .closedLocally / .closed 为真；对端先发
+CHANNEL_CLOSE 时状态是 .closedRemotely，sentClose 为假，而 sendChannelWindowAdjust 对
+.closedRemotely 是 preconditionFailure，会在 event-loop 线程上 abort 整个进程（uTerm 1.6.0
+线上崩溃的同一行，只是从另一扇门进来）。
+
+ChildChannelStateMachine 新增 canSendWindowAdjust，恰好是 sendChannelWindowAdjust 接受的
+4 个状态（.active / .halfClosedLocal / .halfClosedRemote / .quiescent），deliverSingleRead
+改用它。合法集合只写在状态机一处。
+
+在 0.15.2 里 .closedRemotely 是瞬时的：handleInboundChannelClose 收到 CLOSE 后同步回 CLOSE、
+进 .closed，closedCleanly 先置 didClose 再排空，所以今天的代码路径到不了那个 precondition。
+这个补丁是纵深防御：守卫和状态机的合法集合对齐，以后上游改成延迟回 CLOSE（或别处在
+.closedRemotely 里触发读）也不会崩。回归测试直接核对状态机：canSendWindowAdjust 与
+sendChannelWindowAdjust 的接受集合一致，.closedRemotely 下为假。
+
+可以提给上游：apple/swift-nio-ssh 的 main 仍只有 sentClose 守卫。
+---
+ .../ChildChannelStateMachine.swift            | 12 +++
+ .../Child Channels/SSHChildChannel.swift      |  5 +-
+ .../ChildChannelStateMachineTests.swift       | 86 +++++++++++++++++++
+ 3 files changed, 101 insertions(+), 2 deletions(-)
+ create mode 100644 Tests/NIOSSHTests/ChildChannelStateMachineTests.swift
+
+diff --git a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift
+index dba4ded..980475c 100644
+--- a/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
++++ b/Sources/NIOSSH/Child Channels/ChildChannelStateMachine.swift	
+@@ -687,6 +687,18 @@ extension ChildChannelStateMachine {
+         }
+     }
+ 
++    // Whether sending a CHANNEL_WINDOW_ADJUST is legal in the current state: exactly the states that
++    // `sendChannelWindowAdjust` accepts. This is narrower than `isActiveOnChannel` and `!sentClose`, both of
++    // which are also true in `.closedRemotely`, where a window adjust hits a `preconditionFailure`.
++    var canSendWindowAdjust: Bool {
++        switch self.state {
++        case .active, .halfClosedLocal, .halfClosedRemote, .quiescent:
++            return true
++        case .idle, .requestedLocally, .requestedRemotely, .closedRemotely, .closedLocally, .closed:
++            return false
++        }
++    }
++
+     // Whether we've sent a channel close message.
+     var sentClose: Bool {
+         switch self.state {
+diff --git a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift
+index 209481e..2fed52a 100644
+--- a/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
++++ b/Sources/NIOSSH/Child Channels/SSHChildChannel.swift	
+@@ -677,8 +677,9 @@ extension SSHChildChannel {
+     private func deliverSingleRead(_ data: PendingContent) {
+         switch data {
+         case .data(let data):
+-            // We only futz with the window manager if the channel is not already closed.
+-            if !self.didClose, !self.state.sentClose,
++            // We only futz with the window manager if the channel is not already closed, and only in states
++            // that may send a window adjust: `!sentClose` alone lets `.closedRemotely` through.
++            if !self.didClose, self.state.canSendWindowAdjust,
+                 let increment = self.windowManager.unbufferBytes(data.data.readableBytes)
+             {
+                 let update = SSHMessage.ChannelWindowAdjustMessage(
+diff --git a/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift b/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift
+new file mode 100644
+index 0000000..0e74547
+--- /dev/null
++++ b/Tests/NIOSSHTests/ChildChannelStateMachineTests.swift
+@@ -0,0 +1,86 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOCore
++import XCTest
++
++@testable import NIOSSH
++
++final class ChildChannelStateMachineTests: XCTestCase {
++    private func activeOutboundChannel() throws -> ChildChannelStateMachine {
++        var state = ChildChannelStateMachine(localChannelID: 1)
++        state.sendChannelOpen(
++            .init(type: .session, senderChannel: 1, initialWindowSize: 1 << 24, maximumPacketSize: 1 << 17)
++        )
++        try state.receiveChannelOpenConfirmation(
++            .init(recipientChannel: 1, senderChannel: 2, initialWindowSize: 1 << 24, maximumPacketSize: 1 << 17)
++        )
++        return state
++    }
++
++    /// `canSendWindowAdjust` must be true exactly where `sendChannelWindowAdjust` does not trap.
++    func testCanSendWindowAdjustMatchesSendChannelWindowAdjust() throws {
++        let adjust = SSHMessage.ChannelWindowAdjustMessage(recipientChannel: 2, bytesToAdd: 1)
++
++        var idle = ChildChannelStateMachine(localChannelID: 1)
++        XCTAssertFalse(idle.canSendWindowAdjust)
++        idle.sendChannelOpen(
++            .init(type: .session, senderChannel: 1, initialWindowSize: 1 << 24, maximumPacketSize: 1 << 17)
++        )
++        XCTAssertFalse(idle.canSendWindowAdjust, "requestedLocally")
++
++        var active = try self.activeOutboundChannel()
++        XCTAssertTrue(active.canSendWindowAdjust)
++        XCTAssertNoThrow(try active.sendChannelWindowAdjust(adjust))
++
++        var halfClosedRemote = try self.activeOutboundChannel()
++        try halfClosedRemote.receiveChannelEOF(.init(recipientChannel: 1))
++        XCTAssertTrue(halfClosedRemote.canSendWindowAdjust)
++        XCTAssertNoThrow(try halfClosedRemote.sendChannelWindowAdjust(adjust))
++
++        var halfClosedLocal = try self.activeOutboundChannel()
++        try halfClosedLocal.sendChannelEOF(.init(recipientChannel: 2))
++        XCTAssertTrue(halfClosedLocal.canSendWindowAdjust)
++
++        var quiescent = halfClosedLocal
++        try quiescent.receiveChannelEOF(.init(recipientChannel: 1))
++        XCTAssertTrue(quiescent.canSendWindowAdjust)
++        XCTAssertNoThrow(try quiescent.sendChannelWindowAdjust(adjust))
++
++        var closedLocally = try self.activeOutboundChannel()
++        try closedLocally.sendChannelClose(.init(recipientChannel: 2))
++        XCTAssertFalse(closedLocally.canSendWindowAdjust)
++
++        var closed = closedLocally
++        try closed.receiveChannelClose(.init(recipientChannel: 1))
++        XCTAssertFalse(closed.canSendWindowAdjust)
++    }
++
++    /// The peer closed first: `.closedRemotely`. The upstream guard (`!sentClose`) lets this state through, but
++    /// `sendChannelWindowAdjust` would hit a `preconditionFailure` here and abort the process.
++    func testClosedRemotelyCannotSendWindowAdjust() throws {
++        var state = try self.activeOutboundChannel()
++        try state.receiveChannelClose(.init(recipientChannel: 1))
++
++        XCTAssertFalse(state.sentClose, "the gap the old guard left open")
++        XCTAssertTrue(state.isActiveOnChannel)
++        XCTAssertFalse(state.canSendWindowAdjust)
++
++        // The same after an EOF from the peer.
++        var afterEOF = try self.activeOutboundChannel()
++        try afterEOF.receiveChannelEOF(.init(recipientChannel: 1))
++        try afterEOF.receiveChannelClose(.init(recipientChannel: 1))
++        XCTAssertFalse(afterEOF.sentClose)
++        XCTAssertFalse(afterEOF.canSendWindowAdjust)
++    }
++}

@@ -100,8 +100,11 @@ let package = Package(
         // ThirdParty/README.md。模块名保持上游原名，所以同一个构建图里不能再出现
         // 上游的 Citadel / swift-nio-ssh 包（模块会重名）。
         //
-        // apple/swift-nio-ssh 0.15.2 + 我们的补丁。依赖与设置照抄上游 manifest
-        // （工具版本 6.1，即 Swift 6 语言模式，没有额外的编译设置）。
+        // apple/swift-nio-ssh 0.15.2 + 我们的 5 个补丁（ThirdParty/swift-nio-ssh/PATCHES.md）：
+        // 两处 child channel 的 bug，以及「自定义密钥 / 签名」「自定义密钥交换」两个扩展接口
+        // （公开 API 见 ThirdParty/swift-nio-ssh/EXTENSION-API.md；算法实现在 USSHCore，不进 NIOSSH）。
+        // 依赖与设置照抄上游 manifest（工具版本 6.1，即 Swift 6 语言模式；上游的
+        // MemberImportVisibility 没开，它只让编译更严，不影响行为）。
         .target(
             name: "NIOSSH",
             dependencies: [
@@ -204,6 +207,18 @@ let package = Package(
         //     ],
         //     swiftSettings: [.swiftLanguageMode(.v5)]
         // ),
+        // apple/swift-nio-ssh 自己的测试，和 Sources/NIOSSH 一起由 sync.sh 生成（别直接改），
+        // 我们补丁带的回归测试也写在这里。升级上游后先跑它：`swift test --filter NIOSSHTests`。
+        // 依赖照抄上游 manifest。
+        .testTarget(
+            name: "NIOSSHTests",
+            dependencies: [
+                "NIOSSH",
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
+                .product(name: "NIOFoundationCompat", package: "swift-nio"),
+            ]
+        ),
         .testTarget(
             name: "USSHCoreTests",
             dependencies: [

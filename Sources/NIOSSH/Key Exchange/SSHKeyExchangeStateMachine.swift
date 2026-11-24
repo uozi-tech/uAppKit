@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import Crypto
@@ -129,7 +131,7 @@ struct SSHKeyExchangeStateMachine {
 
         return .init(
             cookie: rng.randomCookie(allocator: self.allocator),
-            keyExchangeAlgorithms: Self.supportedKeyExchangeAlgorithms,
+            keyExchangeAlgorithms: self.configuredKeyExchangeAlgorithms,
             serverHostKeyAlgorithms: self.supportedHostKeyAlgorithms,
             encryptionAlgorithmsClientToServer: encryptionAlgorithms,
             encryptionAlgorithmsServerToClient: encryptionAlgorithms,
@@ -289,7 +291,14 @@ struct SSHKeyExchangeStateMachine {
         case .keyExchangeInitSent(exchange: var exchanger, let negotiated):
             switch self.role {
             case .client:
-                guard message.hostKey.keyPrefix.elementsEqual(negotiated.negotiatedHostKeyAlgorithm.utf8) else {
+                // A custom host key may be used with an algorithm other than its key prefix (an `ssh-rsa` key
+                // negotiated as `rsa-sha2-512`); its signature must then be of that algorithm.
+                guard
+                    message.hostKey.isUsable(
+                        withAlgorithm: negotiated.negotiatedHostKeyAlgorithm.utf8,
+                        signature: message.signature
+                    )
+                else {
                     throw NIOSSHError.invalidHostKeyForKeyExchange(
                         expected: negotiated.negotiatedHostKeyAlgorithm,
                         got: message.hostKey.keyPrefix
@@ -451,13 +460,13 @@ struct SSHKeyExchangeStateMachine {
 
         switch self.role {
         case .client:
-            clientAlgorithms = Self.supportedKeyExchangeAlgorithms
+            clientAlgorithms = self.configuredKeyExchangeAlgorithms
             serverAlgorithms = peerKeyExchangeAlgorithms
             clientHostKeyAlgorithms = self.supportedHostKeyAlgorithms
             serverHostKeyAlgorithms = peerHostKeyAlgorithms
         case .server:
             clientAlgorithms = peerKeyExchangeAlgorithms
-            serverAlgorithms = Self.supportedKeyExchangeAlgorithms
+            serverAlgorithms = self.configuredKeyExchangeAlgorithms
             clientHostKeyAlgorithms = peerHostKeyAlgorithms
             serverHostKeyAlgorithms = self.supportedHostKeyAlgorithms
         }
@@ -546,14 +555,31 @@ struct SSHKeyExchangeStateMachine {
             }
         }
 
+        // A registered custom method (see `CustomKeyExchange.swift`)?
+        if let exchanger = Self.customExchanger(
+            for: algorithm,
+            role: self.role,
+            previousSessionIdentifier: self.previousSessionIdentifier
+        ) {
+            return exchanger
+        }
+
         // Huh, we didn't find it. Weird error.
         throw NIOSSHError.keyExchangeNegotiationFailure
+    }
+
+    /// The key exchange methods from the configuration, in order of preference, keeping only those we can run:
+    /// built-in ones and registered custom ones.
+    private var configuredKeyExchangeAlgorithms: [Substring] {
+        self.role.keyExchangeAlgorithms.map { Substring($0) }.filter { name in
+            Self.supportedKeyExchangeAlgorithms.contains(name) || NIOSSHAlgorithms.keyExchangeType(named: name) != nil
+        }
     }
 
     private func expectingIncorrectGuess(_ kexMessage: SSHMessage.KeyExchangeMessage) -> Bool {
         // A guess is wrong if the key exchange algorithm and/or the host key algorithm differ from our preference.
         kexMessage.firstKexPacketFollows
-            && (kexMessage.keyExchangeAlgorithms.first != Self.supportedKeyExchangeAlgorithms.first
+            && (kexMessage.keyExchangeAlgorithms.first != self.configuredKeyExchangeAlgorithms.first
                 || kexMessage.serverHostKeyAlgorithms.first != self.supportedHostKeyAlgorithms.first)
     }
 
@@ -561,7 +587,9 @@ struct SSHKeyExchangeStateMachine {
     private var supportedHostKeyAlgorithms: [Substring] {
         switch self.role {
         case .client:
+            // Registered custom algorithms follow the built-in ones.
             return Self.supportedServerHostKeyAlgorithms
+                + NIOSSHAlgorithms.registeredPublicKeyAlgorithms.map { Substring($0) }
         case .server(let configuration):
             return configuration.hostKeys.flatMap { $0.hostKeyAlgorithms }
         }

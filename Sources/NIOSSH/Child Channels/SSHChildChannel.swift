@@ -10,6 +10,8 @@
 //
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified by uAppKit: see ThirdParty/swift-nio-ssh/PATCHES.md for the list of changes.
+//
 //===----------------------------------------------------------------------===//
 
 import Atomics
@@ -104,6 +106,10 @@ final class SSHChildChannel {
     private var initializer: Initializer?
 
     private var didClose = false
+
+    /// The error that tore this channel down, if any. Kept so that an initializer completing after the teardown
+    /// can fail its promise with the real reason: `closeFuture` never fails, so it cannot carry it.
+    private var closeError: Error?
 
     private var type: SSHChannelType?
 
@@ -512,8 +518,9 @@ extension SSHChildChannel: Channel, ChannelCore {
             self.processOutboundMessage(.channelOpen(message), promise: nil)
             self.writePendingToMultiplexer()
         } else {
-            // Already closed, just fail this promise.
-            self.closeFuture.cascadeFailure(to: userPromise)
+            // Already closed, just fail this promise. Do not cascade from `closeFuture`: it never fails, so the
+            // promise would stay pending forever.
+            userPromise?.fail(self.closeError ?? ChannelError.ioOnClosedChannel)
         }
     }
 
@@ -592,6 +599,7 @@ extension SSHChildChannel: Channel, ChannelCore {
             return
         }
         self.didClose = true
+        self.closeError = error
 
         self.deliverPendingReads()
         self.failPendingWrites(error: error)
@@ -616,7 +624,10 @@ extension SSHChildChannel: Channel, ChannelCore {
 
         self.eventLoop.execute {
             self.removeHandlers(pipeline: self.pipeline)
-            self.closePromise.fail(error)
+            // `Channel.closeFuture` must never fail (NIOCore contract; `NIOAsyncChannel.executeThenClose` asserts
+            // on it). The error has already been reported through `fireErrorCaught`, the failed pending writes and
+            // the pending close / activation promises above.
+            self.closePromise.succeed(())
             self.multiplexer.childChannelErrored(
                 channelID: self.state.localChannelIdentifier,
                 expectClose: !self.state.isClosed
@@ -677,8 +688,9 @@ extension SSHChildChannel {
     private func deliverSingleRead(_ data: PendingContent) {
         switch data {
         case .data(let data):
-            // We only futz with the window manager if the channel is not already closed.
-            if !self.didClose, !self.state.sentClose,
+            // We only futz with the window manager if the channel is not already closed, and only in states
+            // that may send a window adjust: `!sentClose` alone lets `.closedRemotely` through.
+            if !self.didClose, self.state.canSendWindowAdjust,
                 let increment = self.windowManager.unbufferBytes(data.data.readableBytes)
             {
                 let update = SSHMessage.ChannelWindowAdjustMessage(

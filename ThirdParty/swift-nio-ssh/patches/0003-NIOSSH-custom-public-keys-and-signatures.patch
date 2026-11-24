@@ -1,0 +1,1348 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Jacky <me@jackyu.cn>
+Date: Tue, 24 Nov 2026 12:17:12 +0800
+Subject: [PATCH 3/5] =?UTF-8?q?NIOSSH:=20=E8=87=AA=E5=AE=9A=E4=B9=89?=
+ =?UTF-8?q?=E5=85=AC=E9=92=A5=20/=20=E7=A7=81=E9=92=A5=20/=20=E7=AD=BE?=
+ =?UTF-8?q?=E5=90=8D=E7=9A=84=E6=89=A9=E5=B1=95=E6=8E=A5=E5=8F=A3=EF=BC=88?=
+ =?UTF-8?q?custom=20public=20keys=20and=20signatures=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+NIOSSH 只带 ed25519 / ECDSA，Apple 维护者表态只接受「扩展接口」、不把 RSA 合进主线
+（issue #60、PR #62 / #158）。这个补丁就是那个接口，算法实现放在 NIOSSH 之外。公开名字沿用
+Wellz26 fork（同样来自 #62 / #158）：NIOSSHPublicKeyProtocol、NIOSSHPrivateKeyProtocol、
+NIOSSHSignatureProtocol、NIOSSHAlgorithms.register(publicKey:signature:)，以及
+NIOSSHPublicKey(custom:) / NIOSSHPrivateKey(custom:) / NIOSSHPublicKey.write(to:)。
+
+和那个 fork 不同的一点：SSH 里「密钥格式」（公钥 blob 开头的类型，ssh-rsa）和「公钥算法名」
+（userauth 请求、server_host_key_algorithms、签名的格式名，rsa-sha2-512）是两回事，fork 把它们
+绑成一个值，USSHKit 只好把 RSA 公钥的类型也写成 rsa-sha2-512。这里拆开：
+- NIOSSHPublicKeyProtocol.publicKeyPrefix 是密钥格式，NIOSSHSignatureProtocol.signaturePrefix
+  是算法名；register(publicKey:signature:) 声明「这种格式的密钥能用这个算法」。一种格式可以登记
+  多个算法（每个算法一个签名类型），ssh-rsa 就登记 rsa-sha2-512 / rsa-sha2-256 / ssh-rsa 三次。
+- NIOSSHPrivateKeyProtocol.keyPrefix 是这把私钥签名用的算法名。同一把密钥要以多个算法出现时
+  包成多个私钥类型（主机密钥就都放进 SSHServerConfiguration.hostKeys）。
+- 新的内部判断 NIOSSHPublicKey.isUsable(withAlgorithm:signature:)：内置密钥照旧是「算法名 ==
+  密钥前缀」；自定义密钥要求 (类型, 算法) 已登记，并且签名本身就是这个算法的（协商了 rsa-sha2-512
+  却回 ssh-rsa 的 SHA-1 签名要拒绝）。主机密钥校验、userauth 请求与 PK_OK 的一致性检查都改用它。
+- userauth 请求与 PK_OK 多一个内部字段 publicKeyAlgorithm（nil = 密钥前缀，内置密钥一律 nil），
+  客户端从自定义私钥取、写进请求与签名数据；服务端解析时记下、验签和回 PK_OK 用它。
+- 客户端 KEXINIT 的 server_host_key_algorithms = 内置算法（原顺序）+ 已登记算法（登记顺序）。
+  服务端仍只报 hostKeys 里的算法。
+- 解析：已登记的密钥格式与签名格式在内置之后、证书之前查；没登记的照旧 unknownPublicKey /
+  unknownSignature。登记与内置重名、或同名登记给不同类型是编程错误（precondition）。
+- 证书：自定义密钥不能当被证书认证的公钥（需要对应的 *-cert-v01 类型，接口里没有），构造时抛
+  invalidCertificate；自定义密钥当 CA 签发证书不受影响。
+
+注册表进程级、加锁（NIOLockedValueBox）。测试用 @testable 的 _unregisterAllPublicKeyAlgorithms
+复位。CustomKeyTests 用测试专用的玩具算法（Ed25519 包成 toy-key@ 格式、两个与格式不同名的算法）
+走完整的内存客户端 / 服务端：自定义用户密钥认证、密钥格式 ≠ 协商算法的主机密钥（含重新密钥交换）、
+签名算法与协商算法不符被拒；UnregisteredCustomKeyTests：没登记时解析失败、协商失败、userauth 被
+拒，都不会崩。
+
+接口本身可以提给上游；算法实现不进 NIOSSH。
+---
+ .../SSHKeyExchangeStateMachine.swift          |  11 +-
+ .../Keys And Signatures/CustomKeys.swift      | 257 +++++++++
+ .../NIOSSHCertifiedPublicKey.swift            |  10 +
+ .../NIOSSHPrivateKey.swift                    |  14 +
+ .../Keys And Signatures/NIOSSHPublicKey.swift |  39 +-
+ .../Keys And Signatures/NIOSSHSignature.swift |  18 +-
+ Sources/NIOSSH/SSHMessages.swift              |  33 +-
+ .../UserAuthSignablePayload.swift             |  11 +-
+ .../UserAuthenticationMethod.swift            |   5 +-
+ .../UserAuthenticationStateMachine.swift      |   7 +-
+ Tests/NIOSSHTests/CustomKeyTests.swift        | 530 ++++++++++++++++++
+ 11 files changed, 918 insertions(+), 17 deletions(-)
+ create mode 100644 Sources/NIOSSH/Keys And Signatures/CustomKeys.swift
+ create mode 100644 Tests/NIOSSHTests/CustomKeyTests.swift
+
+diff --git a/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift b/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift
+index 3ef830d..e659ae9 100644
+--- a/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift	
++++ b/Sources/NIOSSH/Key Exchange/SSHKeyExchangeStateMachine.swift	
+@@ -289,7 +289,14 @@ struct SSHKeyExchangeStateMachine {
+         case .keyExchangeInitSent(exchange: var exchanger, let negotiated):
+             switch self.role {
+             case .client:
+-                guard message.hostKey.keyPrefix.elementsEqual(negotiated.negotiatedHostKeyAlgorithm.utf8) else {
++                // A custom host key may be used with an algorithm other than its key prefix (an `ssh-rsa` key
++                // negotiated as `rsa-sha2-512`); its signature must then be of that algorithm.
++                guard
++                    message.hostKey.isUsable(
++                        withAlgorithm: negotiated.negotiatedHostKeyAlgorithm.utf8,
++                        signature: message.signature
++                    )
++                else {
+                     throw NIOSSHError.invalidHostKeyForKeyExchange(
+                         expected: negotiated.negotiatedHostKeyAlgorithm,
+                         got: message.hostKey.keyPrefix
+@@ -561,7 +568,9 @@ struct SSHKeyExchangeStateMachine {
+     private var supportedHostKeyAlgorithms: [Substring] {
+         switch self.role {
+         case .client:
++            // Registered custom algorithms follow the built-in ones.
+             return Self.supportedServerHostKeyAlgorithms
++                + NIOSSHAlgorithms.registeredPublicKeyAlgorithms.map { Substring($0) }
+         case .server(let configuration):
+             return configuration.hostKeys.flatMap { $0.hostKeyAlgorithms }
+         }
+diff --git a/Sources/NIOSSH/Keys And Signatures/CustomKeys.swift b/Sources/NIOSSH/Keys And Signatures/CustomKeys.swift
+new file mode 100644
+index 0000000..e9e644b
+--- /dev/null
++++ b/Sources/NIOSSH/Keys And Signatures/CustomKeys.swift	
+@@ -0,0 +1,257 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import NIOConcurrencyHelpers
++import NIOCore
++
++#if canImport(FoundationEssentials)
++import FoundationEssentials
++#else
++import Foundation
++#endif
++
++// An extension point for public key algorithms that NIOSSH does not implement itself (RSA, for instance).
++//
++// SSH separates two names that coincide for every algorithm NIOSSH ships:
++//
++// - the *key format identifier* at the start of a public key blob (RFC 4253 §6.6), e.g. `ssh-rsa`;
++// - the *public key algorithm name* used in SSH_MSG_USERAUTH_REQUEST, in `server_host_key_algorithms` and as
++//   the format identifier of a signature (RFC 4252 §7, RFC 8332), e.g. `rsa-sha2-512`.
++//
++// Here the first is `NIOSSHPublicKeyProtocol.publicKeyPrefix`, the second is
++// `NIOSSHSignatureProtocol.signaturePrefix`, and `NIOSSHAlgorithms.register(publicKey:signature:)` declares that
++// a key format can be used with an algorithm. One key format may be registered with several algorithms (one
++// signature type each), which is how `ssh-rsa` keys get `rsa-sha2-512`, `rsa-sha2-256` and `ssh-rsa`.
++
++/// A signature produced by a custom public key algorithm.
++public protocol NIOSSHSignatureProtocol: Sendable {
++    /// The signature format identifier, which in SSH is the public key algorithm name (e.g. `rsa-sha2-512`).
++    ///
++    /// It must be unique across all registered signature types and must not be one of NIOSSH's built-in names.
++    static var signaturePrefix: String { get }
++
++    /// A canonical byte representation of the signature, used for equality and hashing.
++    var rawRepresentation: Data { get }
++
++    /// Writes the signature blob that follows the format identifier (NIOSSH writes the identifier itself) and
++    /// returns the number of bytes written. For SSH's usual `string signature` blob, that is a length-prefixed
++    /// string.
++    func write(to buffer: inout ByteBuffer) -> Int
++
++    /// Reads what `write(to:)` wrote. `buffer` holds the rest of the signature blob, after the identifier.
++    static func read(from buffer: inout ByteBuffer) throws -> Self
++}
++
++/// A public key of a custom key format.
++public protocol NIOSSHPublicKeyProtocol: Sendable {
++    /// The key format identifier at the start of the public key blob (e.g. `ssh-rsa`).
++    ///
++    /// It must be unique across all registered public key types and must not be one of NIOSSH's built-in names.
++    static var publicKeyPrefix: String { get }
++
++    /// A canonical byte representation of the key, used for equality and hashing.
++    var rawRepresentation: Data { get }
++
++    /// Whether `signature` is a valid signature over `data` made by the matching private key.
++    ///
++    /// `signature` may be of any registered signature type; implementations check its type (and therefore its
++    /// algorithm) themselves. For a host key, `data` is the exchange hash H; for user authentication it is the
++    /// RFC 4252 §7 signed data.
++    func isValidSignature<D: DataProtocol>(_ signature: NIOSSHSignatureProtocol, for data: D) -> Bool
++
++    /// Writes the public key blob that follows the format identifier (NIOSSH writes the identifier itself) and
++    /// returns the number of bytes written. For `ssh-rsa` that is `mpint e, mpint n`.
++    ///
++    /// The output must be byte-for-byte what `read(from:)` consumed: the exchange hash includes the server's host
++    /// key blob, and NIOSSH re-serializes the parsed key to compute it. Keep the received bytes if the encoding
++    /// is not canonical.
++    func write(to buffer: inout ByteBuffer) -> Int
++
++    /// Reads what `write(to:)` wrote. `buffer` holds the rest of the key blob, after the identifier.
++    static func read(from buffer: inout ByteBuffer) throws -> Self
++}
++
++/// A private key of a custom key format.
++public protocol NIOSSHPrivateKeyProtocol: Sendable {
++    /// The public key algorithm name this key signs with (e.g. `rsa-sha2-512`).
++    ///
++    /// It is sent as the algorithm name in user authentication and offered as a host key algorithm. Signatures
++    /// returned by `signature(for:)` must have this `signaturePrefix`, and the algorithm must be registered for
++    /// the key format of `publicKey`. To offer one key under several algorithms, wrap it in several private key
++    /// types (as host keys: pass all of them in `SSHServerConfiguration.hostKeys`).
++    static var keyPrefix: String { get }
++
++    /// The matching public key.
++    var publicKey: NIOSSHPublicKeyProtocol { get }
++
++    /// Signs `data`: the exchange hash H when used as a host key, the RFC 4252 §7 signed data in user
++    /// authentication.
++    func signature<D: DataProtocol>(for data: D) throws -> NIOSSHSignatureProtocol
++}
++
++/// The registry of custom algorithms.
++///
++/// Registration is process-wide and thread-safe. Register everything before the connections that should use it
++/// start: a connection reads the registry while it negotiates.
++public enum NIOSSHAlgorithms {
++    /// Makes the public key algorithm `Signature.signaturePrefix` available for keys of format
++    /// `PublicKey.publicKeyPrefix`.
++    ///
++    /// Afterwards NIOSSH parses such keys and signatures, accepts them in user authentication, and clients offer
++    /// the algorithm in `server_host_key_algorithms` (after the built-in algorithms, in registration order).
++    /// Registering the same pair again does nothing.
++    ///
++    /// - Precondition: Neither name is a built-in one, and neither name is already taken by a different type.
++    public static func register<PublicKey: NIOSSHPublicKeyProtocol, Signature: NIOSSHSignatureProtocol>(
++        publicKey: PublicKey.Type,
++        signature: Signature.Type
++    ) {
++        let keyName = PublicKey.publicKeyPrefix
++        let algorithm = Signature.signaturePrefix
++        precondition(
++            !NIOSSHPublicKey.builtInKeyAlgorithms.contains { $0.elementsEqual(keyName.utf8) },
++            "\(keyName) is a built-in key type"
++        )
++        precondition(
++            !NIOSSHPublicKey.builtInKeyAlgorithms.contains { $0.elementsEqual(algorithm.utf8) },
++            "\(algorithm) is a built-in algorithm"
++        )
++        self.registry.withLockedValue { registry in
++            if let other = registry.first(where: { $0.publicKey.publicKeyPrefix == keyName }) {
++                precondition(ObjectIdentifier(other.publicKey) == ObjectIdentifier(publicKey), "\(keyName) is already registered for another type")
++            }
++            if let other = registry.first(where: { $0.signature.signaturePrefix == algorithm }) {
++                precondition(ObjectIdentifier(other.signature) == ObjectIdentifier(signature), "\(algorithm) is already registered for another type")
++            }
++            if !registry.contains(where: {
++                ObjectIdentifier($0.publicKey) == ObjectIdentifier(publicKey)
++                    && ObjectIdentifier($0.signature) == ObjectIdentifier(signature)
++            }) {
++                registry.append((publicKey, signature))
++            }
++        }
++    }
++
++    private static let registry = NIOLockedValueBox<
++        [(publicKey: any NIOSSHPublicKeyProtocol.Type, signature: any NIOSSHSignatureProtocol.Type)]
++    >([])
++
++    /// Registered public key algorithm names, in registration order, without duplicates.
++    internal static var registeredPublicKeyAlgorithms: [String] {
++        self.registry.withLockedValue { registry in
++            var names: [String] = []
++            for entry in registry where !names.contains(entry.signature.signaturePrefix) {
++                names.append(entry.signature.signaturePrefix)
++            }
++            return names
++        }
++    }
++
++    internal static func publicKeyType<Bytes: Collection>(
++        forPrefix prefix: Bytes
++    ) -> (any NIOSSHPublicKeyProtocol.Type)? where Bytes.Element == UInt8 {
++        self.registry.withLockedValue { registry in
++            registry.first { $0.publicKey.publicKeyPrefix.utf8.elementsEqual(prefix) }?.publicKey
++        }
++    }
++
++    internal static func signatureType<Bytes: Collection>(
++        forPrefix prefix: Bytes
++    ) -> (any NIOSSHSignatureProtocol.Type)? where Bytes.Element == UInt8 {
++        self.registry.withLockedValue { registry in
++            registry.first { $0.signature.signaturePrefix.utf8.elementsEqual(prefix) }?.signature
++        }
++    }
++
++    /// Whether `algorithm` is registered for keys of type `publicKey`.
++    internal static func isRegistered<Bytes: Collection>(
++        publicKey: any NIOSSHPublicKeyProtocol.Type,
++        algorithm: Bytes
++    ) -> Bool where Bytes.Element == UInt8 {
++        self.registry.withLockedValue { registry in
++            registry.contains {
++                ObjectIdentifier($0.publicKey) == ObjectIdentifier(publicKey)
++                    && $0.signature.signaturePrefix.utf8.elementsEqual(algorithm)
++            }
++        }
++    }
++
++    /// Test support: forget every registered public key algorithm.
++    internal static func _unregisterAllPublicKeyAlgorithms() {
++        self.registry.withLockedValue { $0.removeAll() }
++    }
++}
++
++extension NIOSSHPublicKey {
++    /// Wraps a custom public key. Its key format must be registered with `NIOSSHAlgorithms` for NIOSSH to parse it
++    /// back or to accept it from a peer; writing it works regardless.
++    public init<Key: NIOSSHPublicKeyProtocol>(custom key: Key) {
++        self.backingKey = .custom(key)
++    }
++
++    /// Writes the public key blob (format identifier and key data), as used in SSH messages and OpenSSH files.
++    @discardableResult
++    public func write(to buffer: inout ByteBuffer) -> Int {
++        buffer.writeSSHHostKey(self)
++    }
++
++    /// Whether this key can be used with the public key algorithm `algorithm`, and, if `signature` is given,
++    /// whether that signature belongs to the algorithm.
++    ///
++    /// Built-in keys have a single algorithm, their key prefix, and this is the upstream comparison. A custom key
++    /// supports the algorithms registered for its type, and its signature must be of that very algorithm (an
++    /// `ssh-rsa` key negotiated as `rsa-sha2-512` must not be answered with an `ssh-rsa` SHA-1 signature).
++    internal func isUsable<Bytes: Collection>(
++        withAlgorithm algorithm: Bytes,
++        signature: NIOSSHSignature?
++    ) -> Bool where Bytes.Element == UInt8 {
++        guard case .custom(let key) = self.backingKey else {
++            return self.keyPrefix.elementsEqual(algorithm)
++        }
++        guard NIOSSHAlgorithms.isRegistered(publicKey: type(of: key), algorithm: algorithm) else {
++            return false
++        }
++        guard let signature = signature else {
++            return true
++        }
++        guard case .custom(let customSignature) = signature.backingSignature else {
++            return false
++        }
++        return type(of: customSignature).signaturePrefix.utf8.elementsEqual(algorithm)
++    }
++
++    /// The prefixes NIOSSH itself implements.
++    internal static var builtInKeyAlgorithms: [String.UTF8View] {
++        [
++            Self.ed25519PublicKeyPrefix, Self.ecdsaP384PublicKeyPrefix, Self.ecdsaP256PublicKeyPrefix,
++            Self.ecdsaP521PublicKeyPrefix,
++        ]
++    }
++}
++
++extension NIOSSHPrivateKey {
++    /// Wraps a custom private key. Its algorithm (`Key.keyPrefix`) must be registered with `NIOSSHAlgorithms` for
++    /// the format of its public key on the side that verifies its signatures.
++    public init<Key: NIOSSHPrivateKeyProtocol>(custom key: Key) {
++        self.backingKey = .custom(key)
++    }
++
++    /// The public key algorithm name a custom key signs with; `nil` for built-in keys, whose algorithm is their
++    /// key prefix.
++    internal var customAlgorithmName: String? {
++        guard case .custom(let key) = self.backingKey else {
++            return nil
++        }
++        return type(of: key).keyPrefix
++    }
++}
+diff --git a/Sources/NIOSSH/Keys And Signatures/NIOSSHCertifiedPublicKey.swift b/Sources/NIOSSH/Keys And Signatures/NIOSSHCertifiedPublicKey.swift
+index f850df8..ba3ab51 100644
+--- a/Sources/NIOSSH/Keys And Signatures/NIOSSHCertifiedPublicKey.swift	
++++ b/Sources/NIOSSH/Keys And Signatures/NIOSSHCertifiedPublicKey.swift	
+@@ -361,6 +361,8 @@ extension NIOSSHCertifiedPublicKey {
+             return Self.p521KeyPrefix
+         case .certified:
+             preconditionFailure("base key cannot be certified")
++        case .custom:
++            preconditionFailure("custom keys cannot be certified")
+         }
+     }
+ 
+@@ -474,6 +476,9 @@ extension NIOSSHCertifiedPublicKey {
+                 if case .certified = newValue.backingKey {
+                     preconditionFailure("Certificate may not use certified key as public key")
+                 }
++                if case .custom = newValue.backingKey {
++                    preconditionFailure("Certificate may not use a custom key as public key")
++                }
+             }
+         }
+ 
+@@ -512,6 +517,11 @@ extension NIOSSHCertifiedPublicKey {
+             if case .certified = key.backingKey {
+                 throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not use certified key as public key")
+             }
++            // Certifying custom keys would need certificate key types for them (`*-cert-v01@openssh.com`), which
++            // the custom key extension point does not provide. A custom key may still sign certificates.
++            if case .custom = key.backingKey {
++                throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not use a custom key as public key")
++            }
+             if case .certified = signatureKey.backingKey {
+                 throw NIOSSHError.invalidCertificate(diagnostics: "Certificate may not be signed by certified key")
+             }
+diff --git a/Sources/NIOSSH/Keys And Signatures/NIOSSHPrivateKey.swift b/Sources/NIOSSH/Keys And Signatures/NIOSSHPrivateKey.swift
+index 501d84d..00497e7 100644
+--- a/Sources/NIOSSH/Keys And Signatures/NIOSSHPrivateKey.swift	
++++ b/Sources/NIOSSH/Keys And Signatures/NIOSSHPrivateKey.swift	
+@@ -73,6 +73,8 @@ public struct NIOSSHPrivateKey: Sendable {
+         case .secureEnclaveP256:
+             return ["ecdsa-sha2-nistp256"]
+         #endif
++        case .custom(let key):
++            return [Substring(type(of: key).keyPrefix)]
+         }
+     }
+ }
+@@ -88,6 +90,8 @@ extension NIOSSHPrivateKey {
+         #if canImport(Darwin)
+         case secureEnclaveP256(SecureEnclave.P256.Signing.PrivateKey)
+         #endif
++
++        case custom(any NIOSSHPrivateKeyProtocol)  // See `CustomKeys.swift`.
+     }
+ }
+ 
+@@ -122,6 +126,11 @@ extension NIOSSHPrivateKey {
+             }
+             return NIOSSHSignature(backingSignature: .ecdsaP256(signature))
+         #endif
++        case .custom(let key):
++            let signature = try digest.withUnsafeBytes { ptr in
++                try key.signature(for: ptr)
++            }
++            return NIOSSHSignature(backingSignature: .custom(signature))
+         }
+     }
+ 
+@@ -144,6 +153,9 @@ extension NIOSSHPrivateKey {
+             let signature = try key.signature(for: payload.bytes.readableBytesView)
+             return NIOSSHSignature(backingSignature: .ecdsaP256(signature))
+         #endif
++        case .custom(let key):
++            let signature = try key.signature(for: payload.bytes.readableBytesView)
++            return NIOSSHSignature(backingSignature: .custom(signature))
+         }
+     }
+ }
+@@ -164,6 +176,8 @@ extension NIOSSHPrivateKey {
+         case .secureEnclaveP256(let privateKey):
+             return NIOSSHPublicKey(backingKey: .ecdsaP256(privateKey.publicKey))
+         #endif
++        case .custom(let privateKey):
++            return NIOSSHPublicKey(backingKey: .custom(privateKey.publicKey))
+         }
+     }
+ }
+diff --git a/Sources/NIOSSH/Keys And Signatures/NIOSSHPublicKey.swift b/Sources/NIOSSH/Keys And Signatures/NIOSSHPublicKey.swift
+index 20fa63e..65e8e6f 100644
+--- a/Sources/NIOSSH/Keys And Signatures/NIOSSHPublicKey.swift	
++++ b/Sources/NIOSSH/Keys And Signatures/NIOSSHPublicKey.swift	
+@@ -96,10 +96,15 @@ extension NIOSSHPublicKey {
+             }
+         case (.certified(let key), _):
+             return key.isValidSignature(signature, for: digest)
++        case (.custom(let key), .custom(let sig)):
++            return digest.withUnsafeBytes { digestPtr in
++                key.isValidSignature(sig, for: digestPtr)
++            }
+         case (.ed25519, _),
+             (.ecdsaP256, _),
+             (.ecdsaP384, _),
+-            (.ecdsaP521, _):
++            (.ecdsaP521, _),
++            (.custom, _):
+             return false
+         }
+     }
+@@ -118,10 +123,13 @@ extension NIOSSHPublicKey {
+             return key.isValidSignature(sig, for: bytes.readableBytesView)
+         case (.certified(let key), _):
+             return key.isValidSignature(signature, for: bytes)
++        case (.custom(let key), .custom(let sig)):
++            return key.isValidSignature(sig, for: bytes.readableBytesView)
+         case (.ed25519, _),
+             (.ecdsaP256, _),
+             (.ecdsaP384, _),
+-            (.ecdsaP521, _):
++            (.ecdsaP521, _),
++            (.custom, _):
+             return false
+         }
+     }
+@@ -140,10 +148,13 @@ extension NIOSSHPublicKey {
+             return key.isValidSignature(sig, for: payload.bytes.readableBytesView)
+         case (.certified(let key), _):
+             return key.isValidSignature(signature, for: payload)
++        case (.custom(let key), .custom(let sig)):
++            return key.isValidSignature(sig, for: payload.bytes.readableBytesView)
+         case (.ed25519, _),
+             (.ecdsaP256, _),
+             (.ecdsaP384, _),
+-            (.ecdsaP521, _):
++            (.ecdsaP521, _),
++            (.custom, _):
+             return false
+         }
+     }
+@@ -158,6 +169,7 @@ extension NIOSSHPublicKey {
+         case ecdsaP384(P384.Signing.PublicKey)
+         case ecdsaP521(P521.Signing.PublicKey)
+         case certified(NIOSSHCertifiedPublicKey)  // This case recursively contains `NIOSSHPublicKey`.
++        case custom(any NIOSSHPublicKeyProtocol)  // A registered key format, see `CustomKeys.swift`.
+     }
+ 
+     /// The prefix of an Ed25519 public key.
+@@ -184,6 +196,8 @@ extension NIOSSHPublicKey {
+             return Self.ecdsaP521PublicKeyPrefix
+         case .certified(let base):
+             return base.keyPrefix
++        case .custom(let key):
++            return type(of: key).publicKeyPrefix.utf8
+         }
+     }
+ 
+@@ -191,7 +205,7 @@ extension NIOSSHPublicKey {
+         [
+             Self.ed25519PublicKeyPrefix, Self.ecdsaP384PublicKeyPrefix, Self.ecdsaP256PublicKeyPrefix,
+             Self.ecdsaP521PublicKeyPrefix,
+-        ]
++        ] + NIOSSHAlgorithms.registeredPublicKeyAlgorithms.map { $0.utf8 }
+     }
+ }
+ 
+@@ -209,11 +223,15 @@ extension NIOSSHPublicKey.BackingKey: Equatable {
+             return lhs.rawRepresentation == rhs.rawRepresentation
+         case (.certified(let lhs), .certified(let rhs)):
+             return lhs == rhs
++        case (.custom(let lhs), .custom(let rhs)):
++            return type(of: lhs).publicKeyPrefix == type(of: rhs).publicKeyPrefix
++                && lhs.rawRepresentation == rhs.rawRepresentation
+         case (.ed25519, _),
+             (.ecdsaP256, _),
+             (.ecdsaP384, _),
+             (.ecdsaP521, _),
+-            (.certified, _):
++            (.certified, _),
++            (.custom, _):
+             return false
+         }
+     }
+@@ -237,6 +255,10 @@ extension NIOSSHPublicKey.BackingKey: Hashable {
+         case .certified(let pkey):
+             hasher.combine(5)
+             hasher.combine(pkey)
++        case .custom(let pkey):
++            hasher.combine(6)
++            hasher.combine(type(of: pkey).publicKeyPrefix)
++            hasher.combine(pkey.rawRepresentation)
+         }
+     }
+ }
+@@ -262,6 +284,9 @@ extension ByteBuffer {
+             writtenBytes += self.writeECDSAP521PublicKey(baseKey: key)
+         case .certified(let key):
+             return self.writeCertifiedKey(key)
++        case .custom(let key):
++            writtenBytes += self.writeSSHString(type(of: key).publicKeyPrefix.utf8)
++            writtenBytes += key.write(to: &self)
+         }
+ 
+         return writtenBytes
+@@ -283,6 +308,8 @@ extension ByteBuffer {
+             return self.writeECDSAP521PublicKey(baseKey: key)
+         case .certified:
+             preconditionFailure("Certified keys are the only callers of this method, and cannot contain themselves")
++        case .custom(let key):
++            return key.write(to: &self)
+         }
+     }
+ 
+@@ -310,6 +337,8 @@ extension ByteBuffer {
+                 return try buffer.readECDSAP384PublicKey()
+             } else if keyIdentifierBytes.elementsEqual(NIOSSHPublicKey.ecdsaP521PublicKeyPrefix) {
+                 return try buffer.readECDSAP521PublicKey()
++            } else if let customType = NIOSSHAlgorithms.publicKeyType(forPrefix: keyIdentifierBytes) {
++                return NIOSSHPublicKey(backingKey: .custom(try customType.read(from: &buffer)))
+             } else {
+                 // We don't know this public key type. Maybe the certified keys do.
+                 return try buffer.readCertifiedKeyWithoutKeyPrefix(keyIdentifierBytes).map(NIOSSHPublicKey.init)
+diff --git a/Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift b/Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift
+index 3cc36c0..d882694 100644
+--- a/Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift	
++++ b/Sources/NIOSSH/Keys And Signatures/NIOSSHSignature.swift	
+@@ -42,6 +42,8 @@ extension NIOSSHSignature {
+ 
+         case ecdsaP521(P521.Signing.ECDSASignature)
+ 
++        case custom(any NIOSSHSignatureProtocol)  // See `CustomKeys.swift`.
++
+         internal enum RawBytes {
+             case byteBuffer(ByteBuffer)
+             case data(Data)
+@@ -93,10 +95,14 @@ extension NIOSSHSignature.BackingSignature: Equatable {
+             return lhs.rawRepresentation == rhs.rawRepresentation
+         case (.ecdsaP521(let lhs), .ecdsaP521(let rhs)):
+             return lhs.rawRepresentation == rhs.rawRepresentation
++        case (.custom(let lhs), .custom(let rhs)):
++            return type(of: lhs).signaturePrefix == type(of: rhs).signaturePrefix
++                && lhs.rawRepresentation == rhs.rawRepresentation
+         case (.ed25519, _),
+             (.ecdsaP256, _),
+             (.ecdsaP384, _),
+-            (.ecdsaP521, _):
++            (.ecdsaP521, _),
++            (.custom, _):
+             return false
+         }
+     }
+@@ -117,6 +123,10 @@ extension NIOSSHSignature.BackingSignature: Hashable {
+         case .ecdsaP521(let sig):
+             hasher.combine(3)
+             hasher.combine(sig.rawRepresentation)
++        case .custom(let sig):
++            hasher.combine(4)
++            hasher.combine(type(of: sig).signaturePrefix)
++            hasher.combine(sig.rawRepresentation)
+         }
+     }
+ }
+@@ -134,6 +144,10 @@ extension ByteBuffer {
+             return self.writeECDSAP384Signature(baseSignature: sig)
+         case .ecdsaP521(let sig):
+             return self.writeECDSAP521Signature(baseSignature: sig)
++        case .custom(let sig):
++            var writtenLength = self.writeSSHString(type(of: sig).signaturePrefix.utf8)
++            writtenLength += sig.write(to: &self)
++            return writtenLength
+         }
+     }
+ 
+@@ -229,6 +243,8 @@ extension ByteBuffer {
+                 return try buffer.readECDSAP384Signature()
+             } else if bytesView.elementsEqual(NIOSSHSignature.ecdsaP521SignaturePrefix) {
+                 return try buffer.readECDSAP521Signature()
++            } else if let customType = NIOSSHAlgorithms.signatureType(forPrefix: bytesView) {
++                return NIOSSHSignature(backingSignature: .custom(try customType.read(from: &buffer)))
+             } else {
+                 // We don't know this signature type.
+                 let signature =
+diff --git a/Sources/NIOSSH/SSHMessages.swift b/Sources/NIOSSH/SSHMessages.swift
+index a127d33..320cf9f 100644
+--- a/Sources/NIOSSH/SSHMessages.swift
++++ b/Sources/NIOSSH/SSHMessages.swift
+@@ -156,6 +156,10 @@ extension SSHMessage {
+         var username: String
+         var service: String
+         var method: Method
++
++        /// The public key algorithm name of a `.publicKey` request whose key is custom (see `CustomKeys.swift`),
++        /// where it need not equal the key's prefix. `nil` means the key prefix, as for every built-in key.
++        var publicKeyAlgorithm: String? = nil
+     }
+ 
+     struct UserAuthFailureMessage: Equatable {
+@@ -186,6 +190,9 @@ extension SSHMessage {
+         static let id: UInt8 = 60
+ 
+         var key: NIOSSHPublicKey
++
++        /// As `UserAuthRequestMessage.publicKeyAlgorithm`: echoed from the request, `nil` means the key prefix.
++        var publicKeyAlgorithm: String? = nil
+     }
+ 
+     struct GlobalRequestMessage: Equatable {
+@@ -666,6 +673,7 @@ extension ByteBuffer {
+             }
+ 
+             let method: SSHMessage.UserAuthRequestMessage.Method
++            var publicKeyAlgorithm: String? = nil
+             switch methodRawValue {
+             case "none":
+                 method = .none
+@@ -694,9 +702,12 @@ extension ByteBuffer {
+                         return nil
+                     }
+ 
+-                    guard algorithmName.readableBytesView.elementsEqual(publicKey.keyPrefix) else {
++                    guard publicKey.isUsable(withAlgorithm: algorithmName.readableBytesView, signature: nil) else {
+                         throw NIOSSHError.invalidSSHMessage(reason: "algorithm and key mismatch in user auth request")
+                     }
++                    if case .custom = publicKey.backingKey {
++                        publicKeyAlgorithm = String(buffer: algorithmName)
++                    }
+ 
+                     if expectSignature {
+                         guard var signatureBytes = self.readSSHString(),
+@@ -704,6 +715,10 @@ extension ByteBuffer {
+                         else {
+                             return nil
+                         }
++                        guard publicKey.isUsable(withAlgorithm: algorithmName.readableBytesView, signature: signature)
++                        else {
++                            throw NIOSSHError.invalidSSHMessage(reason: "algorithm and signature mismatch in user auth request")
++                        }
+ 
+                         method = .publicKey(.known(key: publicKey, signature: signature))
+                     } else {
+@@ -723,7 +738,12 @@ extension ByteBuffer {
+                 return nil
+             }
+ 
+-            return SSHMessage.UserAuthRequestMessage(username: username, service: service, method: method)
++            return SSHMessage.UserAuthRequestMessage(
++                username: username,
++                service: service,
++                method: method,
++                publicKeyAlgorithm: publicKeyAlgorithm
++            )
+         }
+     }
+ 
+@@ -771,9 +791,12 @@ extension ByteBuffer {
+             }
+ 
+             // Validate consistency here.
+-            guard publicKeyType.readableBytesView.elementsEqual(publicKey.keyPrefix) else {
++            guard publicKey.isUsable(withAlgorithm: publicKeyType.readableBytesView, signature: nil) else {
+                 throw NIOSSHError.invalidSSHMessage(reason: "inconsistent key type")
+             }
++            if case .custom = publicKey.backingKey {
++                return .init(key: publicKey, publicKeyAlgorithm: String(buffer: publicKeyType))
++            }
+ 
+             return .init(key: publicKey)
+         }
+@@ -1373,7 +1396,7 @@ extension ByteBuffer {
+         case .publicKey(.known(key: let key, signature: let signature)):
+             writtenBytes += self.writeSSHString("publickey".utf8)
+             writtenBytes += self.writeSSHBoolean(signature != nil)
+-            writtenBytes += self.writeSSHString(key.keyPrefix)
++            writtenBytes += self.writeSSHString(message.publicKeyAlgorithm?.utf8 ?? key.keyPrefix)
+             writtenBytes += self.writeCompositeSSHString { buffer in
+                 buffer.writeSSHHostKey(key)
+             }
+@@ -1407,7 +1430,7 @@ extension ByteBuffer {
+ 
+     mutating func writeUserAuthPKOKMessage(_ message: SSHMessage.UserAuthPKOKMessage) -> Int {
+         var writtenBytes = 0
+-        writtenBytes += self.writeSSHString(message.key.keyPrefix)
++        writtenBytes += self.writeSSHString(message.publicKeyAlgorithm?.utf8 ?? message.key.keyPrefix)
+         writtenBytes += self.writeCompositeSSHString { buffer in
+             buffer.writeSSHHostKey(message.key)
+         }
+diff --git a/Sources/NIOSSH/User Authentication/UserAuthSignablePayload.swift b/Sources/NIOSSH/User Authentication/UserAuthSignablePayload.swift
+index fce8834..63cf97d 100644
+--- a/Sources/NIOSSH/User Authentication/UserAuthSignablePayload.swift	
++++ b/Sources/NIOSSH/User Authentication/UserAuthSignablePayload.swift	
+@@ -32,7 +32,14 @@ import NIOCore
+ internal struct UserAuthSignablePayload {
+     private(set) var bytes: ByteBuffer
+ 
+-    init(sessionIdentifier: ByteBuffer, userName: String, serviceName: String, publicKey: NIOSSHPublicKey) {
++    /// `publicKeyAlgorithm` is the algorithm name of a custom key; `nil` means the key prefix.
++    init(
++        sessionIdentifier: ByteBuffer,
++        userName: String,
++        serviceName: String,
++        publicKey: NIOSSHPublicKey,
++        publicKeyAlgorithm: String? = nil
++    ) {
+         // We use the session identifier as the base buffer and just append to it. We ask for 1kB because it's likely
+         // enough for this data.
+         var sessionIdentifier = sessionIdentifier
+@@ -45,7 +52,7 @@ internal struct UserAuthSignablePayload {
+         newBuffer.writeSSHString(serviceName.utf8)
+         newBuffer.writeSSHString("publickey".utf8)
+         newBuffer.writeSSHBoolean(true)
+-        newBuffer.writeSSHString(publicKey.keyPrefix)
++        newBuffer.writeSSHString(publicKeyAlgorithm?.utf8 ?? publicKey.keyPrefix)
+         newBuffer.writeCompositeSSHString { buffer in
+             buffer.writeSSHHostKey(publicKey)
+         }
+diff --git a/Sources/NIOSSH/User Authentication/UserAuthenticationMethod.swift b/Sources/NIOSSH/User Authentication/UserAuthenticationMethod.swift
+index a88e9fd..1dac98d 100644
+--- a/Sources/NIOSSH/User Authentication/UserAuthenticationMethod.swift	
++++ b/Sources/NIOSSH/User Authentication/UserAuthenticationMethod.swift	
+@@ -242,11 +242,14 @@ extension SSHMessage.UserAuthRequestMessage {
+ 
+         switch request.offer {
+         case .privateKey(let privateKeyRequest):
++            // A custom key names the algorithm it signs with, which need not be its key prefix.
++            self.publicKeyAlgorithm = privateKeyRequest.privateKey.customAlgorithmName
+             let dataToSign = UserAuthSignablePayload(
+                 sessionIdentifier: sessionID,
+                 userName: self.username,
+                 serviceName: self.service,
+-                publicKey: privateKeyRequest.publicKey
++                publicKey: privateKeyRequest.publicKey,
++                publicKeyAlgorithm: self.publicKeyAlgorithm
+             )
+             let signature = try privateKeyRequest.privateKey.sign(dataToSign)
+             self.method = .publicKey(.known(key: privateKeyRequest.publicKey, signature: signature))
+diff --git a/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift b/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift
+index e32ffb4..e5f7582 100644
+--- a/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift	
++++ b/Sources/NIOSSH/User Authentication/UserAuthenticationStateMachine.swift	
+@@ -505,7 +505,8 @@ extension UserAuthenticationStateMachine {
+                 sessionIdentifier: sessionID,
+                 userName: request.username,
+                 serviceName: request.service,
+-                publicKey: key
++                publicKey: key,
++                publicKeyAlgorithm: request.publicKeyAlgorithm
+             )
+             let supportedMethods = delegate.supportedAuthenticationMethods
+ 
+@@ -532,7 +533,9 @@ extension UserAuthenticationStateMachine {
+         case .publicKey(.known(key: let key, signature: .none)):
+             // This is a weird wrinkle in public key auth: it's a request to ask whether a given key is valid, but not to validate that key itself.
+             // For now we do a shortcut: we just say that all keys are acceptable, rather than ask the delegate.
+-            return self.loop.makeSucceededFuture(.publicKeyOK(.init(key: key)))
++            return self.loop.makeSucceededFuture(
++                .publicKeyOK(.init(key: key, publicKeyAlgorithm: request.publicKeyAlgorithm))
++            )
+ 
+         case .publicKey(.unknown):
+             // We don't known the algorithm, the auth attempt has failed.
+diff --git a/Tests/NIOSSHTests/CustomKeyTests.swift b/Tests/NIOSSHTests/CustomKeyTests.swift
+new file mode 100644
+index 0000000..6e734e7
+--- /dev/null
++++ b/Tests/NIOSSHTests/CustomKeyTests.swift
+@@ -0,0 +1,530 @@
++//===----------------------------------------------------------------------===//
++//
++// This file is part of uAppKit's patches to the SwiftNIO SSH project.
++//
++// Copyright (c) 2026 the uAppKit authors
++// Licensed under Apache License v2.0
++//
++// See LICENSE.txt for license information
++//
++// SPDX-License-Identifier: Apache-2.0
++//
++//===----------------------------------------------------------------------===//
++
++import Crypto
++import NIOCore
++import NIOEmbedded
++import XCTest
++
++@testable import NIOSSH
++
++#if canImport(FoundationEssentials)
++import FoundationEssentials
++#else
++import Foundation
++#endif
++
++// A toy custom public key algorithm, shaped like RSA in SSH: one key format (`toy-key@…`, think `ssh-rsa`) used
++// with two algorithms (`toy-sig@…` / `toy-sig-alt@…`, think `rsa-sha2-512` / `rsa-sha2-256`) whose names differ
++// from the key format. Ed25519 does the actual signing; the "alt" algorithm signs a domain-separated message so
++// that its signatures are distinct.
++
++enum ToyKeyError: Error {
++    case malformed
++    case unsupported
++}
++
++struct ToyPublicKey: NIOSSHPublicKeyProtocol {
++    static let publicKeyPrefix = "toy-key@test.uappkit"
++
++    let key: Curve25519.Signing.PublicKey
++
++    var rawRepresentation: Data { self.key.rawRepresentation }
++
++    func isValidSignature<D: DataProtocol>(_ signature: NIOSSHSignatureProtocol, for data: D) -> Bool {
++        switch signature {
++        case let signature as ToySignature:
++            return self.key.isValidSignature(signature.rawRepresentation, for: Data(data))
++        case let signature as ToyAltSignature:
++            return self.key.isValidSignature(signature.rawRepresentation, for: ToyAltSignature.domain + Data(data))
++        default:
++            return false
++        }
++    }
++
++    func write(to buffer: inout ByteBuffer) -> Int {
++        buffer.writeSSHString(self.key.rawRepresentation)
++    }
++
++    static func read(from buffer: inout ByteBuffer) throws -> ToyPublicKey {
++        guard let bytes = buffer.readSSHString() else {
++            throw ToyKeyError.malformed
++        }
++        return ToyPublicKey(key: try .init(rawRepresentation: bytes.readableBytesView))
++    }
++}
++
++struct ToySignature: NIOSSHSignatureProtocol {
++    static let signaturePrefix = "toy-sig@test.uappkit"
++
++    let rawRepresentation: Data
++
++    func write(to buffer: inout ByteBuffer) -> Int {
++        buffer.writeSSHString(self.rawRepresentation)
++    }
++
++    static func read(from buffer: inout ByteBuffer) throws -> ToySignature {
++        guard let bytes = buffer.readSSHString() else {
++            throw ToyKeyError.malformed
++        }
++        return ToySignature(rawRepresentation: Data(bytes.readableBytesView))
++    }
++}
++
++struct ToyAltSignature: NIOSSHSignatureProtocol {
++    static let signaturePrefix = "toy-sig-alt@test.uappkit"
++    static let domain = Data("alt".utf8)
++
++    let rawRepresentation: Data
++
++    func write(to buffer: inout ByteBuffer) -> Int {
++        buffer.writeSSHString(self.rawRepresentation)
++    }
++
++    static func read(from buffer: inout ByteBuffer) throws -> ToyAltSignature {
++        guard let bytes = buffer.readSSHString() else {
++            throw ToyKeyError.malformed
++        }
++        return ToyAltSignature(rawRepresentation: Data(bytes.readableBytesView))
++    }
++}
++
++/// Signs with `toy-sig@…`.
++struct ToyPrivateKey: NIOSSHPrivateKeyProtocol {
++    static let keyPrefix = ToySignature.signaturePrefix
++
++    let key: Curve25519.Signing.PrivateKey
++
++    var publicKey: NIOSSHPublicKeyProtocol { ToyPublicKey(key: self.key.publicKey) }
++
++    func signature<D: DataProtocol>(for data: D) throws -> NIOSSHSignatureProtocol {
++        ToySignature(rawRepresentation: try self.key.signature(for: Data(data)))
++    }
++}
++
++/// The same key, signing with `toy-sig-alt@…`.
++struct ToyAltPrivateKey: NIOSSHPrivateKeyProtocol {
++    static let keyPrefix = ToyAltSignature.signaturePrefix
++
++    let key: Curve25519.Signing.PrivateKey
++
++    var publicKey: NIOSSHPublicKeyProtocol { ToyPublicKey(key: self.key.publicKey) }
++
++    func signature<D: DataProtocol>(for data: D) throws -> NIOSSHSignatureProtocol {
++        ToyAltSignature(rawRepresentation: try self.key.signature(for: ToyAltSignature.domain + Data(data)))
++    }
++}
++
++/// A misbehaving key: claims `toy-sig@…` but produces `toy-sig-alt@…` signatures (valid ones, for the same key).
++/// Models a server that negotiates `rsa-sha2-512` and then answers with an `ssh-rsa` SHA-1 signature.
++struct MismatchedToyPrivateKey: NIOSSHPrivateKeyProtocol {
++    static let keyPrefix = ToySignature.signaturePrefix
++
++    let key: Curve25519.Signing.PrivateKey
++
++    var publicKey: NIOSSHPublicKeyProtocol { ToyPublicKey(key: self.key.publicKey) }
++
++    func signature<D: DataProtocol>(for data: D) throws -> NIOSSHSignatureProtocol {
++        try ToyAltPrivateKey(key: self.key).signature(for: data)
++    }
++}
++
++/// Registers the toy algorithms in `setUp` and removes them again in `tearDown`, so that the rest of the suite
++/// sees an empty registry.
++class CustomAlgorithmTestCase: XCTestCase {
++    var registersToyKeys: Bool { true }
++
++    override func setUp() {
++        super.setUp()
++        NIOSSHAlgorithms._unregisterAllPublicKeyAlgorithms()
++        if self.registersToyKeys {
++            NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToySignature.self)
++            NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToyAltSignature.self)
++        }
++    }
++
++    override func tearDown() {
++        NIOSSHAlgorithms._unregisterAllPublicKeyAlgorithms()
++        super.tearDown()
++    }
++}
++
++/// Counts `UserAuthSuccessEvent`s on the client.
++final class UserAuthSuccessRecorder: ChannelInboundHandler {
++    typealias InboundIn = Any
++
++    private(set) var successes = 0
++
++    func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
++        if event is UserAuthSuccessEvent {
++            self.successes += 1
++        }
++        context.fireUserInboundEventTriggered(event)
++    }
++}
++
++/// A server delegate that accepts one public key and records how often it was asked.
++final class RecordingPublicKeyAuth: NIOSSHServerUserAuthenticationDelegate {
++    private let key: NIOSSHPublicKey
++    private(set) var requests = 0
++
++    init(_ key: NIOSSHPublicKey) {
++        self.key = key
++    }
++
++    let supportedAuthenticationMethods: NIOSSHAvailableUserAuthenticationMethods = .publicKey
++
++    func requestReceived(
++        request: NIOSSHUserAuthenticationRequest,
++        responsePromise: EventLoopPromise<NIOSSHUserAuthenticationOutcome>
++    ) {
++        self.requests += 1
++        guard case .publicKey(let offered) = request.request, offered.publicKey == self.key else {
++            responsePromise.succeed(.failure)
++            return
++        }
++        responsePromise.succeed(.success)
++    }
++}
++
++final class RecordingHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
++    private(set) var hostKeys: [NIOSSHPublicKey] = []
++
++    func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
++        self.hostKeys.append(hostKey)
++        validationCompletePromise.succeed(())
++    }
++}
++
++final class CustomKeyTests: CustomAlgorithmTestCase {
++    private let ed25519 = Curve25519.Signing.PrivateKey()
++
++    // MARK: Keys and signatures
++
++    func testCustomPublicKeyRoundTripsThroughTheWireFormat() throws {
++        let key = NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey))
++
++        var buffer = ByteBuffer()
++        let written = key.write(to: &buffer)
++        XCTAssertEqual(written, buffer.readableBytes)
++        XCTAssertEqual(buffer.getSSHString(at: buffer.readerIndex).map { String(buffer: $0) }, ToyPublicKey.publicKeyPrefix)
++
++        let parsed = try buffer.readSSHHostKey()
++        XCTAssertEqual(parsed, key)
++        XCTAssertEqual(parsed?.hashValue, key.hashValue)
++        XCTAssertEqual(buffer.readableBytes, 0)
++        XCTAssertTrue(parsed?.keyPrefix.elementsEqual(ToyPublicKey.publicKeyPrefix.utf8) ?? false)
++
++        let openSSH = String(openSSHPublicKey: key)
++        XCTAssertTrue(openSSH.hasPrefix(ToyPublicKey.publicKeyPrefix + " "))
++        XCTAssertEqual(try NIOSSHPublicKey(openSSHPublicKey: openSSH), key)
++
++        // Different key material, different key.
++        XCTAssertNotEqual(key, NIOSSHPublicKey(custom: ToyPublicKey(key: Curve25519.Signing.PrivateKey().publicKey)))
++        // Same bytes, but a built-in key is never equal to a custom one.
++        XCTAssertNotEqual(key, NIOSSHPrivateKey(ed25519Key: self.ed25519).publicKey)
++    }
++
++    func testCustomPrivateKeyExposesItsPublicKeyAndAlgorithm() throws {
++        let privateKey = NIOSSHPrivateKey(custom: ToyAltPrivateKey(key: self.ed25519))
++        XCTAssertEqual(privateKey.publicKey, NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey)))
++        XCTAssertEqual(privateKey.hostKeyAlgorithms, [Substring(ToyAltSignature.signaturePrefix)])
++        XCTAssertEqual(privateKey.customAlgorithmName, ToyAltSignature.signaturePrefix)
++        XCTAssertNil(NIOSSHPrivateKey(ed25519Key: self.ed25519).customAlgorithmName)
++    }
++
++    func testCustomSignaturesRoundTripAndVerify() throws {
++        let privateKey = NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))
++        let altPrivateKey = NIOSSHPrivateKey(custom: ToyAltPrivateKey(key: self.ed25519))
++        let digest = SHA256.hash(data: Data("exchange hash".utf8))
++
++        let signature = try privateKey.sign(digest: digest)
++        let altSignature = try altPrivateKey.sign(digest: digest)
++        XCTAssertNotEqual(signature, altSignature)
++
++        for sig in [signature, altSignature] {
++            var buffer = ByteBuffer()
++            buffer.writeSSHSignature(sig)
++            let parsed = try buffer.readSSHSignature()
++            XCTAssertEqual(parsed, sig)
++            XCTAssertEqual(parsed?.hashValue, sig.hashValue)
++            XCTAssertTrue(privateKey.publicKey.isValidSignature(parsed!, for: digest))
++        }
++
++        let otherDigest = SHA256.hash(data: Data("something else".utf8))
++        XCTAssertFalse(privateKey.publicKey.isValidSignature(signature, for: otherDigest))
++        // A custom key never accepts a built-in signature, and vice versa.
++        let builtIn = try NIOSSHPrivateKey(ed25519Key: self.ed25519).sign(digest: digest)
++        XCTAssertFalse(privateKey.publicKey.isValidSignature(builtIn, for: digest))
++        XCTAssertFalse(NIOSSHPrivateKey(ed25519Key: self.ed25519).publicKey.isValidSignature(signature, for: digest))
++    }
++
++    func testAlgorithmNamesAreSeparateFromTheKeyType() throws {
++        let key = NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey))
++        let digest = SHA256.hash(data: Data("h".utf8))
++        let signature = try NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519)).sign(digest: digest)
++        let altSignature = try NIOSSHPrivateKey(custom: ToyAltPrivateKey(key: self.ed25519)).sign(digest: digest)
++
++        XCTAssertTrue(key.isUsable(withAlgorithm: ToySignature.signaturePrefix.utf8, signature: nil))
++        XCTAssertTrue(key.isUsable(withAlgorithm: ToyAltSignature.signaturePrefix.utf8, signature: nil))
++        XCTAssertTrue(key.isUsable(withAlgorithm: ToySignature.signaturePrefix.utf8, signature: signature))
++        XCTAssertFalse(key.isUsable(withAlgorithm: ToySignature.signaturePrefix.utf8, signature: altSignature))
++        // The key type itself is not an algorithm unless something registers it as one.
++        XCTAssertFalse(key.isUsable(withAlgorithm: ToyPublicKey.publicKeyPrefix.utf8, signature: nil))
++        XCTAssertFalse(key.isUsable(withAlgorithm: "ssh-ed25519".utf8, signature: nil))
++        // Built-in keys are unchanged: their algorithm is their prefix.
++        let builtIn = NIOSSHPrivateKey(ed25519Key: self.ed25519).publicKey
++        XCTAssertTrue(builtIn.isUsable(withAlgorithm: "ssh-ed25519".utf8, signature: nil))
++        XCTAssertFalse(builtIn.isUsable(withAlgorithm: ToySignature.signaturePrefix.utf8, signature: nil))
++    }
++
++    func testRegistrationIsIdempotentAndOrdered() {
++        NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToySignature.self)
++        NIOSSHAlgorithms.register(publicKey: ToyPublicKey.self, signature: ToyAltSignature.self)
++        XCTAssertEqual(
++            NIOSSHAlgorithms.registeredPublicKeyAlgorithms,
++            [ToySignature.signaturePrefix, ToyAltSignature.signaturePrefix]
++        )
++        XCTAssertEqual(
++            NIOSSHPublicKey.knownAlgorithms.map { String($0) },
++            ["ssh-ed25519", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp521"]
++                + [ToySignature.signaturePrefix, ToyAltSignature.signaturePrefix]
++        )
++    }
++
++    func testClientOffersRegisteredHostKeyAlgorithmsAfterTheBuiltInOnes() {
++        let client = SSHKeyExchangeStateMachine(
++            allocator: ByteBufferAllocator(),
++            loop: EmbeddedEventLoop(),
++            role: .client(
++                .init(userAuthDelegate: InfinitePasswordDelegate(), serverAuthDelegate: AcceptAllHostKeysDelegate())
++            ),
++            remoteVersion: Constants.version,
++            protectionSchemes: [AES256GCMOpenSSHTransportProtection.self],
++            previousSessionIdentifier: nil
++        )
++        XCTAssertEqual(
++            client.createKeyExchangeMessage().serverHostKeyAlgorithms,
++            SSHKeyExchangeStateMachine.supportedServerHostKeyAlgorithms
++                + [Substring(ToySignature.signaturePrefix), Substring(ToyAltSignature.signaturePrefix)]
++        )
++    }
++
++    // MARK: User authentication messages
++
++    func testUserAuthRequestCarriesTheAlgorithmNameNotTheKeyType() throws {
++        var sessionID = ByteBuffer()
++        sessionID.writeBytes(0..<32)
++        let offer = NIOSSHUserAuthenticationOffer(
++            username: "foo",
++            serviceName: "",
++            offer: .privateKey(.init(privateKey: NIOSSHPrivateKey(custom: ToyAltPrivateKey(key: self.ed25519))))
++        )
++        let message = try SSHMessage.UserAuthRequestMessage(request: offer, sessionID: sessionID)
++        XCTAssertEqual(message.publicKeyAlgorithm, ToyAltSignature.signaturePrefix)
++
++        var buffer = ByteBuffer()
++        _ = buffer.writeUserAuthRequestMessage(message)
++
++        // username, service, "publickey", TRUE, algorithm name, key blob (whose type is the key format).
++        var reader = buffer
++        XCTAssertEqual(reader.readSSHStringAsString(), "foo")
++        XCTAssertEqual(reader.readSSHStringAsString(), "ssh-connection")
++        XCTAssertEqual(reader.readSSHStringAsString(), "publickey")
++        XCTAssertEqual(reader.readSSHBoolean(), true)
++        XCTAssertEqual(reader.readSSHStringAsString(), ToyAltSignature.signaturePrefix)
++        var blob = reader.readSSHString()!
++        XCTAssertEqual(blob.readSSHStringAsString(), ToyPublicKey.publicKeyPrefix)
++
++        let parsed = try buffer.readUserAuthRequestMessage()
++        XCTAssertEqual(parsed, message)
++        guard case .publicKey(.known(key: let key, signature: .some(let signature))) = parsed?.method else {
++            XCTFail("Unexpected method: \(String(describing: parsed?.method))")
++            return
++        }
++        let payload = UserAuthSignablePayload(
++            sessionIdentifier: sessionID,
++            userName: "foo",
++            serviceName: "ssh-connection",
++            publicKey: key,
++            publicKeyAlgorithm: parsed?.publicKeyAlgorithm
++        )
++        XCTAssertTrue(key.isValidSignature(signature, for: payload))
++    }
++
++    func testUserAuthRequestWithMismatchedSignatureAlgorithmIsRejected() throws {
++        var sessionID = ByteBuffer()
++        sessionID.writeBytes(0..<32)
++        let offer = NIOSSHUserAuthenticationOffer(
++            username: "foo",
++            serviceName: "",
++            offer: .privateKey(.init(privateKey: NIOSSHPrivateKey(custom: MismatchedToyPrivateKey(key: self.ed25519))))
++        )
++        let message = try SSHMessage.UserAuthRequestMessage(request: offer, sessionID: sessionID)
++        var buffer = ByteBuffer()
++        _ = buffer.writeUserAuthRequestMessage(message)
++        XCTAssertThrowsError(try buffer.readUserAuthRequestMessage()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidSSHMessage)
++        }
++    }
++
++    func testPublicKeyOKEchoesTheAlgorithmName() throws {
++        let key = NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey))
++        let message = SSHMessage.UserAuthPKOKMessage(key: key, publicKeyAlgorithm: ToyAltSignature.signaturePrefix)
++        var buffer = ByteBuffer()
++        _ = buffer.writeUserAuthPKOKMessage(message)
++        XCTAssertEqual(buffer.getSSHString(at: buffer.readerIndex).map { String(buffer: $0) }, ToyAltSignature.signaturePrefix)
++        XCTAssertEqual(try buffer.readUserAuthPKOKMessage(), message)
++    }
++
++    // MARK: End to end
++
++    private var channel: BackToBackEmbeddedChannel!
++
++    override func setUp() {
++        super.setUp()
++        self.channel = BackToBackEmbeddedChannel()
++    }
++
++    override func tearDown() {
++        try? self.channel.finish()
++        self.channel = nil
++        super.tearDown()
++    }
++
++    func testCustomUserKeyAuthenticates() throws {
++        let userKey = NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))
++        let serverAuth = RecordingPublicKeyAuth(userKey.publicKey)
++        let successes = UserAuthSuccessRecorder()
++        var harness = TestHarness()
++        harness.clientAuthDelegate = PrivateKeyClientAuth(userKey)
++        harness.serverAuthDelegate = serverAuth
++
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.client.pipeline.syncOperations.addHandler(successes))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(serverAuth.requests, 1)
++        XCTAssertEqual(successes.successes, 1)
++
++        // Authenticated: channels can be opened.
++        self.channel.clientSSHHandler?.createChannel(nil, nil)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(self.channel.activeServerChannels.count, 1)
++    }
++
++    func testCustomHostKeyWithAnAlgorithmOtherThanItsKeyType() throws {
++        // The server offers the same key under both algorithms; the client prefers the one registered first.
++        let hostKeys = [
++            NIOSSHPrivateKey(custom: ToyAltPrivateKey(key: self.ed25519)),
++            NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519)),
++        ]
++        let recorder = RecordingHostKeyDelegate()
++        var harness = TestHarness()
++        harness.serverHostKeys = hostKeys
++        harness.clientServerAuthDelegate = recorder
++
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++
++        XCTAssertEqual(recorder.hostKeys, [NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey))])
++        self.channel.clientSSHHandler?.createChannel(nil, nil)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(self.channel.activeServerChannels.count, 1)
++
++        // And it survives a rekey.
++        XCTAssertNoThrow(try self.channel.clientSSHHandler!._rekey())
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        self.channel.clientSSHHandler?.createChannel(nil, nil)
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(self.channel.activeServerChannels.count, 2)
++        XCTAssertEqual(recorder.hostKeys.count, 2)
++    }
++
++    func testHostSignatureOfADifferentAlgorithmIsRejected() throws {
++        var harness = TestHarness()
++        harness.serverHostKeys = [NIOSSHPrivateKey(custom: MismatchedToyPrivateKey(key: self.ed25519))]
++
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .invalidHostKeyForKeyExchange)
++        }
++    }
++}
++
++/// The same scenarios with nothing registered: everything fails cleanly instead of trapping.
++final class UnregisteredCustomKeyTests: CustomAlgorithmTestCase {
++    override var registersToyKeys: Bool { false }
++
++    private var channel: BackToBackEmbeddedChannel!
++    private let ed25519 = Curve25519.Signing.PrivateKey()
++
++    override func setUp() {
++        super.setUp()
++        self.channel = BackToBackEmbeddedChannel()
++    }
++
++    override func tearDown() {
++        try? self.channel.finish()
++        self.channel = nil
++        super.tearDown()
++    }
++
++    func testUnregisteredKeyTypesAndSignaturesDoNotParse() throws {
++        var buffer = ByteBuffer()
++        NIOSSHPublicKey(custom: ToyPublicKey(key: self.ed25519.publicKey)).write(to: &buffer)
++        XCTAssertThrowsError(try buffer.readSSHHostKey()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .unknownPublicKey)
++        }
++
++        let signature = try NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))
++            .sign(digest: SHA256.hash(data: Data()))
++        buffer.clear()
++        buffer.writeSSHSignature(signature)
++        XCTAssertThrowsError(try buffer.readSSHSignature()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .unknownSignature)
++        }
++        XCTAssertEqual(NIOSSHAlgorithms.registeredPublicKeyAlgorithms, [])
++    }
++
++    func testUnregisteredHostKeyAlgorithmFailsNegotiation() throws {
++        var harness = TestHarness()
++        harness.serverHostKeys = [NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))]
++
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.activate())
++        XCTAssertThrowsError(try self.channel.interactInMemory()) { error in
++            XCTAssertEqual((error as? NIOSSHError)?.type, .keyExchangeNegotiationFailure)
++        }
++    }
++
++    func testUnregisteredUserKeyIsRefused() throws {
++        let userKey = NIOSSHPrivateKey(custom: ToyPrivateKey(key: self.ed25519))
++        let serverAuth = RecordingPublicKeyAuth(userKey.publicKey)
++        let successes = UserAuthSuccessRecorder()
++        var harness = TestHarness()
++        harness.clientAuthDelegate = PrivateKeyClientAuth(userKey)
++        harness.serverAuthDelegate = serverAuth
++
++        XCTAssertNoThrow(try self.channel.configureWithHarness(harness))
++        XCTAssertNoThrow(try self.channel.client.pipeline.syncOperations.addHandler(successes))
++        XCTAssertNoThrow(try self.channel.activate())
++        // The server does not know the algorithm: it answers with a failure without consulting its delegate, the
++        // client has nothing else to offer, and the connection never authenticates. Nothing traps.
++        XCTAssertNoThrow(try self.channel.interactInMemory())
++        XCTAssertEqual(serverAuth.requests, 0)
++        XCTAssertEqual(successes.successes, 0)
++    }
++}
