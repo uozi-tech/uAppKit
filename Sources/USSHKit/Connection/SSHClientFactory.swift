@@ -210,7 +210,8 @@ nonisolated enum SSHClientFactory {
             client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first,
                                                       authentication: authentication))
         } catch SSHClientError.noCommonAlgorithm(let failure) {
-            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure), !watch.wasCalled else {
+            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure, first: first, retry: fallback),
+                  !watch.wasCalled else {
                 throw SSHClientError.noCommonAlgorithm(failure)
             }
             // 第二次的错误（含又一次没有共同算法）原样交出去。
