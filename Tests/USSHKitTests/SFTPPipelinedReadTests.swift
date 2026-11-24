@@ -105,13 +105,20 @@ final class SFTPPipelinedReadTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(SSHFileTransferSession.downloadWindow, 16)
         let inFlight = SSHFileTransferSession.downloadWindow * 32 * 1024
         XCTAssertGreaterThanOrEqual(SSHFileTransferSession.defaultChannelWindowBytes, inFlight)
-        XCTAssertTrue(SSHFileTransferSession.channelWindowRange.contains(SSHFileTransferSession.defaultChannelWindowBytes),
-                      "越出 NIOSSH 的 precondition 范围会直接 abort 进程")
+        // 会话按「窗口 / 64」要包长（NIOSSH 0.15 的窗口 = 包长 × 64），要落在 USSHCore 不用夹的区间里，
+        // 实际通告的窗口才是想要的那么大。
+        let packet = SSHFileTransferSession.maximumPacketSize(
+            forWindow: SSHFileTransferSession.defaultChannelWindowBytes)
+        XCTAssertTrue(SSHClient.maximumPacketSizeRange.contains(packet))
+        let configuration = SSHClient.Configuration(
+            authentication: .password("", username: ""), hostKeyValidation: .acceptAnything,
+            maximumPacketSize: packet)
+        XCTAssertEqual(configuration.channelWindowSize, SSHFileTransferSession.defaultChannelWindowBytes)
     }
 }
 
 /// 真服务器上的整份下载（默认跳过）：`USSHKIT_SFTP_LIVE="host:port:user:password:/remote/path:/local/reference"`。
-/// 用来确认 Citadel 在同一条 SFTP 通道上并行读请求时，字节与源文件逐一相同。
+/// 用来确认同一条 SFTP 通道上并行读请求时，字节与源文件逐一相同。
 final class SFTPPipelinedLiveDownloadTests: XCTestCase {
     private struct AcceptAll: HostKeyStore {
         func verify(_ hostKey: SSHHostKey) async throws -> SSHHostKeyVerification { .trusted }

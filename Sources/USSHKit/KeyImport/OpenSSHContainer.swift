@@ -1,8 +1,8 @@
 import Foundation
 
 /// OpenSSH 新格式私钥容器（`-----BEGIN OPENSSH PRIVATE KEY-----`，内层 magic
-/// `openssh-key-v1\0`）的外层解析：走到私钥段、读掉算法标识，剩下的分量交给各算法
-/// 解码器自己读。
+/// `openssh-key-v1\0`，格式见 OpenSSH 的 PROTOCOL.key）的外层解析：走到私钥段、读掉算法标识，
+/// 剩下的分量交给各算法解码器（RSA / Ed25519 / ECDSA）自己读。
 ///
 /// 带口令的容器（`ciphername != "none"`）在这里现场解密，解密实现见
 /// `OpenSSHKeyDecryption`。不给口令时不解密，只把 ciphername 原样报出去，由调用方
@@ -63,6 +63,25 @@ nonisolated enum OpenSSHContainer {
         }
         let keyType = String(decoding: try priv.readString(), as: UTF8.self)
         return .plaintext(keyType: keyType, body: priv)
+    }
+
+    /// 容器声明的密钥类型（`ssh-rsa` / `ssh-ed25519` / `ecdsa-sha2-nistp256` …），取自明文的公钥段，
+    /// 所以带口令的容器不用口令也读得出来。
+    static func publicKeyType(text: String) throws -> String {
+        let der = try extractBase64Body(text)
+        let magic = Array("openssh-key-v1\u{0}".utf8)
+        guard der.count >= magic.count, Array(der.prefix(magic.count)) == magic else {
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：缺少 magic", bundle: ModuleBundle.bundle))
+        }
+        var reader = SSHWireReader(Array(der.dropFirst(magic.count)))
+        _ = try reader.readString()                    // ciphername
+        _ = try reader.readString()                    // kdfname
+        _ = try reader.readString()                    // kdfoptions
+        guard try reader.readUInt32() == 1 else {
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH：密钥数量非 1", bundle: ModuleBundle.bundle))
+        }
+        var publicKey = SSHWireReader(try reader.readString())
+        return String(decoding: try publicKey.readString(), as: UTF8.self)
     }
 
     /// 取 BEGIN/END 之间的 base64 并解码。

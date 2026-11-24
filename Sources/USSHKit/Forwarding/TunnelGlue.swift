@@ -5,8 +5,8 @@ import os
 /// 一条隧道的累计收发字节（线程安全）。在转泵热循环里每块累加，故用 `OSAllocatedUnfairLock`
 /// 做内部可变性而非 actor —— 避免每个 chunk 跳隔离域。`Sendable`，可自由跨 actor / Task 传递。
 /// 多个连接（同一规则的多条 socket）共享同一个计数器，于是得到的是**该规则**的合计流量。
-/// 上行 = 本地→远端（客户端发出）；下行 = 远端→本地（返回）。`-R` 走 Citadel 内部转发，
-/// 不经本计数器，故远程转发恒为 0（UI 标「不统计」）。
+/// 上行 = 本地→远端（客户端发出）；下行 = 远端→本地（返回）。`-R` 由 app 自己粘合，
+/// 不经本计数器的话远程转发恒为 0（UI 标「不统计」）。
 @_spi(uTermIntegration)
 public nonisolated final class TunnelByteCounter: Sendable {
     private let state = OSAllocatedUnfairLock<(up: UInt64, down: UInt64)>(initialState: (0, 0))
@@ -61,8 +61,7 @@ public nonisolated struct TunnelOutcome: Sendable {
 
 /// 双向把两个 `NIOAsyncChannel<ByteBuffer, ByteBuffer>` 粘合起来（A↔B 全双工）。
 ///
-/// 仿 Citadel `runRemotePortForward` 内部的粘合写法：`withThrowingTaskGroup`
-/// 跑两个方向（A→B、B→A）的转泵循环。**优雅半关**：某方向读到 EOF 时只半关对端写端
+/// `withThrowingTaskGroup` 跑两个方向（A→B、B→A）的转泵循环。**优雅半关**：某方向读到 EOF 时只半关对端写端
 /// （`outbound.finish()`），另一方向继续把缓冲 / 在途字节排空，直到它也读到 EOF；两个方向
 /// **都**收尾后才返回，两端的 `executeThenClose` 随之关闭通道。两个通道在闭包返回时都被关闭，
 /// 因此调用方无需再手动关 —— 防止 socket/通道泄漏。

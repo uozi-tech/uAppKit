@@ -203,6 +203,6 @@ nonisolated extension DERKeyDecoder {
 
     /// PKCS#1 RSAPrivateKey ::= SEQUENCE { version, n, e, d, p, q, dP, dQ, qInv }
     static func decodePKCS1RSA(_ der: [UInt8]) throws -> ParsedPrivateKey {
-        return .rsa(try RSAKeyComponents.fromPKCS1DER(der))
+        return .rsa(try RSAKeyMaterial.makeKey(RSAKeyMaterial.componentsFromPKCS1DER(der)))
     }
 }

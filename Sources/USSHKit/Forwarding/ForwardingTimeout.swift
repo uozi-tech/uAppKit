@@ -9,17 +9,16 @@ public nonisolated struct ForwardingTimeoutError: LocalizedError, Sendable {
 /// 给一个 async 操作套超时：操作先完成则返回其结果并取消计时；超时先到则抛
 /// `ForwardingTimeoutError` 并取消操作子任务。
 ///
-/// 动机：`createDirectTCPIPChannel` 在**半死的 SSH 传输**上可能既发不出也收不到
+/// 动机：开 direct-tcpip 在**半死的 SSH 传输**上可能既发不出也收不到
 /// 响应而无限挂起 —— 此时本地已 accept 的 socket 既不被粘合也不被关闭，客户端
 /// （如 psql）自行超时关闭后，本地 socket 堆成 `CLOSE_WAIT`。套上超时后上游卡住
 /// 会快速失败，调用方据此关闭本地 socket（客户端立刻拿到 reset 而非干等数十秒），
 /// 不再堆 `CLOSE_WAIT`。僵尸连接本身由 `ConnectionWatchdog` 的周期心跳判死拆除。
 ///
-/// 注意：这里不能用 `withThrowingTaskGroup` race。结构化并发作用域退出前会等待
-/// 所有 child task 收尾；而 Citadel 的开通道调用不保证响应取消，半死传输上可能
-/// 永远挂住，导致“超时分支先完成，但函数仍等操作子任务结束”，本地 listener 看着
-/// 还在、accept 处理却卡死。这里改用非结构化任务 + 一次性 continuation：超时后
-/// 立即恢复调用方，后台操作若很晚才成功，交给 `lateResultCleanup` 关闭迟到资源。
+/// 这里不用 `withThrowingTaskGroup` race：结构化并发作用域退出前会等所有 child task 收尾，
+/// 操作只要有一处不响应取消，超时分支先到了函数也还在等它。USSHCore 的开通道响应取消，
+/// 但这个函数也给 app 自己的操作套超时，所以保持「非结构化任务 + 一次性 continuation」：
+/// 超时后立即恢复调用方，后台操作若很晚才成功，交给 `lateResultCleanup` 关闭迟到资源。
 @_spi(uTermIntegration)
 public nonisolated func withForwardingTimeout<T: Sendable>(
     _ duration: Duration,

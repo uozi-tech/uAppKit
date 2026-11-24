@@ -1,5 +1,6 @@
 import Foundation
 import NIOSSH
+import USSHCore
 
 /// direct-tcpip 开通道失败的归类结果，供上层把「NIOSSH.NIOSSHError错误1」这类
 /// 原始错误翻译成用户能看懂的话（转发被拒 / 目标不可达 / 超时）。
@@ -7,7 +8,8 @@ import NIOSSH
 /// 归类依据：
 /// - `ForwardingTimeoutError` → `.timeout`（我们自己的开通道超时保护先到 ——
 ///   对端 CHANNEL_OPEN 全程无响应，典型为白名单/安全组把包丢在半路）；
-/// - `NIOSSHError.channelSetupRejected` → 按 RFC 4254 的 reason code 细分：
+/// - `SSHChannelError.openRejected`（USSHCore 包着的 `NIOSSHError.channelSetupRejected`，
+///   裸的 `NIOSSHError` 也认）→ 按 RFC 4254 的 reason code 细分：
 ///   1 = SSH_OPEN_ADMINISTRATIVELY_PROHIBITED（sshd 拒绝转发，常见
 ///   `AllowTcpForwarding no`），2 = SSH_OPEN_CONNECT_FAILED（跳板机自己连
 ///   目标失败：拒绝/不可达/解析失败）。reason code 只存在于 NIOSSHError 的
@@ -37,6 +39,11 @@ public nonisolated struct SSHForwardingChannelFailure: Sendable {
     public init(classifying error: Error) {
         if error is ForwardingTimeoutError {
             self.init(kind: .timeout, detail: (error as? LocalizedError)?.errorDescription ?? "\(error)")
+            return
+        }
+        if case SSHChannelError.openRejected(let sshError) = error {
+            let description = String(describing: sshError)
+            self.init(kind: Self.rejectionKind(fromDiagnostics: description), detail: description)
             return
         }
         if let sshError = error as? NIOSSHError, sshError.type == .channelSetupRejected {

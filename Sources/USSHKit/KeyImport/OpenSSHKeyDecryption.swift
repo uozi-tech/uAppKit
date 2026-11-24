@@ -1,15 +1,14 @@
 import Foundation
 import Crypto
 import _CryptoExtras
-import CCitadelBcrypt
+import CBcryptPBKDF
 
 /// OpenSSH 新格式容器（`-----BEGIN OPENSSH PRIVATE KEY-----`）私钥段的解密。
 ///
 /// 带口令的容器用 `bcrypt_pbkdf(口令, salt, rounds)` 一次性派生出 `key || iv`，再用
 /// `ciphername` 声明的对称算法解私钥段。bcrypt_pbkdf 是 OpenSSH 自己的 PBKDF2 变体
-/// （摘要 SHA-512、分组函数是 EksBlowfish），整个 SSH 栈里只有 Citadel 的 C target
-/// `CCitadelBcrypt` 有实现（本包里的 target，见 `ThirdParty/Citadel`）。对称算法用
-/// swift-crypto 的 `AES._CTR`，不引新依赖。
+/// （摘要 SHA-512、分组函数是 EksBlowfish），实现是本包的 C target `CBcryptPBKDF`（OpenBSD 的代码，
+/// 来源见 THIRD_PARTY_NOTICES.md）。对称算法用 swift-crypto 的 `AES._CTR`，不引新依赖。
 nonisolated enum OpenSSHKeyDecryption {
 
     /// 容器的对称算法。`ssh-keygen` 默认写 `aes256-ctr`；其余两档是它支持的另两个 CTR
@@ -94,7 +93,7 @@ nonisolated enum OpenSSHKeyDecryption {
         let status = passphrase.withUnsafeBufferPointer { pass in
             salt.withUnsafeBufferPointer { salt in
                 derived.withUnsafeMutableBufferPointer { out in
-                    citadel_bcrypt_pbkdf(
+                    uappkit_bcrypt_pbkdf(
                         pass.baseAddress, pass.count,
                         salt.baseAddress, salt.count,
                         out.baseAddress, keyLength, rounds)
@@ -118,11 +117,9 @@ nonisolated enum OpenSSHKeyDecryption {
         }
     }
 
-    /// `citadel_bcrypt_pbkdf` 不自带摘要实现，要调用方先注入一个（Citadel 自己注入的是
-    /// BoringSSL 的那份）。这里注入 swift-crypto 的 `SHA512`：两边写进去的实现等价，
-    /// 谁先谁后、谁覆盖谁都不影响派生结果。
+    /// `uappkit_bcrypt_pbkdf` 不自带摘要实现，要调用方先注入一个。这里注入 swift-crypto 的 `SHA512`。
     private static let sha512HookInstalled: Bool = {
-        citadel_set_crypto_hash_sha512 { out, input, inputLength in
+        uappkit_set_crypto_hash_sha512 { out, input, inputLength in
             guard let out, let input else { return }
             var hasher = SHA512()
             hasher.update(bufferPointer: UnsafeRawBufferPointer(

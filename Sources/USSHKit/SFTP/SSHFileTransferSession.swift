@@ -1,8 +1,8 @@
 import Foundation
-@preconcurrency import Citadel
 import NIOCore
+import USSHCore
 
-/// Non-secret metadata about a remote file, surfaced without leaking Citadel types.
+/// Non-secret metadata about a remote file, surfaced as plain `Foundation` values.
 public struct SSHRemoteFileInfo: Sendable, Hashable {
     public let size: Int64
     public let modificationDate: Date?
@@ -31,7 +31,7 @@ public enum SSHFileTransferError: Error, LocalizedError, Sendable {
 ///
 /// USSHKit owns SSH authentication, host-key validation, and the SFTP subsystem;
 /// the application supplies endpoint/credential/host-key policy and works purely
-/// in terms of `Foundation` values (`URL`, `Data`, paths). Citadel stays internal.
+/// in terms of `Foundation` values (`URL`, `Data`, paths).
 ///
 /// The session is an `actor`, so all transfers on a given session are serialized;
 /// callers do not need to add their own locking around `download`/`upload`.
@@ -39,8 +39,10 @@ public actor SSHFileTransferSession {
     private let connected: ConnectedClient
     private let sftp: SFTPClient
 
-    /// Chunk size for streamed transfers. Kept comfortably below swift-nio-ssh's
-    /// per-message limit (see `SFTPFile.write`).
+    /// Chunk size for streamed transfers. Every SFTP server accepts this much per
+    /// READ / WRITE (`SFTPClient` falls back to 32 KiB when the server does not
+    /// announce `limits@openssh.com`); larger servers' limits are not used so the
+    /// read pipeline below keeps the same in-flight bytes as before.
     private static let chunkSize = 32 * 1024
 
     private init(connected: ConnectedClient, sftp: SFTPClient) {
@@ -48,15 +50,20 @@ public actor SSHFileTransferSession {
         self.sftp = sftp
     }
 
-    /// Inbound window of the SFTP channel this session opens (NIOSSH sizes each
-    /// child channel's window from `maximumPacketSize`, default 128 KiB). The
-    /// window, not the request count, caps a download at window/RTT: 16 MB over
-    /// a 150 ms link took 36 s at 128 KiB even with reads pipelined. The
-    /// connection exists only for file transfer, so a large window costs
-    /// nothing else. Must stay inside NIOSSH's precondition range (see
-    /// `USSHKitIntegration.connect`); out-of-range values are clamped.
+    /// Inbound window of the SFTP channel this session opens. The window, not
+    /// the request count, caps a download at window/RTT: 16 MB over a 150 ms
+    /// link took 36 s at 128 KiB even with reads pipelined. The connection
+    /// exists only for file transfer, so a large window costs nothing else.
+    ///
+    /// NIOSSH 0.15 sizes every child channel's window as 64 × the maximum
+    /// packet size, so the session asks for `channelWindowBytes / 64` as its
+    /// packet size (USSHCore clamps it to `SSHClient.maximumPacketSizeRange`).
     public static let defaultChannelWindowBytes = 1 << 22
-    static let channelWindowRange: ClosedRange<Int> = 32_768...(1 << 24)
+
+    /// The maximum packet size that gives an inbound window of `windowBytes`.
+    static func maximumPacketSize(forWindow windowBytes: Int) -> Int {
+        windowBytes / 64
+    }
 
     /// Connect to `endpoint` and open an SFTP subsystem channel.
     ///
@@ -73,7 +80,6 @@ public actor SSHFileTransferSession {
         channelWindowBytes: Int = SSHFileTransferSession.defaultChannelWindowBytes,
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in false }
     ) async throws -> SSHFileTransferSession {
-        let window = min(max(channelWindowBytes, channelWindowRange.lowerBound), channelWindowRange.upperBound)
         let connected = try await SSHClientFactory.connect(
             endpoint: endpoint,
             credential: credential,
@@ -82,10 +88,10 @@ public actor SSHFileTransferSession {
             connectTimeout: connectTimeout,
             approvalTimeout: approvalTimeout,
             approver: approver,
-            protocolOptions: [.maximumPacketSize(window)]
+            maximumPacketSize: maximumPacketSize(forWindow: channelWindowBytes)
         )
         do {
-            let sftp = try await connected.target.openSFTP()
+            let sftp = try await CoreShims.openSFTP(on: connected.target)
             return SSHFileTransferSession(connected: connected, sftp: sftp)
         } catch {
             await connected.close()
@@ -95,10 +101,10 @@ public actor SSHFileTransferSession {
 
     /// `stat(2)` the remote file, returning size and modification date.
     public func stat(_ remotePath: String) async throws -> SSHRemoteFileInfo {
-        let attributes = try await sftp.getAttributes(at: remotePath)
+        let attributes = try await sftp.stat(remotePath)
         return SSHRemoteFileInfo(
             size: Self.clampedSize(attributes.size),
-            modificationDate: attributes.accessModificationTime?.modificationTime
+            modificationDate: attributes.modificationDate
         )
     }
 
@@ -134,15 +140,17 @@ public actor SSHFileTransferSession {
         let handle = try FileHandle(forWritingTo: localURL)
         defer { try? handle.close() }
 
-        let file = try await sftp.openFile(filePath: remotePath, flags: .read)
-        let reader = UncheckedSFTPFile(file: file)
+        let file = try await sftp.openFile(remotePath, flags: .read)
         do {
-            try await Self.pipelinedRead(
+            _ = try await Self.pipelinedRead(
                 expectedSize: info.size,
                 chunkSize: Self.chunkSize,
                 window: Self.downloadWindow,
                 maximumBytes: maximumBytes,
-                read: { offset, length in try await reader.file.read(from: offset, length: length) },
+                read: { offset, length in
+                    // nil = EOF，按空块交给流水线（它把空块当 EOF）。
+                    try await file.read(from: offset, length: Int(length)) ?? ByteBuffer()
+                },
                 write: { buffer in try handle.write(contentsOf: Data(buffer.readableBytesView)) }
             )
             try await file.close()
@@ -232,19 +240,30 @@ public actor SSHFileTransferSession {
         return received
     }
 
+    /// Upload to a temporary file next to `remotePath`, then move it into place.
+    ///
+    /// With `posix-rename@openssh.com` (every OpenSSH server) the move atomically
+    /// replaces an existing file. Servers without it only have SFTP v3 RENAME,
+    /// which refuses to overwrite: there the old file is removed first, so the
+    /// replacement is not atomic.
     public func uploadAtomically(_ localURL: URL, to remotePath: String) async throws {
         let tempPath = remotePath + ".utable-upload.tmp"
         try await uploadStreaming(localURL, to: tempPath)
         do {
-            try await sftp.rename(at: tempPath, to: remotePath)
-        } catch {
-            try? await sftp.remove(at: remotePath)
-            do {
-                try await sftp.rename(at: tempPath, to: remotePath)
-            } catch {
-                try? await sftp.remove(at: tempPath)
-                throw error
+            if sftp.supportsExtension(SFTPExtensionName.posixRename) {
+                try await sftp.rename(tempPath, to: remotePath, mode: .posix)
+            } else {
+                do {
+                    try await sftp.rename(tempPath, to: remotePath)
+                } catch let error as SFTPError where error.statusCode != nil {
+                    // 目标已存在时 v3 的 RENAME 回 FAILURE：删掉旧文件再改名。
+                    try? await sftp.remove(remotePath)
+                    try await sftp.rename(tempPath, to: remotePath)
+                }
             }
+        } catch {
+            try? await sftp.remove(tempPath)
+            throw error
         }
     }
 
@@ -255,14 +274,15 @@ public actor SSHFileTransferSession {
         defer { try? handle.close() }
 
         let file = try await sftp.openFile(
-            filePath: remotePath,
+            remotePath,
             flags: [.write, .create, .truncate]
         )
+        let chunkSize = min(Self.chunkSize, sftp.maximumWriteLength)
         do {
             var offset: UInt64 = 0
             while true {
                 try Task.checkCancellation()
-                let chunk = try handle.read(upToCount: Self.chunkSize) ?? Data()
+                let chunk = try handle.read(upToCount: chunkSize) ?? Data()
                 if chunk.isEmpty { break }
                 var buffer = ByteBuffer()
                 buffer.writeBytes(chunk)
@@ -277,7 +297,7 @@ public actor SSHFileTransferSession {
     }
 
     public func close() async {
-        try? await sftp.close()
+        await sftp.close()
         await connected.close()
     }
 
@@ -288,10 +308,4 @@ public actor SSHFileTransferSession {
         guard let size else { return 0 }
         return size > UInt64(Int64.max) ? Int64.max : Int64(size)
     }
-}
-
-/// `SFTPFile` is a non-Sendable class; its reads go through the client's
-/// event-loop-confined request table, which is safe to use concurrently.
-private struct UncheckedSFTPFile: @unchecked Sendable {
-    let file: SFTPFile
 }
