@@ -73,34 +73,65 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         return String(cString: pointer)
     }
 
+    /// 按字节比较（`String` 的 `==` / `hasPrefix` 按规范等价，NFC 与 NFD 会被当成一样）。
     private func isInsideRoot(_ hostPath: String) -> Bool {
-        hostPath == rootPath || hostPath.hasPrefix(rootPath + "/")
+        hostPath.utf8.elementsEqual(rootPath.utf8) || hostPath.utf8.starts(with: (rootPath + "/").utf8)
     }
 
-    /// 映射到真实路径并核对限制。`followingFinal`：最后一段若是符号链接，是否要跟随（核对它的目标）。
+    private static let escapes = SFTPServerStatusError.permissionDenied("path escapes root")
+
+    /// 映射到系统调用该用的真实路径，并核对它出不了根目录。
+    ///
+    /// - 所在目录先解析成真实路径（中间任何一段符号链接都已展开），必须在根目录里；
+    /// - 最后一段不存在：就是这个路径（要新建的东西）；
+    /// - 最后一段是普通文件 / 目录：就是这个路径；
+    /// - 最后一段是符号链接：`followingFinal == false` 时操作链接本身；要跟随时解析它的目标，
+    ///   目标必须存在（悬空的链接一律拒绝，否则 `open(O_CREAT)` 会顺着它在根目录外面建文件）且在根目录里，
+    ///   返回解析后的真实路径。
+    ///
+    /// 返回的路径里没有需要再跟随的符号链接，调用方的系统调用配合 `O_NOFOLLOW` / `l*` 版本使用。
     private func confined(_ path: String, followingFinal: Bool) throws -> String {
-        let host = hostPath(for: path)
+        let normalized = Self.normalize(path)
+        if normalized == "/" { return rootPath }
+        let lexical = rootPath + normalized
+        let name = (lexical as NSString).lastPathComponent
+        guard let parent = Self.canonical((lexical as NSString).deletingLastPathComponent) else {
+            throw Self.error(ENOENT)
+        }
+        guard isInsideRoot(parent) else { throw Self.escapes }
+        let candidate = parent + "/" + name
         var info = Darwin.stat()
-        let exists = lstat(host, &info) == 0
-        if exists && followingFinal {
-            // 跟随整条路径；悬空的链接解析不出来，交给后面的系统调用去报 ENOENT。
-            if let resolved = Self.canonical(host) {
-                guard isInsideRoot(resolved) else { throw SFTPServerStatusError.permissionDenied("path escapes root") }
-                return host
+        guard lstat(candidate, &info) == 0, info.st_mode & S_IFMT == S_IFLNK, followingFinal else {
+            return candidate
+        }
+        guard let target = Self.canonical(candidate) else {
+            throw SFTPServerStatusError.noSuchFile("dangling symbolic link")
+        }
+        guard isInsideRoot(target) else { throw Self.escapes }
+        return target
+    }
+
+    /// 新建符号链接时它的目标：以 `/` 开头的按客户端视角换成根目录下的真实路径；相对的原样保存，
+    /// 但按字面从链接所在目录走一遍，走出根目录就拒绝。
+    private func storedSymlinkTarget(_ target: String, linkPath: String) throws -> String {
+        if target.hasPrefix("/") { return hostPath(for: target) }
+        var depth = Self.normalize(linkPath).split(separator: "/").count - 1
+        for component in target.split(separator: "/", omittingEmptySubsequences: true) {
+            switch component {
+            case ".": continue
+            case "..":
+                depth -= 1
+                if depth < 0 { throw SFTPServerStatusError.permissionDenied("symbolic link target leaves root") }
+            default: depth += 1
             }
         }
-        // 不跟随最后一段：只核对它所在的目录。
-        let parent = (host as NSString).deletingLastPathComponent
-        if let resolvedParent = Self.canonical(parent), !isInsideRoot(resolvedParent) {
-            throw SFTPServerStatusError.permissionDenied("path escapes root")
-        }
-        return host
+        return target
     }
 
     private func virtualPath(forHost host: String) -> String? {
-        if host == rootPath { return "/" }
-        guard host.hasPrefix(rootPath + "/") else { return nil }
-        return String(host.dropFirst(rootPath.count))
+        guard isInsideRoot(host) else { return nil }
+        let rest = host.utf8.dropFirst(rootPath.utf8.count)
+        return rest.isEmpty ? "/" : String(decoding: rest, as: UTF8.self)
     }
 
     /// 这台机器的文件系统（APFS）只收合法 UTF-8 的名字；别的名字照系统的做法拒绝（EILSEQ → SSH_FX_FAILURE）。
@@ -173,6 +204,10 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
     }
 
     private func apply(_ attributes: SFTPFileAttributes, toHost host: String, followingSymlinks: Bool) throws {
+        // 不跟随链接时改不了长度（truncate 总会穿过链接），照 OpenSSH 的 lsetstat 拒绝。
+        if attributes.size != nil && !followingSymlinks {
+            throw SFTPServerStatusError(.badMessage, "size cannot be set on a symbolic link")
+        }
         if let size = attributes.size {
             try Self.check(truncate(host, off_t(clamping: size)))
         }
@@ -229,6 +264,8 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         if flags.contains(.create) { oflags |= O_CREAT }
         if flags.contains(.truncate) { oflags |= O_TRUNC }
         if flags.contains(.exclusive) { oflags |= O_EXCL }
+        // 路径已解析成真实路径；这之后谁再把它换成链接，打开就失败，不会被领到根目录外面。
+        oflags |= O_NOFOLLOW
         let mode = mode_t(attributes.permissions.map { $0 & 0o7777 } ?? 0o666)
         let fd = open(host, oflags, mode)
         guard fd >= 0 else { throw Self.error() }
@@ -306,7 +343,7 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         let linkPath = try Self.text(linkPath)
         let targetPath = try Self.text(targetPath)
         let host = try confined(linkPath, followingFinal: false)
-        let target = targetPath.hasPrefix("/") ? hostPath(for: targetPath) : targetPath
+        let target = try storedSymlinkTarget(targetPath, linkPath: linkPath)
         try Self.check(symlink(target, host))
     }
 
@@ -315,7 +352,8 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         let existingPath = try Self.text(existingPath)
         let existing = try confined(existingPath, followingFinal: false)
         let new = try confined(newPath, followingFinal: false)
-        try Self.check(link(existing, new))
+        // `link(2)` 在 macOS 上会跟随源路径的符号链接；`linkat` 不带 AT_SYMLINK_FOLLOW 时链接的是链接本身。
+        try Self.check(linkat(AT_FDCWD, existing, AT_FDCWD, new, 0))
     }
 
     public func fileSystemStats(at path: SFTPPath) async throws -> SFTPFileSystemStats {
