@@ -277,7 +277,10 @@ public actor SSHFileTransferSession {
         while true {
             try Task.checkCancellation()
             guard let buffer = try await readNext(offset) else { break }
-            guard buffer.readableBytes > 0 else { break }
+            // EOF 只认 nil。空的数据不是 EOF（`SFTPFile.read` 本来也不会交出空的），当成 EOF 就把截断的文件交出去了。
+            guard buffer.readableBytes > 0 else {
+                throw SFTPError.invalidResponse("zero-length SSH_FXP_DATA at offset \(offset)")
+            }
             try accept(buffer)
             offset += UInt64(buffer.readableBytes)
         }

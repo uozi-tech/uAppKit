@@ -217,7 +217,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   所以按它们从本地文件读、往内存里拼都有上限。app 自己按它们 `read(upToCount:)` 的代码不用再额外封顶，但别绕过它们直接用
   `client.limits` 里的原始宣告值。
 - **完整性**：知道大小时用 `file.readAll(from:expectedLength:maximumBytes:window:)`：读不满就抛 `SFTPError.shortRead(expected:actual:)`，
-  不会把被截短的数据当成功；0 字节的 DATA、EOF 后面又冒出数据都是 `invalidResponse`。区间越过 `UInt64` 抛 `offsetOutOfRange`。
+  不会把被截短的数据当成功；0 字节的 DATA、EOF 后面又冒出数据都是 `invalidResponse`。单个 `file.read(from:length:)`
+  也一样：`length > 0` 时服务端回 0 字节的 DATA 抛 `invalidResponse`（以前交出一个空切片，调用方当成 EOF 就截断、
+  照原 offset 再读就打转）；EOF 只有 `nil` 一种。`length <= 0` 照旧不发请求、回空。区间越过 `UInt64` 抛 `offsetOutOfRange`。
   `SSHFileTransferSession.download` 现在按 stat 的大小分段（每段 8 MiB）`readAll(expectedLength:)`：**下载过程中文件变短 →
   报 `shortRead`**（以前按成功返回、只拿到前一部分）；变长照旧读到 EOF。
 - **`SSHFileTransferSession` 失败时不丢数据**：

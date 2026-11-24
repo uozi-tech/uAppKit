@@ -52,6 +52,27 @@ final class SFTPReadIntegrityTests: XCTestCase {
         }
     }
 
+    /// 单个 READ 也一样：要了字节、回 0 字节的 DATA 是协议错误，不是空切片（原来交出 `.some(空)`，调用方要么当 EOF
+    /// 截断、要么在同一个 offset 上打转）。0 长度的读照旧不发请求、回空。
+    func testSingleReadRejectsZeroLengthData() async throws {
+        override { _, offset, _ in offset == 0 ? .data(ByteBuffer()) : nil }
+        let file = try await pair.client.openFile("/f", flags: .read)
+        do {
+            _ = try await file.read(from: 0, length: 100)
+            XCTFail("empty DATA for a 100-byte read was accepted")
+        } catch SFTPError.invalidResponse(let detail) {
+            XCTAssertTrue(detail.contains("zero-length"), detail)
+        }
+        let before = pair.faults.requestCount(of: .read)
+        let empty = try await file.read(from: 0, length: 0)
+        XCTAssertEqual(empty, ByteBuffer())
+        XCTAssertEqual(pair.faults.requestCount(of: .read), before)
+        // 别的 offset 照常。
+        let rest = try await file.read(from: 1, length: 10)
+        XCTAssertEqual(rest, payload.getSlice(at: 1, length: 10))
+        try await file.close()
+    }
+
     /// 中间一段谎报 EOF、后面的段却有数据：是个洞，不能当成「读完了」。
     func testEOFFollowedByDataIsAHole() async throws {
         let second = chunk
