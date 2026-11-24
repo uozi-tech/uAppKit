@@ -155,6 +155,7 @@ final class SSHTestServerState: Sendable {
         if let keyExchangeAlgorithms = configuration.keyExchangeAlgorithms {
             serverConfiguration.keyExchangeAlgorithms = keyExchangeAlgorithms
         }
+        serverConfiguration.serverSignatureAlgorithms = configuration.serverSignatureAlgorithms
         if let schemes = configuration.transportProtectionSchemes {
             serverConfiguration.transportProtectionSchemes = schemes
         }

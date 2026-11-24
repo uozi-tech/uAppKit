@@ -119,9 +119,8 @@ public enum SSHAuthenticationMethod: Sendable {
     /// RSA 用户私钥（RFC 8332）。依次以 `rsa-sha2-512`、`rsa-sha2-256` 签名尝试，连接允许旧算法时最后再试
     /// SHA-1 的 `ssh-rsa`；每个算法算服务器的一次认证尝试，第一次成功就停。
     ///
-    /// NIOSSH 0.15.2 不收 `server-sig-algs`（RFC 8308），事先不知道服务器接受哪个，只能这样逐个试
-    /// （OpenSSH 的 `MaxAuthTries` 默认 6，够用）。服务器宣告了的话，第一次就直接用它支持的最好的那个
-    /// （`SSHRSAUserAuthenticationPlan`）。
+    /// 服务器宣告了 `server-sig-algs`（RFC 8308，OpenSSH 7.2 起都发）时只试其中有的、第一次就用最好的那个，
+    /// 一个 RSA 算法都没列就跳过这把钥匙；没宣告时按上面的顺序逐个试（`SSHRSAUserAuthenticationPlan`）。
     case rsaPrivateKey(SSHRSAPrivateKey)
     /// 带 OpenSSH 证书的公钥。
     case certifiedPrivateKey(NIOSSHPrivateKey, certificate: NIOSSHCertifiedPublicKey)
@@ -255,20 +254,20 @@ public struct SSHAlgorithms: Sendable {
 
     /// 自带的优先，后面补上 USSHCore 的现代算法：密钥交换 `diffie-hellman-group16-sha512`、
     /// `diffie-hellman-group14-sha256`，RSA 主机密钥（`rsa-sha2-512`、`rsa-sha2-256`），加密 AES-CTR +
-    /// `hmac-sha2-256`。暂时不含 `-etm` 的 MAC 与 `hmac-sha2-512`，原因见 `SSHAlgorithmsPendingPatches`。
+    /// `hmac-sha2-256` / `hmac-sha2-512`（ETM 在前），排序见 `SSHAlgorithmsPresetSchemes`。
     public static let standard = SSHAlgorithms(
         transportProtectionSchemes: Constants.bundledTransportProtectionSchemes
-            + SSHAlgorithmsPendingPatches.standardAESCTRSchemes,
+            + SSHAlgorithmsPresetSchemes.standardAESCTRSchemes,
         keyExchangeAlgorithms: builtInKeyExchangeAlgorithms + SSHDiffieHellmanAlgorithm.modern.map(\.name),
         rsaHostKeyAlgorithms: SSHRSASignatureAlgorithm.modern
     )
 
     /// ⚠️ 只为连老设备（旧的网络设备、嵌入式 sshd）：`.standard` 再加 SHA-1 的 `ssh-rsa`（主机密钥与用户认证）、
-    /// `diffie-hellman-group14-sha1`、AES-CTR + `hmac-sha1`。要用户明确选用；它会触发进程级的
+    /// `diffie-hellman-group14-sha1`、AES-CTR + `hmac-sha1`（ETM 在前）。要用户明确选用；它会触发进程级的
     /// `SSHAlgorithms.registerLegacyAlgorithms()`（不影响别的连接，见那里的说明）。
     public static let legacyCompatible = SSHAlgorithms(
         transportProtectionSchemes: standard.transportProtectionSchemes
-            + SSHAlgorithmsPendingPatches.legacyAESCTRSchemes,
+            + SSHAlgorithmsPresetSchemes.legacyAESCTRSchemes,
         keyExchangeAlgorithms: standard.keyExchangeAlgorithms + SSHDiffieHellmanAlgorithm.legacy.map(\.name),
         rsaHostKeyAlgorithms: SSHRSASignatureAlgorithm.modern + SSHRSASignatureAlgorithm.legacy,
         allowsLegacyAlgorithms: true
@@ -304,29 +303,36 @@ public struct SSHAlgorithms: Sendable {
     }
 }
 
-/// ⚠️ 等 NIOSSH 的补丁落地后要放宽的唯一地方（`SSHAlgorithmPresetTests.testPendingPatchExclusions` 钉着现状，
-/// 放宽时一起改那个测试）：
+/// 预设里 USSHCore 的 AES-CTR 组合——要调整预设的加密方式就改这里（`SSHAlgorithmPresetTests` 钉着确切内容）。
 ///
-/// - **strict KEX（Terrapin，CVE-2023-48795）**：NIOSSH 0.15.2 没有 `kex-strict-*`。Terrapin 能在握手时删掉
-///   序号连续的报文，受影响的是 ChaCha20-Poly1305 与所有 `-etm@openssh.com` 的 MAC；encrypt-and-MAC 与
-///   AES-GCM 不受影响。补丁落地后把 `SSHTransportProtections.modern` 里的 `-etm` 组合加进
-///   `standardAESCTRSchemes`（排在非 ETM 之前，OpenSSH 也是 ETM 优先），旧算法同理。
-/// - **RFC 4253 §7.2 的密钥加长**：NIOSSH 自带的密钥交换（curve25519、ECDH）推导会话密钥时不做加长，
-///   要 64 字节 MAC 密钥的 `hmac-sha2-512` 配上 SHA-256 / SHA-384 的交换会握手失败（Debug 直接断言）。
-///   补丁落地后把 `SSHTransportProtections.requiringKeyExtension` 加进来。
-///   （USSHCore 的 DH 不受这条影响：它的密钥由 NIOSSH 自定义密钥交换那条路径推导，带加长。）
-enum SSHAlgorithmsPendingPatches {
-    /// `.standard` 用的 AES-CTR：256 > 192 > 128，只配 `hmac-sha2-256`（encrypt-and-MAC）。
+/// 排序：NIOSSH 自带的 AES-GCM 永远在最前（AEAD，不受 Terrapin 影响），然后是 AES-CTR + ETM 的 MAC，最后
+/// AES-CTR + 普通（encrypt-and-MAC）MAC。NIOSSH 按数组里第一次出现的顺序得出加密名与 MAC 名的偏好列表，
+/// 所以 MAC 的偏好是 `hmac-sha2-256-etm` > `hmac-sha2-512-etm` > `hmac-sha2-256` > `hmac-sha2-512`，和 OpenSSH 一样。
+///
+/// 为什么现在能放 ETM 与 `hmac-sha2-512`：
+/// - **strict KEX**（NIOSSH 补丁 0007，Terrapin / CVE-2023-48795 的对策）：受影响的正是 `-etm` 的 MAC 与
+///   chacha20-poly1305。strict KEX 只在对端也支持时生效（OpenSSH 9.6+），对付不支持的老服务器，靠的是 AES-GCM
+///   排在 ETM 前面——双方都有 AES-GCM 时根本协商不到 ETM。
+/// - **RFC 4253 §7.2 的密钥加长**（补丁 0003）：自带的 curve25519 / ECDH 推导会话密钥也会加长了，
+///   要 64 字节 MAC 密钥的 `hmac-sha2-512` 不再握手失败。
+enum SSHAlgorithmsPresetSchemes {
+    private typealias CTR<Cipher: SSHAESCTRCipher, MAC: SSHHMACAlgorithm> = SSHAESCTRTransportProtection<Cipher, MAC>
+
+    /// `.standard`：AES-CTR（256 > 192 > 128）× ETM（SHA2-256 > SHA2-512），再 × 普通 MAC（同序）。
     static let standardAESCTRSchemes: [SSHTransportProtections.Scheme] = [
-        SSHAESCTRTransportProtection<SSHAES256CTR, SSHHMACSHA256>.self,
-        SSHAESCTRTransportProtection<SSHAES192CTR, SSHHMACSHA256>.self,
-        SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA256>.self,
+        CTR<SSHAES256CTR, SSHHMACSHA256ETM>.self, CTR<SSHAES256CTR, SSHHMACSHA512ETM>.self,
+        CTR<SSHAES192CTR, SSHHMACSHA256ETM>.self, CTR<SSHAES192CTR, SSHHMACSHA512ETM>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA256ETM>.self, CTR<SSHAES128CTR, SSHHMACSHA512ETM>.self,
+        CTR<SSHAES256CTR, SSHHMACSHA256>.self, CTR<SSHAES256CTR, SSHHMACSHA512>.self,
+        CTR<SSHAES192CTR, SSHHMACSHA256>.self, CTR<SSHAES192CTR, SSHHMACSHA512>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA256>.self, CTR<SSHAES128CTR, SSHHMACSHA512>.self,
     ]
 
-    /// `.legacyCompatible` 额外加的：AES-CTR + `hmac-sha1`（encrypt-and-MAC）。
+    /// `.legacyCompatible` 额外加的：AES-CTR × `hmac-sha1-etm@openssh.com`，再 × `hmac-sha1`。
     static let legacyAESCTRSchemes: [SSHTransportProtections.Scheme] = [
-        SSHAESCTRTransportProtection<SSHAES256CTR, SSHHMACSHA1>.self,
-        SSHAESCTRTransportProtection<SSHAES192CTR, SSHHMACSHA1>.self,
-        SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self,
+        CTR<SSHAES256CTR, SSHHMACSHA1ETM>.self, CTR<SSHAES192CTR, SSHHMACSHA1ETM>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA1ETM>.self,
+        CTR<SSHAES256CTR, SSHHMACSHA1>.self, CTR<SSHAES192CTR, SSHHMACSHA1>.self,
+        CTR<SSHAES128CTR, SSHHMACSHA1>.self,
     ]
 }

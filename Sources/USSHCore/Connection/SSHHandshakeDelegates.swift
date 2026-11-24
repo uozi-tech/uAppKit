@@ -211,10 +211,9 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     /// 依次试过的 RSA 签名算法（测试用）。
     private(set) var attemptedRSAAlgorithms: [SSHRSASignatureAlgorithm] = []
 
-    /// 服务器在 `server-sig-algs`（RFC 8308）里宣告的公钥算法。NIOSSH 0.15.2 不收 EXT_INFO，所以现在
-    /// 总是 `nil`；补上 `server-sig-algs` 的补丁之后，在认证开始前把它填进来，RSA 第一次就会直接用服务器
-    /// 支持的最好的算法（`SSHRSAUserAuthenticationPlan.algorithms`）。
-    var serverSignatureAlgorithms: [String]?
+    /// 服务器在 `server-sig-algs`（RFC 8308）里宣告的公钥算法（NIOSSH 补丁 0008 交给三参数的
+    /// `nextAuthenticationType`）；没宣告时 `nil`。EXT_INFO 早于 SERVICE_ACCEPT，第一次被问时就已经在了。
+    private(set) var serverSignatureAlgorithms: [String]?
 
     /// 列表用完了（在 EventLoop 上调）。NIOSSH 0.15.2 收到 `nil` 之后什么也不做，连接会一直挂着，
     /// 所以必须由我们自己结束连接。
@@ -230,6 +229,16 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
         availableMethods: NIOSSHAvailableUserAuthenticationMethods,
         nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
     ) {
+        nextAuthenticationType(
+            availableMethods: availableMethods, serverSignatureAlgorithms: nil, nextChallengePromise: nextChallengePromise)
+    }
+
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    ) {
+        self.serverSignatureAlgorithms = serverSignatureAlgorithms
         if let delegate = activeDelegate {
             ask(delegate, availableMethods: availableMethods, promise: nextChallengePromise)
         } else if availableMethods.contains(.publicKey), let next = nextRSAAttempt() {
@@ -301,7 +310,9 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     ) {
         let eventLoop = promise.futureResult.eventLoop
         let inner = eventLoop.makePromise(of: NIOSSHUserAuthenticationOffer?.self)
-        delegate.nextAuthenticationType(availableMethods: availableMethods, nextChallengePromise: inner)
+        delegate.nextAuthenticationType(
+            availableMethods: availableMethods, serverSignatureAlgorithms: serverSignatureAlgorithms,
+            nextChallengePromise: inner)
         // delegate 可能在别的线程完成 promise；回调总在 promise 的 EventLoop（即本连接的）上。
         let loopBoundSelf = NIOLoopBound(self, eventLoop: eventLoop)
         inner.futureResult.whenComplete { result in
@@ -322,18 +333,18 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
 
 /// RSA 用户私钥按哪些签名算法、以什么顺序尝试（每个算法一次认证尝试）。
 enum SSHRSAUserAuthenticationPlan {
-    /// 候选：`rsa-sha2-512`、`rsa-sha2-256`，允许旧算法时再加 `ssh-rsa`。
+    /// 候选按偏好：`rsa-sha2-512`、`rsa-sha2-256`，允许旧算法时最后是 `ssh-rsa`。
     ///
-    /// - Parameter serverSignatureAlgorithms: 服务器的 `server-sig-algs`；不知道时 `nil`，按候选顺序逐个试。
-    ///   知道时把服务器支持的排到前面（保持我们的偏好顺序），第一次就用最好的那个；它没列的放在后面照样试——
-    ///   `server-sig-algs` 只是提示，有的服务器列得不全。
+    /// - Parameter serverSignatureAlgorithms: 服务器的 `server-sig-algs`。
+    ///   - 宣告了：只试其中有的，按我们的偏好顺序，第一次就用最好的那个；一个 RSA 算法都没有就不试 RSA
+    ///     （OpenSSH 7.2 起都发这个列表，没列的它不会接受，试了只是白占认证次数）。
+    ///   - 没宣告（`nil`，老服务器）：按候选顺序逐个试。
     static func algorithms(
         allowsLegacyAlgorithms: Bool,
         serverSignatureAlgorithms: [String]?
     ) -> [SSHRSASignatureAlgorithm] {
         let candidates = SSHRSASignatureAlgorithm.modern + (allowsLegacyAlgorithms ? SSHRSASignatureAlgorithm.legacy : [])
         guard let serverSignatureAlgorithms else { return candidates }
-        let supported = candidates.filter { serverSignatureAlgorithms.contains($0.name) }
-        return supported + candidates.filter { !supported.contains($0) }
+        return candidates.filter { serverSignatureAlgorithms.contains($0.name) }
     }
 }

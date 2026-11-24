@@ -90,11 +90,11 @@ package struct SSHRSAExtensionPublicKey: NIOSSHPublicKeyProtocol {
     /// `buffer` 是格式名之后的剩余部分，可能比公钥长（NIOSSH 有的调用点给的是整条报文的剩余部分）：
     /// 只读两个 mpint，不要求读完；失败时读指针不动（内核保证）。
     package static func read(from buffer: inout ByteBuffer) throws -> SSHRSAExtensionPublicKey {
-        let start = buffer.readerIndex
+        // 读之前留一份（ByteBuffer 是写时复制，不拷数据）：读过的区间不能再从原缓冲 get。
+        var before = buffer
         let key = try SSHRSAPublicKey(readingBodyFrom: &buffer)
-        let consumed = buffer.readerIndex - start
-        // 刚读过的区间一定还在缓冲里。
-        let body = buffer.getBytes(at: start, length: consumed)!
+        let consumed = buffer.readerIndex - before.readerIndex
+        let body = before.readBytes(length: consumed)!
         return SSHRSAExtensionPublicKey(key: key, body: body)
     }
 

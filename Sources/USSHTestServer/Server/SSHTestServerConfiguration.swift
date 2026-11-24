@@ -32,6 +32,9 @@ extension SSHTestServer {
         public var keyExchangeAlgorithms: [String]?
         /// 按偏好排序的加密方式；`nil` 用 NIOSSH 自带的 AES-GCM。
         public var transportProtectionSchemes: [SSHTransportProtections.Scheme]?
+        /// 在 EXT_INFO 里宣告的 `server-sig-algs`（RFC 8308，客户端宣告了 `ext-info-c` 才发）；`nil` 不发
+        /// （像 OpenSSH 7.2 之前的服务器）。OpenSSH 发的是它接受的全部用户公钥算法。
+        public var serverSignatureAlgorithms: [String]?
         /// 接受 SHA-1 的旧算法（`ssh-rsa` 用户签名等）。为真时起服务端会调进程级的
         /// `SSHAlgorithms.registerLegacyAlgorithms()`；`keyExchangeAlgorithms` 里有 group14-sha1、或
         /// `useRSAHostKey` 带了 `ssh-rsa` 时自动视为真。

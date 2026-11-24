@@ -22,25 +22,36 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         XCTAssertEqual(SSHAlgorithms().keyExchangeAlgorithms, preset.keyExchangeAlgorithms)
     }
 
+    private static let aesCTR = ["aes256-ctr", "aes192-ctr", "aes128-ctr"]
+
+    private static func ctr(_ macs: [String]) -> [String] {
+        aesCTR.flatMap { cipher in macs.map { "\(cipher)+\($0)" } }
+    }
+
     func testStandardPreset() {
         let preset = SSHAlgorithms.standard
-        XCTAssertEqual(names(preset.transportProtectionSchemes), [
-            "aes256-gcm@openssh.com+aead", "aes128-gcm@openssh.com+aead",
-            "aes256-ctr+hmac-sha2-256", "aes192-ctr+hmac-sha2-256", "aes128-ctr+hmac-sha2-256",
-        ].map { $0.replacingOccurrences(of: "+aead", with: "+" + (Self.bundledMACName ?? "aead")) })
+        XCTAssertEqual(
+            names(preset.transportProtectionSchemes),
+            names(Constants.bundledTransportProtectionSchemes)
+                + Self.ctr(["hmac-sha2-256-etm@openssh.com", "hmac-sha2-512-etm@openssh.com"])
+                + Self.ctr(["hmac-sha2-256", "hmac-sha2-512"]))
         XCTAssertEqual(preset.keyExchangeAlgorithms, Self.nioDefaultKeyExchangeAlgorithms() + [
             "diffie-hellman-group16-sha512", "diffie-hellman-group14-sha256",
         ])
         XCTAssertEqual(preset.rsaHostKeyAlgorithms, [.rsaSHA2_512, .rsaSHA2_256])
         XCTAssertFalse(preset.allowsLegacyAlgorithms)
         XCTAssertFalse(preset.requiresLegacyRegistration)
+        // AEAD 永远在最前：对端不支持 strict KEX 时，双方都有 AES-GCM 就协商不到 ETM。
+        XCTAssertNil(preset.transportProtectionSchemes[0].macName)
+        XCTAssertNil(preset.transportProtectionSchemes[1].macName)
     }
 
     func testLegacyCompatiblePreset() {
         let preset = SSHAlgorithms.legacyCompatible
-        XCTAssertEqual(names(preset.transportProtectionSchemes), names(SSHAlgorithms.standard.transportProtectionSchemes) + [
-            "aes256-ctr+hmac-sha1", "aes192-ctr+hmac-sha1", "aes128-ctr+hmac-sha1",
-        ])
+        XCTAssertEqual(
+            names(preset.transportProtectionSchemes),
+            names(SSHAlgorithms.standard.transportProtectionSchemes)
+                + Self.ctr(["hmac-sha1-etm@openssh.com"]) + Self.ctr(["hmac-sha1"]))
         XCTAssertEqual(preset.keyExchangeAlgorithms,
                        SSHAlgorithms.standard.keyExchangeAlgorithms + ["diffie-hellman-group14-sha1"])
         XCTAssertEqual(preset.rsaHostKeyAlgorithms, [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
@@ -48,17 +59,13 @@ final class SSHAlgorithmPresetTests: XCTestCase {
         XCTAssertTrue(preset.requiresLegacyRegistration)
     }
 
-    /// 钉住「等 NIOSSH 补丁」的排除项。补丁（strict KEX、RFC 4253 §7.2 密钥加长）落地、放宽
-    /// `SSHAlgorithmsPendingPatches` 时，有意地改这个测试。
-    func testPendingPatchExclusions() {
-        for preset in [SSHAlgorithms.standard, .legacyCompatible] {
-            for scheme in preset.transportProtectionSchemes {
-                let mac = scheme.macName ?? ""
-                XCTAssertFalse(mac.hasSuffix("-etm@openssh.com"), "ETM 要等 strict KEX：\(mac)")
-                XCTAssertNotEqual(mac, "hmac-sha2-512", "hmac-sha2-512 要等密钥加长补丁")
-                XCTAssertFalse(scheme.cipherName.contains("chacha20"))
-            }
+    /// 预设里没有我们没实现、或不该默认用的东西。
+    func testPresetsExcludeChaChaAndSHA1ByDefault() {
+        for scheme in SSHAlgorithms.standard.transportProtectionSchemes {
+            XCTAssertFalse(scheme.cipherName.contains("chacha20"))
+            XCTAssertFalse((scheme.macName ?? "").contains("sha1"))
         }
+        XCTAssertFalse(SSHAlgorithms.standard.keyExchangeAlgorithms.contains { $0.hasSuffix("sha1") })
     }
 
     func testLegacyEntriesAreDroppedUnlessAllowed() {
@@ -89,22 +96,20 @@ final class SSHAlgorithmPresetTests: XCTestCase {
                        [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
     }
 
-    func testRSAUserAuthPlanWithServerSigAlgsPicksBestSupportedFirst() {
+    func testRSAUserAuthPlanWithServerSigAlgsUsesOnlyListedAlgorithms() {
+        let plan = SSHRSAUserAuthenticationPlan.algorithms
         // OpenSSH 的典型宣告。
         let openSSH = ["ssh-ed25519", "ecdsa-sha2-nistp256", "rsa-sha2-512", "rsa-sha2-256"]
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: false, serverSignatureAlgorithms: openSSH),
-                       [.rsaSHA2_512, .rsaSHA2_256])
-        // 只支持 256：第一次就用 256，512 放到后面。
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: false, serverSignatureAlgorithms: ["rsa-sha2-256"]),
-                       [.rsaSHA2_256, .rsaSHA2_512])
-        // 只支持 ssh-rsa：允许旧算法时第一次就用它；不允许时它根本不在候选里。
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: true, serverSignatureAlgorithms: ["ssh-rsa"]),
-                       [.sshRSA, .rsaSHA2_512, .rsaSHA2_256])
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: false, serverSignatureAlgorithms: ["ssh-rsa"]),
-                       [.rsaSHA2_512, .rsaSHA2_256])
-        // 空列表（宣告了但不含 RSA）：按原顺序照样试。
-        XCTAssertEqual(SSHRSAUserAuthenticationPlan.algorithms(allowsLegacyAlgorithms: false, serverSignatureAlgorithms: []),
-                       [.rsaSHA2_512, .rsaSHA2_256])
+        XCTAssertEqual(plan(false, openSSH), [.rsaSHA2_512, .rsaSHA2_256])
+        XCTAssertEqual(plan(true, openSSH), [.rsaSHA2_512, .rsaSHA2_256])
+        // 只支持 256：第一次就用 256，不再试 512。
+        XCTAssertEqual(plan(false, ["rsa-sha2-256"]), [.rsaSHA2_256])
+        // 只支持 ssh-rsa：允许旧算法时第一次就用它；不允许时不试 RSA。
+        XCTAssertEqual(plan(true, ["ssh-rsa"]), [.sshRSA])
+        XCTAssertEqual(plan(false, ["ssh-rsa"]), [])
+        // 宣告了但没有 RSA：不试 RSA。
+        XCTAssertEqual(plan(false, ["ssh-ed25519"]), [])
+        XCTAssertEqual(plan(true, []), [])
     }
 
     /// 认证 delegate 按计划一次一个算法地出价，服务器不再接受公钥就跳到下一个方式。
