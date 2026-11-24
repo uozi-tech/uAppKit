@@ -294,7 +294,7 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
   换行变空格，截断到 300 个字符加「…」。app 自己把服务器原话（`SFTPError.status` 的 `message`、`SSHChannelOpenFailure.description`）
-  直接拿去显示或写日志的地方，也应该这样处理。
+  直接拿去显示或写日志的地方，也应该这样处理（`SSHPeerText.sanitize` 是 public 的，直接用它，别抄一份规则）。
 - **认证失败的文案**按实际发出过的方式说（「服务器拒绝了密码」「服务器拒绝了私钥」「服务器不接受所提供的认证方式（服务器支持：…）」）。
 
 ## 9. 在 app 的测试里用 `USSHTestServer`（替代 Citadel 的 `SSHServer`）
