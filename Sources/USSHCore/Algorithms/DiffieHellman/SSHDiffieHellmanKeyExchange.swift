@@ -161,26 +161,12 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
         peerPublicValue: [UInt8],
         inputs: SSHExchangeHashInputs
     ) throws -> SSHDiffieHellmanResult {
-        guard let exponent = self.privateExponent else {
-            throw SSHDiffieHellmanError.alreadyCompleted
-        }
-        let group = self.algorithm.group
-        let peer = BigUInt(sshMagnitude: peerPublicValue)
-        guard group.isValidPublicValue(peer) else {
-            throw SSHDiffieHellmanError.invalidPeerPublicValue
-        }
-        // 私钥只用这一次（校验失败时保留，调用方可以换一个合法的值重试——不会泄露什么，因为什么也没算）。
-        self.privateExponent = nil
-
-        let shared = peer.power(exponent, modulus: group.prime)
-        guard shared > 1 else {
-            throw SSHDiffieHellmanError.degenerateSharedSecret
-        }
-        let peerBytes = peer.sshMagnitudeBytes
+        let shared = try self.sharedSecret(peerPublicValue: peerPublicValue)
+        let peerBytes = SSHBytes.trimmingLeadingZeros(peerPublicValue)
         let (e, f) = self.role == .client ? (self.localPublicValue, peerBytes) : (peerBytes, self.localPublicValue)
 
         var sharedMPInt = ByteBuffer()
-        sharedMPInt.writeSSHWireUnsignedMPInt(magnitude: shared.sshMagnitudeBytes)
+        sharedMPInt.writeSSHWireUnsignedMPInt(magnitude: shared)
         let sharedSecretMPInt = Array(sharedMPInt.readableBytesView)
 
         let exchangeHash = Self.exchangeHash(
@@ -197,6 +183,28 @@ public struct SSHDiffieHellmanKeyExchange: Sendable {
             sharedSecretMPInt: sharedSecretMPInt,
             exchangeHash: exchangeHash
         )
+    }
+
+    /// 校验对端公开值、算出共享秘密 K（大端无符号、无前导零），不拼交换哈希。
+    ///
+    /// 给 NIOSSH 的密钥交换扩展接口用：那边自己算 H、自己推导会话密钥，只要 K。`complete` 也经由这里。
+    /// 私钥只用一次（成功后清掉，再调抛 `.alreadyCompleted`）；对端值不合格时私钥保留——什么也没算，不会泄露。
+    package mutating func sharedSecret(peerPublicValue: [UInt8]) throws -> [UInt8] {
+        guard let exponent = self.privateExponent else {
+            throw SSHDiffieHellmanError.alreadyCompleted
+        }
+        let group = self.algorithm.group
+        let peer = BigUInt(sshMagnitude: peerPublicValue)
+        guard group.isValidPublicValue(peer) else {
+            throw SSHDiffieHellmanError.invalidPeerPublicValue
+        }
+        self.privateExponent = nil
+
+        let shared = peer.power(exponent, modulus: group.prime)
+        guard shared > 1 else {
+            throw SSHDiffieHellmanError.degenerateSharedSecret
+        }
+        return shared.sshMagnitudeBytes
     }
 
     /// H = HASH(string V_C ‖ string V_S ‖ string I_C ‖ string I_S ‖ string K_S ‖ mpint e ‖ mpint f ‖ mpint K)。

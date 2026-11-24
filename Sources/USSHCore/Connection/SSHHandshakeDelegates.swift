@@ -80,13 +80,16 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     private let port: Int
     private let timeout: Duration?
     private let clock: SSHHandshakeClock
+    /// 这条连接接受的 RSA 主机密钥签名算法（已去掉未经允许的旧算法）。
+    private let rsaHostKeyAlgorithms: Set<SSHRSASignatureAlgorithm>
     /// 正在跑的回调，连接关掉时取消。
     private var pending: [Int: Task<Void, Never>] = [:]
     private var nextID = 0
     private var cancelled = false
 
     init(eventLoop: any EventLoop, validation: SSHHostKeyValidation, host: String, port: Int,
-         timeout: Duration?, clock: SSHHandshakeClock) {
+         timeout: Duration?, clock: SSHHandshakeClock, rsaHostKeyAlgorithms: Set<SSHRSASignatureAlgorithm>) {
+        self.rsaHostKeyAlgorithms = rsaHostKeyAlgorithms
         self.eventLoop = eventLoop
         self.validation = validation
         self.host = host
@@ -96,6 +99,11 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
     }
 
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
+        // 先核对签名算法（首次交换与每次换钥都会走到这里），不允许的算法不必再问回调。
+        if let refused = refusedAlgorithm(of: hostKey) {
+            validationCompletePromise.fail(refused)
+            return
+        }
         switch validation {
         case .acceptAnything:
             validationCompletePromise.succeed(())
@@ -112,6 +120,18 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
             }
             startCustom(callback, hostKey: hostKey, promise: validationCompletePromise)
         }
+    }
+
+    /// RSA 主机密钥：取出刚才验签时记下的算法（同一个调用栈里，见 `SSHRSAVerificationRecord`），
+    /// 不在 `rsaHostKeyAlgorithms` 里（或取不到）就拒绝。别的密钥类型的算法就是它的格式，NIOSSH 已按配置协商。
+    private func refusedAlgorithm(of hostKey: NIOSSHPublicKey) -> SSHHostKeyAlgorithmRefused? {
+        var buffer = ByteBuffer()
+        hostKey.write(to: &buffer)
+        let blob = Array(buffer.readableBytesView)
+        guard (try? buffer.readSSHWireIdentifier()) == SSHRSAPublicKey.keyType else { return nil }
+        let algorithm = SSHRSAVerificationRecord.take(keyBlob: blob)
+        if let algorithm, rsaHostKeyAlgorithms.contains(algorithm) { return nil }
+        return SSHHostKeyAlgorithmRefused(algorithm: algorithm, hostKey: hostKey)
     }
 
     private func startCustom(_ callback: @escaping @Sendable (SSHHostKeyContext) async throws -> Void,
@@ -182,17 +202,28 @@ final class SSHHostKeyDelegate: NIOSSHClientServerAuthenticationDelegate {
 final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private let username: String
     private let methods: [SSHAuthenticationMethod]
+    private let allowsLegacyAlgorithms: Bool
     private var index = 0
     private var activeDelegate: (any NIOSSHClientUserAuthenticationDelegate & Sendable)?
+    /// 正在逐个算法尝试的 RSA 用户私钥与还没试的算法。
+    private var rsaAttempts: (key: SSHRSAPrivateKey, remaining: ArraySlice<SSHRSASignatureAlgorithm>)?
     private(set) var attempted: [SSHAuthenticationMethod.Kind] = []
+    /// 依次试过的 RSA 签名算法（测试用）。
+    private(set) var attemptedRSAAlgorithms: [SSHRSASignatureAlgorithm] = []
+
+    /// 服务器在 `server-sig-algs`（RFC 8308）里宣告的公钥算法。NIOSSH 0.15.2 不收 EXT_INFO，所以现在
+    /// 总是 `nil`；补上 `server-sig-algs` 的补丁之后，在认证开始前把它填进来，RSA 第一次就会直接用服务器
+    /// 支持的最好的算法（`SSHRSAUserAuthenticationPlan.algorithms`）。
+    var serverSignatureAlgorithms: [String]?
 
     /// 列表用完了（在 EventLoop 上调）。NIOSSH 0.15.2 收到 `nil` 之后什么也不做，连接会一直挂着，
     /// 所以必须由我们自己结束连接。
     var onExhausted: ((SSHAuthenticationFailure) -> Void)?
 
-    init(authentication: SSHAuthentication) {
+    init(authentication: SSHAuthentication, allowsLegacyAlgorithms: Bool) {
         self.username = authentication.username
         self.methods = authentication.methods
+        self.allowsLegacyAlgorithms = allowsLegacyAlgorithms
     }
 
     func nextAuthenticationType(
@@ -201,9 +232,22 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     ) {
         if let delegate = activeDelegate {
             ask(delegate, availableMethods: availableMethods, promise: nextChallengePromise)
+        } else if availableMethods.contains(.publicKey), let next = nextRSAAttempt() {
+            nextChallengePromise.succeed(next)
         } else {
+            rsaAttempts = nil
             advance(availableMethods: availableMethods, promise: nextChallengePromise)
         }
+    }
+
+    /// RSA 私钥还有没试的算法就取下一个。
+    private func nextRSAAttempt() -> NIOSSHUserAuthenticationOffer? {
+        guard var attempts = rsaAttempts, let algorithm = attempts.remaining.popFirst() else { return nil }
+        rsaAttempts = attempts
+        attempted.append(.publicKey)
+        attemptedRSAAlgorithms.append(algorithm)
+        let key = NIOSSHPrivateKey(rsaPrivateKey: attempts.key, algorithm: algorithm)
+        return .init(username: username, serviceName: "", offer: .privateKey(.init(privateKey: key)))
     }
 
     private func advance(
@@ -227,6 +271,15 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
                 guard availableMethods.contains(.publicKey) else { continue }
                 attempted.append(.publicKey)
                 promise.succeed(.init(username: username, serviceName: "", offer: .privateKey(.init(privateKey: key))))
+                return
+            case .rsaPrivateKey(let key):
+                guard availableMethods.contains(.publicKey) else { continue }
+                let plan = SSHRSAUserAuthenticationPlan.algorithms(
+                    allowsLegacyAlgorithms: allowsLegacyAlgorithms,
+                    serverSignatureAlgorithms: serverSignatureAlgorithms)
+                rsaAttempts = (key, plan[...])
+                guard let offer = nextRSAAttempt() else { continue }
+                promise.succeed(offer)
                 return
             case .certifiedPrivateKey(let key, let certificate):
                 guard availableMethods.contains(.publicKey) else { continue }
@@ -264,5 +317,23 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
                 promise.fail(error)
             }
         }
+    }
+}
+
+/// RSA 用户私钥按哪些签名算法、以什么顺序尝试（每个算法一次认证尝试）。
+enum SSHRSAUserAuthenticationPlan {
+    /// 候选：`rsa-sha2-512`、`rsa-sha2-256`，允许旧算法时再加 `ssh-rsa`。
+    ///
+    /// - Parameter serverSignatureAlgorithms: 服务器的 `server-sig-algs`；不知道时 `nil`，按候选顺序逐个试。
+    ///   知道时把服务器支持的排到前面（保持我们的偏好顺序），第一次就用最好的那个；它没列的放在后面照样试——
+    ///   `server-sig-algs` 只是提示，有的服务器列得不全。
+    static func algorithms(
+        allowsLegacyAlgorithms: Bool,
+        serverSignatureAlgorithms: [String]?
+    ) -> [SSHRSASignatureAlgorithm] {
+        let candidates = SSHRSASignatureAlgorithm.modern + (allowsLegacyAlgorithms ? SSHRSASignatureAlgorithm.legacy : [])
+        guard let serverSignatureAlgorithms else { return candidates }
+        let supported = candidates.filter { serverSignatureAlgorithms.contains($0.name) }
+        return supported + candidates.filter { !supported.contains($0) }
     }
 }
