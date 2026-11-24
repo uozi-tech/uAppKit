@@ -2650,6 +2650,34 @@
         }
       }
     },
+    "文件已上传到 %@，但没能替换 %@（旧文件已删除）：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The file was uploaded to %1$@, but %2$@ couldn't be replaced (the old file was already deleted): %3$@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ファイルは %1$@ にアップロードされましたが、%2$@ を置き換えられませんでした（古いファイルは削除済み）：%3$@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "파일은 %1$@에 업로드되었지만 %2$@을(를) 교체하지 못함(이전 파일은 이미 삭제됨): %3$@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檔案已上傳到 %1$@，但沒能取代 %2$@（舊檔案已刪除）：%3$@"
+          }
+        }
+      }
+    },
     "文件或路径不存在" : {
       "localizations" : {
         "en" : {
