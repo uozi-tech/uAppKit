@@ -236,16 +236,24 @@ public struct SFTPFileAttributes: Hashable, Sendable {
 
 /// SSH_FXP_NAME 里的一项：READDIR 的目录项，也是 REALPATH / READLINK 的回答。
 public struct SFTPDirectoryEntry: Hashable, Sendable {
-    public var filename: String
+    /// 名字的原始字节。拿目录项去做后续操作（stat、打开、改名、删除）时用它，不要用 `filename`。
+    public var name: SFTPPath
     /// `ls -l` 风格的一行（v3 有，内容依实现而定，只适合原样显示）。
     public var longname: String
     public var attributes: SFTPFileAttributes
 
-    public init(filename: String, longname: String, attributes: SFTPFileAttributes) {
-        self.filename = filename
+    public init(name: SFTPPath, longname: String, attributes: SFTPFileAttributes) {
+        self.name = name
         self.longname = longname
         self.attributes = attributes
     }
+
+    public init(filename: String, longname: String, attributes: SFTPFileAttributes) {
+        self.init(name: SFTPPath(filename), longname: longname, attributes: attributes)
+    }
+
+    /// 名字按 UTF-8 解出的字符串（非法序列替换，只适合显示）。
+    public var filename: String { name.string }
 }
 
 // MARK: - 扩展的返回值

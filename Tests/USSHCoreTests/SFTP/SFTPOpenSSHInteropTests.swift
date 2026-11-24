@@ -10,63 +10,23 @@ import XCTest
 ///
 /// 服务端以 `-d <临时目录>` 启动，所有路径都是该目录下的真实绝对路径。
 final class SFTPOpenSSHInteropTests: XCTestCase {
-    private static let serverPath = "/usr/libexec/sftp-server"
-
-    private var process: Process?
-    private var exit = ProcessExitSignal()
+    private var server: OpenSSHServer?
     private var client: SFTPClient!
     private var root: String!
+    private var process: Process? { server?.process }
+    private var exit: ProcessExitSignal { server!.exit }
 
     override func setUp() async throws {
-        guard FileManager.default.isExecutableFile(atPath: Self.serverPath) else {
-            throw XCTSkip("\(Self.serverPath) not available")
-        }
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("usshcore-openssh-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        root = try XCTUnwrap(directory.path.withCString { pointer -> String? in
-            guard let resolved = realpath(pointer, nil) else { return nil }
-            defer { free(resolved) }
-            return String(cString: resolved)
-        })
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: Self.serverPath)
-        process.arguments = ["-d", root, "-e", "-l", "ERROR"]
-        let toServer = Pipe()
-        let fromServer = Pipe()
-        process.standardInput = toServer
-        process.standardOutput = fromServer
-        process.standardError = FileHandle.nullDevice
-        // 不用 `waitUntilExit()`：它在测试的异步 tearDown 里转主线程的 run loop，实测会偶发地永远等不到结束。
-        let exit = ProcessExitSignal()
-        self.exit = exit
-        process.terminationHandler = { _ in exit.signal() }
-        try process.run()
-        self.process = process
-
-        // NIO 接管的是复制出来的描述符；Pipe 自己那份关掉，子进程才能在通道关闭时读到 EOF。
-        let input = dup(fromServer.fileHandleForReading.fileDescriptor)
-        let output = dup(toServer.fileHandleForWriting.fileDescriptor)
-        try fromServer.fileHandleForReading.close()
-        try toServer.fileHandleForWriting.close()
-        let channel = try await NIOPipeBootstrap(group: MultiThreadedEventLoopGroup.singleton)
-            .takingOwnershipOfDescriptors(input: input, output: output).get()
-        client = try await SFTPClient.start(on: channel)
+        let server = try await OpenSSHServer.start()
+        self.server = server
+        client = server.client
+        root = server.root
     }
 
     override func tearDown() async throws {
-        // 关通道 = 关掉子进程的 stdin，sftp-server 读到 EOF 自己退出；等不到再发 SIGTERM。
-        if let client { await client.close() }
-        if let process {
-            if await !exit.wait(timeout: .seconds(5)) {
-                process.terminate()
-                _ = await exit.wait(timeout: .seconds(5))
-            }
-        }
-        if let root { try? FileManager.default.removeItem(atPath: root) }
+        await server?.stop()
+        server = nil
         client = nil
-        process = nil
     }
 
     private func path(_ name: String) -> String { root + "/" + name }
@@ -347,46 +307,5 @@ final class SFTPOpenSSHInteropTests: XCTestCase {
         let exited = await exit.wait(timeout: .seconds(10))
         XCTAssertTrue(exited)
         await XCTAssertSFTPError(.connectionClosed) { _ = try await self.client.stat(self.root) }
-    }
-}
-
-/// 子进程结束的信号（`terminationHandler` 里触发），可以带时限地等。
-final class ProcessExitSignal: Sendable {
-    private let state = NIOLockedValueBox<(exited: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
-
-    func signal() {
-        resumeWaiters(markingExited: true)
-    }
-
-    private func resumeWaiters(markingExited: Bool) {
-        let waiters = state.withLockedValue { state -> [CheckedContinuation<Void, Never>] in
-            if markingExited { state.exited = true }
-            defer { state.waiters = [] }
-            return state.waiters
-        }
-        for waiter in waiters { waiter.resume() }
-    }
-
-    private func wait() async {
-        await withCheckedContinuation { continuation in
-            let exited = state.withLockedValue { state -> Bool in
-                if !state.exited { state.waiters.append(continuation) }
-                return state.exited
-            }
-            if exited { continuation.resume() }
-        }
-    }
-
-    /// 在时限内结束了返回 true。
-    func wait(timeout: Duration) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await self.wait(); return true }
-            group.addTask { try? await Task.sleep(for: timeout); return false }
-            let first = await group.next() ?? false
-            group.cancelAll()
-            // 超时：放走还挂着的等待者（不当作已结束），任务组才能收尾。
-            if !first { self.resumeWaiters(markingExited: false) }
-            return first
-        }
     }
 }

@@ -43,6 +43,10 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
     }
 
     /// 客户端路径对应的真实路径（只做字面映射，不核对符号链接）。测试里用来直接检查磁盘上的结果。
+    public func hostPath(for path: SFTPPath) -> String {
+        hostPath(for: path.string)
+    }
+
     public func hostPath(for path: String) -> String {
         let normalized = Self.normalize(path)
         return normalized == "/" ? rootPath : rootPath + normalized
@@ -97,6 +101,13 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         if host == rootPath { return "/" }
         guard host.hasPrefix(rootPath + "/") else { return nil }
         return String(host.dropFirst(rootPath.count))
+    }
+
+    /// 这台机器的文件系统（APFS）只收合法 UTF-8 的名字；别的名字照系统的做法拒绝（EILSEQ → SSH_FX_FAILURE）。
+    /// 要测非 UTF-8 名字，换一个自己实现的 `SFTPServerFileSystem`。
+    static func text(_ path: SFTPPath) throws -> String {
+        guard path.isLosslessUTF8, !path.bytes.contains(0) else { throw error(EILSEQ) }
+        return path.string
     }
 
     // MARK: - 错误
@@ -181,28 +192,32 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
 
     // MARK: - SFTPServerFileSystem
 
-    public func realPath(_ path: String) async throws -> String {
+    public func realPath(_ path: SFTPPath) async throws -> SFTPPath {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: true)
         guard let resolved = Self.canonical(host) else { throw Self.error() }
         guard let virtual = virtualPath(forHost: resolved) else {
             throw SFTPServerStatusError.permissionDenied("path escapes root")
         }
-        return virtual
+        return SFTPPath(virtual)
     }
 
-    public func attributes(at path: String, followingSymlinks: Bool) async throws -> SFTPFileAttributes {
+    public func attributes(at path: SFTPPath, followingSymlinks: Bool) async throws -> SFTPFileAttributes {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: followingSymlinks)
         var info = Darwin.stat()
         try Self.check(followingSymlinks ? stat(host, &info) : lstat(host, &info))
         return Self.attributes(from: info)
     }
 
-    public func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool) async throws {
+    public func setAttributes(_ attributes: SFTPFileAttributes, at path: SFTPPath, followingSymlinks: Bool) async throws {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: followingSymlinks)
         try apply(attributes, toHost: host, followingSymlinks: followingSymlinks)
     }
 
-    public func openFile(_ path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes) async throws -> any SFTPServerFile {
+    public func openFile(_ path: SFTPPath, flags: SFTPOpenFlags, attributes: SFTPFileAttributes) async throws -> any SFTPServerFile {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: true)
         var oflags: Int32
         switch (flags.contains(.read), flags.contains(.write)) {
@@ -220,7 +235,8 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         return SFTPLocalFile(descriptor: fd, appends: flags.contains(.append))
     }
 
-    public func openDirectory(_ path: String) async throws -> any SFTPServerDirectory {
+    public func openDirectory(_ path: SFTPPath) async throws -> any SFTPServerDirectory {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: true)
         var info = Darwin.stat()
         try Self.check(stat(host, &info))
@@ -244,22 +260,27 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         return SFTPLocalDirectory(entries: entries, batchSize: directoryBatchSize)
     }
 
-    public func removeFile(_ path: String) async throws {
+    public func removeFile(_ path: SFTPPath) async throws {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: false)
         try Self.check(unlink(host))
     }
 
-    public func createDirectory(_ path: String, attributes: SFTPFileAttributes) async throws {
+    public func createDirectory(_ path: SFTPPath, attributes: SFTPFileAttributes) async throws {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: false)
         try Self.check(mkdir(host, mode_t(attributes.permissions.map { $0 & 0o7777 } ?? 0o777)))
     }
 
-    public func removeDirectory(_ path: String) async throws {
+    public func removeDirectory(_ path: SFTPPath) async throws {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: false)
         try Self.check(rmdir(host))
     }
 
-    public func rename(_ oldPath: String, to newPath: String, replacingExisting: Bool) async throws {
+    public func rename(_ oldPath: SFTPPath, to newPath: SFTPPath, replacingExisting: Bool) async throws {
+        let oldPath = try Self.text(oldPath)
+        let newPath = try Self.text(newPath)
         let old = try confined(oldPath, followingFinal: false)
         let new = try confined(newPath, followingFinal: false)
         if !replacingExisting {
@@ -270,29 +291,35 @@ public struct SFTPLocalFileSystem: SFTPServerFileSystem {
         try Self.check(Darwin.rename(old, new))
     }
 
-    public func readLink(_ path: String) async throws -> String {
+    public func readLink(_ path: SFTPPath) async throws -> SFTPPath {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: false)
         var buffer = [CChar](repeating: 0, count: Int(PATH_MAX) + 1)
         let count = readlink(host, &buffer, buffer.count - 1)
         guard count >= 0 else { throw Self.error() }
         let target = String(decoding: buffer[0..<count].map { UInt8(bitPattern: $0) }, as: UTF8.self)
         // 建链接时换成了真实路径的绝对目标，换回客户端视角。
-        return virtualPath(forHost: target) ?? target
+        return SFTPPath(virtualPath(forHost: target) ?? target)
     }
 
-    public func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws {
+    public func createSymlink(at linkPath: SFTPPath, pointingTo targetPath: SFTPPath) async throws {
+        let linkPath = try Self.text(linkPath)
+        let targetPath = try Self.text(targetPath)
         let host = try confined(linkPath, followingFinal: false)
         let target = targetPath.hasPrefix("/") ? hostPath(for: targetPath) : targetPath
         try Self.check(symlink(target, host))
     }
 
-    public func createHardLink(at newPath: String, pointingTo existingPath: String) async throws {
+    public func createHardLink(at newPath: SFTPPath, pointingTo existingPath: SFTPPath) async throws {
+        let newPath = try Self.text(newPath)
+        let existingPath = try Self.text(existingPath)
         let existing = try confined(existingPath, followingFinal: false)
         let new = try confined(newPath, followingFinal: false)
         try Self.check(link(existing, new))
     }
 
-    public func fileSystemStats(at path: String) async throws -> SFTPFileSystemStats {
+    public func fileSystemStats(at path: SFTPPath) async throws -> SFTPFileSystemStats {
+        let path = try Self.text(path)
         let host = try confined(path, followingFinal: true)
         var info = statvfs()
         try Self.check(statvfs(host, &info))

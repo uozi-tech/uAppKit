@@ -9,11 +9,11 @@ import NIOCore
 public struct SFTPFile: Sendable {
     public let client: SFTPClient
     /// 打开时给的路径（只用于诊断）。
-    public let path: String
+    public let path: SFTPPath
     let handle: ByteBuffer
     private let closed: NIOLockedValueBox<Bool>
 
-    init(client: SFTPClient, path: String, handle: ByteBuffer) {
+    init(client: SFTPClient, path: SFTPPath, handle: ByteBuffer) {
         self.client = client
         self.path = path
         self.handle = handle

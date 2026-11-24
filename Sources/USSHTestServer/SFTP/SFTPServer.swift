@@ -287,7 +287,7 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
         case .realpath(_, let path):
             run(id, decision) {
                 let resolved = try await fs.realPath(path)
-                return .response(.name(id: id, entries: [SFTPDirectoryEntry(filename: resolved, longname: resolved, attributes: .none)]))
+                return .response(.name(id: id, entries: [SFTPDirectoryEntry(name: resolved, longname: resolved.string, attributes: .none)]))
             }
         case .rename(_, let oldPath, let newPath):
             run(id, decision) {
@@ -297,7 +297,7 @@ final class SFTPServerChannelHandler: ChannelInboundHandler, RemovableChannelHan
         case .readlink(_, let path):
             run(id, decision) {
                 let target = try await fs.readLink(path)
-                return .response(.name(id: id, entries: [SFTPDirectoryEntry(filename: target, longname: target, attributes: .none)]))
+                return .response(.name(id: id, entries: [SFTPDirectoryEntry(name: target, longname: target.string, attributes: .none)]))
             }
         case .symlink(_, let linkPath, let targetPath):
             run(id, decision) {

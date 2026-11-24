@@ -181,7 +181,7 @@ public final class SFTPClient: Sendable {
     // MARK: - 目录
 
     /// 列目录：OPENDIR → READDIR 直到 EOF → CLOSE。默认去掉 `.` 与 `..`。
-    public func listDirectory(_ path: String, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
+    public func listDirectory(_ path: SFTPPath, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
         let handle = try SFTPResponseReader.handle(try await core.perform { .opendir(id: $0, path: path) })
         var entries: [SFTPDirectoryEntry] = []
         do {
@@ -191,7 +191,7 @@ public final class SFTPClient: Sendable {
                     if includingDotEntries {
                         entries.append(contentsOf: batch)
                     } else {
-                        entries.append(contentsOf: batch.lazy.filter { $0.filename != "." && $0.filename != ".." })
+                        entries.append(contentsOf: batch.lazy.filter { $0.name != "." && $0.name != ".." })
                     }
                 case .status(_, let code, _, _) where code == .eof:
                     break reading
@@ -207,34 +207,34 @@ public final class SFTPClient: Sendable {
         return entries
     }
 
-    public func createDirectory(_ path: String, attributes: SFTPFileAttributes = .none) async throws {
+    public func createDirectory(_ path: SFTPPath, attributes: SFTPFileAttributes = .none) async throws {
         try SFTPResponseReader.ok(try await core.perform { .mkdir(id: $0, path: path, attributes: attributes) })
     }
 
-    public func removeDirectory(_ path: String) async throws {
+    public func removeDirectory(_ path: SFTPPath) async throws {
         try SFTPResponseReader.ok(try await core.perform { .rmdir(id: $0, path: path) })
     }
 
     // MARK: - 路径
 
     /// REALPATH：服务端规范化后的绝对路径（`"."` 即登录目录）。
-    public func realPath(_ path: String) async throws -> String {
-        try SFTPResponseReader.singleName(try await core.perform { .realpath(id: $0, path: path) }).filename
+    public func realPath(_ path: SFTPPath) async throws -> SFTPPath {
+        try SFTPResponseReader.singleName(try await core.perform { .realpath(id: $0, path: path) }).name
     }
 
     /// STAT（跟随符号链接）。
-    public func stat(_ path: String) async throws -> SFTPFileAttributes {
+    public func stat(_ path: SFTPPath) async throws -> SFTPFileAttributes {
         try SFTPResponseReader.attributes(try await core.perform { .stat(id: $0, path: path) })
     }
 
     /// LSTAT（不跟随符号链接）。
-    public func lstat(_ path: String) async throws -> SFTPFileAttributes {
+    public func lstat(_ path: SFTPPath) async throws -> SFTPFileAttributes {
         try SFTPResponseReader.attributes(try await core.perform { .lstat(id: $0, path: path) })
     }
 
     /// SETSTAT；`followingSymlinks == false` 时用 `lsetstat@openssh.com`（改链接本身）。
     /// 只有非 nil 的字段会被改。
-    public func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool = true) async throws {
+    public func setAttributes(_ attributes: SFTPFileAttributes, at path: SFTPPath, followingSymlinks: Bool = true) async throws {
         if followingSymlinks {
             try SFTPResponseReader.ok(try await core.perform { .setstat(id: $0, path: path, attributes: attributes) })
         } else {
@@ -245,7 +245,7 @@ public final class SFTPClient: Sendable {
         }
     }
 
-    public func rename(_ oldPath: String, to newPath: String, mode: SFTPRenameMode = .standard) async throws {
+    public func rename(_ oldPath: SFTPPath, to newPath: SFTPPath, mode: SFTPRenameMode = .standard) async throws {
         let posix: Bool
         switch mode {
         case .standard: posix = false
@@ -262,22 +262,22 @@ public final class SFTPClient: Sendable {
     }
 
     /// 删文件（REMOVE）。
-    public func remove(_ path: String) async throws {
+    public func remove(_ path: SFTPPath) async throws {
         try SFTPResponseReader.ok(try await core.perform { .remove(id: $0, path: path) })
     }
 
-    /// 符号链接指向哪里（原样返回链接里存的字符串）。
-    public func readLink(_ path: String) async throws -> String {
-        try SFTPResponseReader.singleName(try await core.perform { .readlink(id: $0, path: path) }).filename
+    /// 符号链接指向哪里（原样返回链接里存的字节）。
+    public func readLink(_ path: SFTPPath) async throws -> SFTPPath {
+        try SFTPResponseReader.singleName(try await core.perform { .readlink(id: $0, path: path) }).name
     }
 
     /// 在 `linkPath` 建一个指向 `targetPath` 的符号链接（线上按 OpenSSH 的参数顺序发，见 `SFTPRequest.symlink`）。
-    public func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws {
+    public func createSymlink(at linkPath: SFTPPath, pointingTo targetPath: SFTPPath) async throws {
         try SFTPResponseReader.ok(try await core.perform { .symlink(id: $0, linkPath: linkPath, targetPath: targetPath) })
     }
 
     /// `hardlink@openssh.com`：在 `newPath` 建一个指向 `existingPath` 的硬链接。
-    public func createHardLink(at newPath: String, pointingTo existingPath: String) async throws {
+    public func createHardLink(at newPath: SFTPPath, pointingTo existingPath: SFTPPath) async throws {
         try requireExtension(SFTPExtensionName.hardLink)
         try SFTPResponseReader.ok(try await core.perform {
             .extended(id: $0, request: .hardLink(oldPath: existingPath, newPath: newPath))
@@ -285,7 +285,7 @@ public final class SFTPClient: Sendable {
     }
 
     /// `statvfs@openssh.com`：`path` 所在文件系统的容量。
-    public func statVFS(_ path: String) async throws -> SFTPFileSystemStats {
+    public func statVFS(_ path: SFTPPath) async throws -> SFTPFileSystemStats {
         try requireExtension(SFTPExtensionName.statVFS)
         let response = try await core.perform { .extended(id: $0, request: .statVFS(path: path)) }
         return try SFTPResponseReader.extendedReply(response, as: SFTPFileSystemStats.decode)
@@ -294,7 +294,7 @@ public final class SFTPClient: Sendable {
     // MARK: - 文件
 
     /// OPEN。返回的句柄用完要 `close()`（任务被取消、句柄还没交到调用方手里时，客户端会自己关）。
-    public func openFile(_ path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes = .none) async throws -> SFTPFile {
+    public func openFile(_ path: SFTPPath, flags: SFTPOpenFlags, attributes: SFTPFileAttributes = .none) async throws -> SFTPFile {
         let handle = try SFTPResponseReader.handle(try await core.perform {
             .open(id: $0, path: path, flags: flags, attributes: attributes)
         })
@@ -303,7 +303,7 @@ public final class SFTPClient: Sendable {
 
     /// 打开、交给 `body`、无论成败都关掉。
     public func withFile<Value: Sendable>(
-        _ path: String,
+        _ path: SFTPPath,
         flags: SFTPOpenFlags,
         attributes: SFTPFileAttributes = .none,
         _ body: (SFTPFile) async throws -> Value
@@ -318,6 +318,79 @@ public final class SFTPClient: Sendable {
         }
         try await file.close()
         return result
+    }
+}
+
+// MARK: - String 便捷写法
+
+/// 每个收路径的操作都有一份收 `String` 的便捷重载（UTF-8 编码后照发）。
+/// 目录项里拿到的名字请用 `SFTPDirectoryEntry.name`（`SFTPPath`）原样回传，名字可能不是合法的 UTF-8。
+extension SFTPClient {
+    public func listDirectory(_ path: String, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
+        try await listDirectory(SFTPPath(path), includingDotEntries: includingDotEntries)
+    }
+
+    public func createDirectory(_ path: String, attributes: SFTPFileAttributes = .none) async throws {
+        try await createDirectory(SFTPPath(path), attributes: attributes)
+    }
+
+    public func removeDirectory(_ path: String) async throws {
+        try await removeDirectory(SFTPPath(path))
+    }
+
+    /// 同 `realPath(_: SFTPPath)`，结果按 UTF-8 解成字符串（非法序列替换）。
+    public func realPath(_ path: String) async throws -> String {
+        try await realPath(SFTPPath(path)).string
+    }
+
+    public func stat(_ path: String) async throws -> SFTPFileAttributes {
+        try await stat(SFTPPath(path))
+    }
+
+    public func lstat(_ path: String) async throws -> SFTPFileAttributes {
+        try await lstat(SFTPPath(path))
+    }
+
+    public func setAttributes(_ attributes: SFTPFileAttributes, at path: String, followingSymlinks: Bool = true) async throws {
+        try await setAttributes(attributes, at: SFTPPath(path), followingSymlinks: followingSymlinks)
+    }
+
+    public func rename(_ oldPath: String, to newPath: String, mode: SFTPRenameMode = .standard) async throws {
+        try await rename(SFTPPath(oldPath), to: SFTPPath(newPath), mode: mode)
+    }
+
+    public func remove(_ path: String) async throws {
+        try await remove(SFTPPath(path))
+    }
+
+    /// 同 `readLink(_: SFTPPath)`，结果按 UTF-8 解成字符串（非法序列替换）。
+    public func readLink(_ path: String) async throws -> String {
+        try await readLink(SFTPPath(path)).string
+    }
+
+    public func createSymlink(at linkPath: String, pointingTo targetPath: String) async throws {
+        try await createSymlink(at: SFTPPath(linkPath), pointingTo: SFTPPath(targetPath))
+    }
+
+    public func createHardLink(at newPath: String, pointingTo existingPath: String) async throws {
+        try await createHardLink(at: SFTPPath(newPath), pointingTo: SFTPPath(existingPath))
+    }
+
+    public func statVFS(_ path: String) async throws -> SFTPFileSystemStats {
+        try await statVFS(SFTPPath(path))
+    }
+
+    public func openFile(_ path: String, flags: SFTPOpenFlags, attributes: SFTPFileAttributes = .none) async throws -> SFTPFile {
+        try await openFile(SFTPPath(path), flags: flags, attributes: attributes)
+    }
+
+    public func withFile<Value: Sendable>(
+        _ path: String,
+        flags: SFTPOpenFlags,
+        attributes: SFTPFileAttributes = .none,
+        _ body: (SFTPFile) async throws -> Value
+    ) async throws -> Value {
+        try await withFile(SFTPPath(path), flags: flags, attributes: attributes, body)
     }
 }
 
