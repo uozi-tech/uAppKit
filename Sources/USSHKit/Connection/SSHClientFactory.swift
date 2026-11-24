@@ -248,6 +248,8 @@ nonisolated enum SSHClientFactory {
             bastion = try await connectDirect(bastionHop, options: options)
         } catch is CancellationError {
             throw CancellationError()
+        } catch let rejection as any HostKeyStoreRejection {
+            throw rejection
         } catch {
             // `connectDirect` 抛的已经是归好类的 `SSHConnectionError`。
             throw SSHConnectionError.jumpHostFailed(
@@ -268,6 +270,10 @@ nonisolated enum SSHClientFactory {
         } catch {
             await bastion.close()
             if error is CancellationError { throw error }
+            if case SSHClientError.hostKeyRejected(let underlying) = error,
+               let rejection = underlying as? any HostKeyStoreRejection {
+                throw rejection
+            }
             throw SSHConnectionError.jumpHostFailed(
                 String(localized: "经跳板机连接 \(target.host):\(String(target.port)) 失败 —— \(jumpFailureDetail(error, target: target))", bundle: ModuleBundle.bundle),
                 cause: jumpFailureCause(error)
@@ -310,8 +316,10 @@ nonisolated enum SSHClientFactory {
             switch error {
             case .hostKeyRejected(let underlying):
                 // 我们的信任判定抛的就是 `SSHConnectionError.hostKeyRejected`，原样交出去；
+                // 主机密钥库自己按类型拒绝（`HostKeyStoreRejection`）的原样抛给调用方；
                 // 主机密钥库自己出错（读写失败）也算拒绝。
                 if let rejection = underlying as? SSHConnectionError { return rejection }
+                if let rejection = underlying as? any HostKeyStoreRejection { throw rejection }
                 return .hostKeyRejected(SSHErrorText.describe(underlying))
             case .hostKeyValidationTimeout:
                 return .hostKeyRejected(SSHErrorText.describe(error))

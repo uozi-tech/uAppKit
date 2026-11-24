@@ -216,6 +216,11 @@ extension SSHClientError: LocalizedError {
     }
 }
 
+extension SSHDisconnectReason {
+    /// 给人看的断开原因（「服务器连续 3 次没有回应保活请求，连接已断开」）。判断原因看 case，不看这段文字。
+    public var userDescription: String { SSHErrorText.describe(self) }
+}
+
 extension SSHChannelError: LocalizedError {
     public var errorDescription: String? {
         switch self {

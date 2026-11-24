@@ -95,6 +95,13 @@ public enum SSHHostKeyVerification: Equatable, Sendable {
     case mismatch(previousFingerprint: String)
 }
 
+/// An error a `HostKeyStore` throws from `verify` / `remember` to refuse a host key with the
+/// application's own typed error (for example "the key changed since it was first trusted", carrying
+/// both fingerprints). USSHKit hands it unchanged to the caller of `connect` / `open` (direct and
+/// through a jump host) instead of wrapping it into `SSHConnectionError.hostKeyRejected(String)`.
+/// Other errors a store throws are still wrapped.
+public protocol HostKeyStoreRejection: Error {}
+
 /// Persistence boundary for host-key trust. Applications own storage and UI policy.
 public protocol HostKeyStore: Sendable {
     func verify(_ hostKey: SSHHostKey) async throws -> SSHHostKeyVerification
@@ -212,6 +219,7 @@ public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
     /// （`.authenticationFailed` / `.hostKeyRejected` / `.handshakeFailed` 是配置问题、重试不会好；`.connectFailed`
     /// 是网络问题；跳板机拒绝开到目标的通道、或开通道超时也归 `.connectFailed`）。app 判断要不要重连看 `cause`，
     /// 不看文字。只有本端以外的极少数情形 `cause` 为 nil。
+    /// 主机密钥库按类型拒绝的（`HostKeyStoreRejection`，哪一跳都一样）不包进这里，原样抛给调用方，类别由 app 自己的类型决定。
     case jumpHostFailed(String, cause: SSHConnectionError? = nil)
     case hostKeyRejected(String)
     case bindFailed(String)
