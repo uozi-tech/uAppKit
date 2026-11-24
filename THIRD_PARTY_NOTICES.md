@@ -62,7 +62,8 @@ SOFTWARE.
 这份代码是经 [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) 0.12.1（`ae8562f895de06ccb86fdb1cbb65fd99c8976e12`）
 拿到的：Citadel 把它作为 C target `CCitadelBcrypt` 随包带着，给符号加了前缀、把 SHA-512 改成由调用方注入。
 2026-11 起 Citadel 不再编进本包，这份 C 代码改名为 `CBcryptPBKDF` 由我们自己维护（符号前缀改成 `uappkit_`，
-另加一行 `#undef BCRYPT_WORDS` 消掉宏重定义的警告）。Citadel 那部分改动的许可如下。
+另加一行 `#undef BCRYPT_WORDS` 消掉宏重定义的警告；`uappkit_bcrypt_pbkdf` 返回前把栈上的 `sha2pass` / `sha2salt` 与
+`countsalt` 清零——原版只清 `out` / `tmpout`）。Citadel 那部分改动的许可如下。
 
 ```
 MIT License

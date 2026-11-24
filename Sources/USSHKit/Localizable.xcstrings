@@ -463,6 +463,34 @@
         }
       }
     },
+    "EC 显式曲线参数（只支持 P-256 / P-384 / P-521）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC explicit curve parameters (only P-256 / P-384 / P-521 are supported)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC の明示的な曲線パラメータ（P-256 / P-384 / P-521 のみ対応）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 명시적 곡선 매개변수(P-256 / P-384 / P-521만 지원)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "EC 顯式曲線參數（只支援 P-256 / P-384 / P-521）"
+          }
+        }
+      }
+    },
     "EC 曲线 %@" : {
       "localizations" : {
         "en" : {
@@ -1327,6 +1355,90 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "RSA 簽章失敗"
+          }
+        }
+      }
+    },
+    "SEC1 EC：公钥与私钥不是同一把钥匙" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: the public key does not belong to the private key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：公開鍵と秘密鍵が同じ鍵ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: 공개 키와 개인 키가 같은 키가 아닙니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：公鑰與私鑰不是同一把金鑰"
+          }
+        }
+      }
+    },
+    "SEC1 EC：公钥格式不对" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: malformed public key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：公開鍵の形式が正しくありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: 공개 키 형식이 올바르지 않습니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：公鑰格式不正確"
+          }
+        }
+      }
+    },
+    "SEC1 EC：内外两层的曲线不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: the inner and outer curve parameters disagree"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：内側と外側で曲線が一致しません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC: 내부와 외부의 곡선이 일치하지 않습니다"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SEC1 EC：內外兩層的曲線不一致"
           }
         }
       }

@@ -204,7 +204,8 @@ struct AuthenticationDelegateFailure: Error {
 /// 那一种方式记为部分通过，以后不再提交（RSA 私钥不再换别的签名算法重递，成功的算法记下来）；下一个从配置的方式里
 /// **从头**挑：服务器现在要的、按配置顺序的第一个、部分通过过的除外。之前被拒或因为服务器当时不收而跳过的方式这时
 /// 会被重新考虑（上一阶段拒绝它，可能只是那时还不允许这种方式；每次部分成功都消耗掉一种方式，所以重试有上限）。
-/// 上一次是 `.delegate` 给的就把标志转给它，由它接着答。普通拒绝之后照旧往后走，不回头。
+/// 上一次是 `.delegate` 给的就把标志转给它，由它接着答；它说没有了（`nil`）时同样从头挑，它自己不再被问。
+/// 普通拒绝之后照旧往后走，不回头。
 ///
 /// 列表用完时以 `nil` 完成 promise，NIOSSH（补丁 0011）随即在 pipeline 上报
 /// `NIOSSHError.noFurtherAuthenticationOffers`，`SSHConnectionGuard` 据此结束连接、取 `failure` 作为详情。
@@ -220,7 +221,9 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
     private var offered: Set<Int> = []
     /// 得到部分成功的方式（下标），整个认证过程里都不再提交。
     private var consumed: Set<Int> = []
-    private var activeDelegate: (index: Int, delegate: any NIOSSHClientUserAuthenticationDelegate & Sendable)?
+    /// 正在问的 `.delegate`；`partiallySucceeded`：它给的方式在它问着的期间得到过部分成功（它说没有了之后要从头挑）。
+    private var activeDelegate: (index: Int, delegate: any NIOSSHClientUserAuthenticationDelegate & Sendable,
+                                 partiallySucceeded: Bool)?
     /// 正在逐个算法尝试的 RSA 用户私钥与还没试的算法。
     private var rsaAttempts: (index: Int, key: SSHRSAPrivateKey, remaining: ArraySlice<SSHRSASignatureAlgorithm>)?
     /// 最近一次提交的是哪种方式（RSA 带上签名算法）。
@@ -304,14 +307,18 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
             if let algorithm = previous.rsaAlgorithm { partiallyAcceptedRSAAlgorithms.append(algorithm) }
             // 这把 RSA 钥匙已经通过了，别再换算法重递。
             rsaAttempts = nil
+            // 部分通过的方式整个认证过程里都不再提交（`.delegate` 也一样：它说没有了之后不再回头问它）。
+            consumed.insert(previous.index)
             if activeDelegate == nil {
                 // 新的一阶段：从头挑，部分通过过的除外。
-                consumed.insert(previous.index)
                 offered = consumed
                 index = 0
+            } else {
+                // 由它接着答；它说没有了时再从头挑（`ask` 里）。
+                activeDelegate?.partiallySucceeded = true
             }
         }
-        if case let (_, delegate)? = activeDelegate {
+        if case let (_, delegate, _)? = activeDelegate {
             ask(delegate, availableMethods: availableMethods, partialSuccess: partialSuccess, promise: nextChallengePromise)
         } else if availableMethods.contains(.publicKey), let next = nextRSAAttempt() {
             nextChallengePromise.succeed(next)
@@ -348,7 +355,7 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
             switch method {
             case .delegate(let delegate):
                 offered.insert(current)
-                activeDelegate = (current, delegate)
+                activeDelegate = (current, delegate, false)
                 ask(delegate, availableMethods: availableMethods, partialSuccess: false, promise: promise)
                 return
             case .password(let password):
@@ -406,6 +413,12 @@ final class SSHClientAuthDelegate: NIOSSHClientUserAuthenticationDelegate {
                 this.record(this.activeDelegate?.index ?? -1, .delegate)
                 promise.succeed(offer)
             case .success(.none):
+                // 它给的方式部分通过过：进了新的一阶段，和别的方式部分通过之后一样从头挑（排在它前面、
+                // 上一阶段被拒或被跳过的方式这时还有机会），部分通过过的除外。
+                if this.activeDelegate?.partiallySucceeded == true {
+                    this.offered = this.consumed
+                    this.index = 0
+                }
                 this.activeDelegate = nil
                 this.advance(availableMethods: availableMethods, promise: promise)
             case .failure(let error):

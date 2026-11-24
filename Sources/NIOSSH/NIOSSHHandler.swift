@@ -65,8 +65,9 @@ public final class NIOSSHHandler {
 
     private var pendingGlobalRequestResponses: CircularBuffer<PendingGlobalRequestResponse?>
 
-    // Messages from child channels written while a key exchange forbids channel messages; sent in order afterwards.
-    private var queuedChildMessages = CircularBuffer<(SSHMessage, EventLoopPromise<Void>?)>(initialCapacity: 4)
+    // Channel messages and replies to the peer's global requests written while a key exchange forbids them; sent in
+    // order afterwards. Our own global requests wait in `pendingGlobalRequests` meanwhile.
+    private var queuedMessages = CircularBuffer<(SSHMessage, EventLoopPromise<Void>?)>(initialCapacity: 4)
 
     /// Construct a new ``NIOSSHHandler``.
     ///
@@ -160,7 +161,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
 
         self.dropAllPendingGlobalRequests(ChannelError.eof)
         self.dropUnsatisfiedGlobalRequests(ChannelError.eof)
-        while let next = self.queuedChildMessages.popFirst() {
+        while let next = self.queuedMessages.popFirst() {
             next.1?.fail(ChannelError.eof)
         }
         while let next = self.pendingChannelInitializations.popFirst() {
@@ -202,8 +203,8 @@ extension NIOSSHHandler: ChannelDuplexHandler {
                 loop: context.eventLoop
             ) {
                 try self.processInboundMessageResult(result, context: context)
-                // Our NEWKEYS may just have gone out: release channel messages held during the key exchange.
-                self.sendQueuedChildMessagesIfPossible()
+                // Our NEWKEYS may just have gone out: release what was held during the key exchange.
+                self.sendQueuedMessagesIfPossible()
                 self.rekeyIfTrafficLimitReached()
             }
         } catch {
@@ -221,8 +222,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
         }
 
         self.createPendingChannelsIfPossible()
-        self.sendGlobalRequestsIfPossible()
-        self.sendQueuedChildMessagesIfPossible()
+        self.sendQueuedMessagesIfPossible()
     }
 
     private func writeMessage(
@@ -264,7 +264,7 @@ extension NIOSSHHandler: ChannelDuplexHandler {
                         try self.writeMessage(message, context: context)
                         self.pendingWrite = false
                         context.flush()
-                        self.sendQueuedChildMessagesIfPossible()
+                        self.sendQueuedMessagesIfPossible()
                     } catch {
                         context.fireErrorCaught(error)
                     }
@@ -410,7 +410,7 @@ extension NIOSSHHandler {
             if message.wantReply {
                 // There's no way to tell what message this is and how to respond from here.
                 // The only reasonable solution is to reply `SSH_MSG_REQUEST_FAILURE`
-                try self.writeMessage(.init(.requestFailure), context: context)
+                try self.writeOrQueue(.requestFailure, context: context)
             }
             return
         case .tcpipForward(let host, let port):
@@ -459,18 +459,16 @@ extension NIOSSHHandler {
             do {
                 switch result {
                 case .success(let tcpForwardingResponse):
-                    try self.writeMessage(
-                        .init(
-                            .requestSuccess(
-                                .init(.tcpForwarding(tcpForwardingResponse), allocator: context.channel.allocator)
-                            )
+                    try self.writeOrQueue(
+                        .requestSuccess(
+                            .init(.tcpForwarding(tcpForwardingResponse), allocator: context.channel.allocator)
                         ),
                         context: context
                     )
                     context.flush()
                 case .failure:
                     // We don't care why, we just say no.
-                    try self.writeMessage(.init(.requestFailure), context: context)
+                    try self.writeOrQueue(.requestFailure, context: context)
                     context.flush()
                 }
             } catch {
@@ -485,13 +483,13 @@ extension NIOSSHHandler {
             return
         }
 
-        guard self.stateMachine.isActive, self.pendingGlobalRequests.count > 0 else {
-            // No work to do
+        guard self.stateMachine.canSendChannelMessages, self.pendingGlobalRequests.count > 0 else {
+            // No work to do, or a key exchange is in flight: these go out once our NEWKEYS is.
             return
         }
 
         var didSend = false
-        while let next = self.pendingGlobalRequests.popFirst() {
+        while self.stateMachine.canSendChannelMessages, let next = self.pendingGlobalRequests.popFirst() {
             didSend = true
             self.sendGlobalRequest(next.0, promise: next.1, context: context)
         }
@@ -612,26 +610,36 @@ extension NIOSSHHandler: SSHMultiplexerDelegate {
             return
         }
 
-        // A key exchange is in flight: hold the message (behind any already held) until our NEWKEYS is out.
-        guard self.queuedChildMessages.isEmpty, self.stateMachine.canSendChannelMessages else {
-            self.queuedChildMessages.append((message, promise))
-            return
-        }
-
         do {
-            try self.writeMessage(SSHMultiMessage(message), context: context, promise: promise)
+            try self.writeOrQueue(message, context: context, promise: promise)
         } catch {
             promise?.fail(error)
         }
     }
 
-    /// Sends child channel messages held during a key exchange, once channel messages are allowed again.
-    fileprivate func sendQueuedChildMessagesIfPossible() {
-        guard let context = self.context, !self.queuedChildMessages.isEmpty else {
+    /// Writes a channel message or a reply to a global request, or, while a key exchange is in flight, holds it
+    /// (behind any already held) until our NEWKEYS is out.
+    fileprivate func writeOrQueue(
+        _ message: SSHMessage,
+        context: ChannelHandlerContext,
+        promise: EventLoopPromise<Void>? = nil
+    ) throws {
+        guard self.queuedMessages.isEmpty, self.stateMachine.canSendChannelMessages else {
+            self.queuedMessages.append((message, promise))
             return
         }
+        try self.writeMessage(SSHMultiMessage(message), context: context, promise: promise)
+    }
+
+    /// Sends what was held during a key exchange, once that is allowed again: the queued messages, then our own
+    /// global requests.
+    fileprivate func sendQueuedMessagesIfPossible() {
+        guard let context = self.context else {
+            return
+        }
+        defer { self.sendGlobalRequestsIfPossible() }
         var wrote = false
-        while self.stateMachine.canSendChannelMessages, let next = self.queuedChildMessages.popFirst() {
+        while self.stateMachine.canSendChannelMessages, let next = self.queuedMessages.popFirst() {
             wrote = true
             do {
                 try self.writeMessage(SSHMultiMessage(next.0), context: context, promise: next.1)

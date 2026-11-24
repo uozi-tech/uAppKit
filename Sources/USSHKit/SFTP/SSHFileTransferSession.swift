@@ -66,10 +66,24 @@ public enum SSHFileTransferError: Error, LocalizedError, Sendable {
 public actor SSHFileTransferSession {
     private let connected: ConnectedClient
     private let sftp: SFTPClient
+    /// 本端调过 `close()`（之后 `disconnectReason` 为 nil）。`nonisolated` 的属性要读它，所以不放在 actor 的状态里。
+    private let closedLocally = SessionFlag()
+    /// SFTP 通道关了、SSH 连接却还在（服务端的 sftp-server 退出了）。
+    private let sftpChannelLost = SessionFlag()
+
+    /// 通道关了之后等这么久再看 SSH 连接：连接本身在断时，子通道比连接的断开原因先一步关掉，原因差一拍才落定。
+    static let channelLossSettle: Duration = .milliseconds(200)
 
     private init(connected: ConnectedClient, sftp: SFTPClient) {
         self.connected = connected
         self.sftp = sftp
+        let lost = sftpChannelLost
+        sftp.closeFuture.whenComplete { _ in
+            Task {
+                try? await Task.sleep(for: Self.channelLossSettle)
+                if connected.isConnected { lost.set() }
+            }
+        }
     }
 
     /// Inbound window of the SFTP channel this session opens. The window, not
@@ -136,17 +150,25 @@ public actor SSHFileTransferSession {
         }
     }
 
-    /// Every hop of the SSH connection is still up. Once the connection is lost
-    /// (server closed it, transport error, keepalive timeout) the session never
-    /// recovers: open a new one.
-    public nonisolated var isConnected: Bool { connected.isConnected }
+    /// Every hop of the SSH connection is still up **and** the SFTP channel is
+    /// still open. The server's `sftp-server` process can exit (crash, killed,
+    /// idle timeout) while sshd keeps the SSH connection: the session is then
+    /// just as dead. Once false the session never recovers: open a new one.
+    public nonisolated var isConnected: Bool { connected.isConnected && !sftpChannelLost.isSet }
 
-    /// Why the SSH connection went away, or nil while it is up or after a local
-    /// `close()`.
+    /// Why the session went away, or nil while it is up or after a local
+    /// `close()`. The SSH connection's reason when it is lost; when only the SFTP
+    /// channel closed (the SSH connection is still up) it is
+    /// `.transportError(SFTPError.connectionClosed)`. The channel-only case is
+    /// recognised `channelLossSettle` (200 ms) after the channel closes: when the
+    /// whole connection is going down the channel closes a moment before the
+    /// connection's reason is known, and that reason wins.
     public nonisolated var disconnectReason: SSHDisconnectReason? {
+        if closedLocally.isSet { return nil }
         let reason = connected.target.disconnectReason ?? connected.bastion?.disconnectReason
-        if let reason, reason.isLocalClose { return nil }
-        return reason
+        if let reason { return reason.isLocalClose ? nil : reason }
+        // 连接还在，SFTP 通道却已经关了：服务端的 sftp-server 退出了。
+        return sftpChannelLost.isSet ? .transportError(SFTPError.connectionClosed) : nil
     }
 
     /// `stat(2)` the remote file, returning size and modification date.
@@ -296,7 +318,10 @@ public actor SSHFileTransferSession {
         while true {
             try Task.checkCancellation()
             guard let buffer = try await readNext(offset) else { break }
-            guard buffer.readableBytes > 0 else { break }
+            // EOF 只认 nil。空的数据不是 EOF（`SFTPFile.read` 本来也不会交出空的），当成 EOF 就把截断的文件交出去了。
+            guard buffer.readableBytes > 0 else {
+                throw SFTPError.invalidResponse("zero-length SSH_FXP_DATA at offset \(offset)")
+            }
             try accept(buffer)
             offset += UInt64(buffer.readableBytes)
         }
@@ -331,9 +356,18 @@ public actor SSHFileTransferSession {
         let sftp = self.sftp
         let cleanUp = { await Self.bestEffort(within: Self.cleanupDeadline) { try? await sftp.remove(tempPath) } }
         // 目标已经在的话，新文件要继承它的权限（以及尽量继承属主 / 属组）：改名是换一个新文件上去，
-        // 不继承的话 0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不在就用调用方给的，再没有就照服务端默认。
-        let destination = try? await sftp.stat(remotePath)
-        let model = destination?.isRegularFile == true ? destination : fallbackAttributes?.attributesToRestore
+        // 不继承的话 0660 的库会变成服务端默认的 0644、属主变成登录用户。
+        // 用 lstat：替换的是路径上的东西本身，目标是符号链接时换掉的是链接，不能把它指向的文件的权限 / 属主
+        // 搬到新文件上（下面判断「目标在不在」也用 lstat）。符号链接不是普通文件，于是不继承任何属性——
+        // 调用方给的 fallbackAttributes 也不用（那多半是之前 stat 跟着链接读到的）。
+        // 目标不在才用调用方给的；再没有就照服务端默认。属主 / 属组先于权限、setuid / setgid 的规则照旧适用。
+        let destination = try? await sftp.lstat(remotePath)
+        let model: SFTPFileAttributes?
+        if let destination {
+            model = destination.isRegularFile ? destination : nil
+        } else {
+            model = fallbackAttributes?.attributesToRestore
+        }
         do {
             try await uploadStreaming(localURL, to: tempPath, matching: model)
         } catch {
@@ -396,23 +430,37 @@ public actor SSHFileTransferSession {
         }
     }
 
-    /// 让临时文件的权限位（含 setuid / setgid / sticky）与属主 / 属组跟目标一样。尽力而为：服务端拒绝
-    /// （`PERMISSION_DENIED`、不支持 setstat……）就算了，上传照样成功——数据比权限要紧。只改和临时文件现状
-    /// 不同的那几项（不是 root 的用户改不了属主，白发一次请求还会多一条拒绝）。
+    /// 让临时文件的属主 / 属组与权限位跟目标一样。尽力而为：服务端拒绝（`PERMISSION_DENIED`、不支持 setstat……）
+    /// 就算了，上传照样成功——数据比权限要紧。只改和临时文件现状不同的那几项（不是 root 的用户改不了属主，白发
+    /// 一次请求还会多一条拒绝）。
+    ///
+    /// 顺序与特殊位：
+    /// 1. 先换属主 / 属组（换不了属主时只换属组）。`chown` 会清掉 setuid / setgid，所以权限放在后面设；
+    /// 2. 再读一次临时文件的实际属主 / 属组；
+    /// 3. 设权限位：setuid 与 sticky 只在属主确实与目标相同时才带过去，setgid 只在属组确实相同时才带过去。
+    ///    否则（换属主被拒、服务端没报属主）一律去掉——不能让上传者造出一个属于自己的 setuid / setgid 文件，
+    ///    在原文件主人或同组的人手里以上传者的身份运行。
     static func adoptAttributes(of destination: SFTPFileAttributes, on file: SFTPFile) async {
-        let current = try? await file.stat()
-        if let bits = destination.permissionBits, current?.permissionBits != bits {
-            try? await file.setAttributes(SFTPFileAttributes(permissions: bits))
-        }
-        guard let owner = destination.owner, let currentOwner = current?.owner, currentOwner != owner else { return }
-        do {
-            try await file.setAttributes(SFTPFileAttributes(owner: owner))
-        } catch {
-            // 换不了属主（不是 root）时属组往往还能换（登录用户在那个组里）。
-            if currentOwner.groupID != owner.groupID {
-                try? await file.setAttributes(SFTPFileAttributes(
-                    owner: SFTPFileOwner(userID: currentOwner.userID, groupID: owner.groupID)))
+        let before = try? await file.stat()
+        if let owner = destination.owner, let currentOwner = before?.owner, currentOwner != owner {
+            do {
+                try await file.setAttributes(SFTPFileAttributes(owner: owner))
+            } catch {
+                // 换不了属主（不是 root）时属组往往还能换（登录用户在那个组里）。
+                if currentOwner.groupID != owner.groupID {
+                    try? await file.setAttributes(SFTPFileAttributes(
+                        owner: SFTPFileOwner(userID: currentOwner.userID, groupID: owner.groupID)))
+                }
             }
+        }
+        guard var bits = destination.permissionBits else { return }
+        let after = try? await file.stat()
+        let ownerMatches = destination.owner != nil && after?.owner?.userID == destination.owner?.userID
+        let groupMatches = destination.owner != nil && after?.owner?.groupID == destination.owner?.groupID
+        if !ownerMatches { bits &= ~UInt32(0o5000) }   // setuid、sticky
+        if !groupMatches { bits &= ~UInt32(0o2000) }   // setgid
+        if after?.permissionBits != bits {
+            try? await file.setAttributes(SFTPFileAttributes(permissions: bits))
         }
     }
 
@@ -501,6 +549,7 @@ public actor SSHFileTransferSession {
     }
 
     public func close() async {
+        closedLocally.set()
         await sftp.close()
         await connected.close()
     }
@@ -512,6 +561,14 @@ public actor SSHFileTransferSession {
         guard let size else { return 0 }
         return size > UInt64(Int64.max) ? Int64.max : Int64(size)
     }
+}
+
+/// 只能从假变真的标志，任意线程读写。
+private final class SessionFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }
 
 /// 只恢复一次的 continuation（收尾做完与时限到了，谁先到算谁）。

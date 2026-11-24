@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Jacky <me@jackyu.cn>
-Date: Tue, 24 Nov 2026 19:48:13 +0800
+Date: Wed, 25 Nov 2026 00:36:45 +0800
 Subject: [PATCH 15/15] =?UTF-8?q?NIOSSH:=20=E7=BB=99=E6=94=B9=E8=BF=87?=
  =?UTF-8?q?=E7=9A=84=E6=96=87=E4=BB=B6=E5=8A=A0=E4=BF=AE=E6=94=B9=E5=A3=B0?=
  =?UTF-8?q?=E6=98=8E=EF=BC=88Apache-2.0=20=C2=A74(b)=20notice=EF=BC=89?=
@@ -107,7 +107,7 @@ index 2a4de99..cd92048 100644
  
  import NIOCore
 diff --git a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift
-index ed5fe55..5d19a9a 100644
+index 92c4f20..da6b6fc 100644
 --- a/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
 +++ b/Sources/NIOSSH/Connection State Machine/SSHConnectionStateMachine.swift	
 @@ -10,6 +10,8 @@
@@ -211,7 +211,7 @@ index 51a7ba4..665ec32 100644
  
  /// An error thrown by NIOSSH.
 diff --git a/Sources/NIOSSH/NIOSSHHandler.swift b/Sources/NIOSSH/NIOSSHHandler.swift
-index 5b307ae..d16325e 100644
+index 36eab80..56bc593 100644
 --- a/Sources/NIOSSH/NIOSSHHandler.swift
 +++ b/Sources/NIOSSH/NIOSSHHandler.swift
 @@ -10,6 +10,8 @@

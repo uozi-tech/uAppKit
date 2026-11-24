@@ -554,10 +554,14 @@ enum SFTPResponseReader {
         try throwUnexpected(response, expected: "SSH_FXP_EXTENDED_REPLY")
     }
 
-    /// READ 的回答：数据、或 nil（EOF）。数据比要的多是协议错误。
+    /// READ 的回答：数据、或 nil（EOF）。数据比要的多是协议错误；要了字节却回 0 字节的 DATA 也是（不是 EOF——
+    /// 当成 EOF 会把截断的文件当成读完了，原地重读会打转）。
     static func readData(_ response: SFTPResponse, requested: Int) throws -> ByteBuffer? {
         switch response {
         case .data(_, let data):
+            guard data.readableBytes > 0 || requested == 0 else {
+                throw SFTPError.invalidResponse("zero-length SSH_FXP_DATA for a \(requested)-byte read")
+            }
             guard data.readableBytes <= requested else {
                 throw SFTPError.invalidResponse("SSH_FXP_DATA of \(data.readableBytes) bytes for a \(requested)-byte read")
             }
