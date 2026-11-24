@@ -3716,6 +3716,34 @@
         }
       }
     },
+    "每次连接都要用口令重新解开私钥，轮数太高会让每次连接卡上很久。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The private key is unlocked with its passphrase on every connection, so a very high round count would stall every connection."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接続のたびにパスフレーズで秘密鍵を解除するため、ラウンド数が多すぎると毎回の接続が長く止まってしまいます。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결할 때마다 암호로 개인 키를 다시 풀어야 하므로 라운드 수가 너무 많으면 매번 연결이 오래 멈춤."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次連線都要用密碼重新解開私密金鑰，輪數太高會讓每次連線卡住很久。"
+          }
+        }
+      }
+    },
     "派生密钥长度非法" : {
       "localizations" : {
         "en" : {
@@ -3966,6 +3994,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法辨識私密金鑰內容：%@"
+          }
+        }
+      }
+    },
+    "私钥口令的派生轮数 %@ 过高（最多支持 %@）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The private key's passphrase derivation uses %1$@ rounds, which is too many (at most %2$@ are supported)"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "秘密鍵のパスフレーズの導出ラウンド数 %1$@ が多すぎます（対応しているのは %2$@ まで）"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "개인 키 암호의 파생 라운드 수 %1$@이(가) 너무 많음(최대 %2$@까지 지원)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私密金鑰密碼的衍生輪數 %1$@ 過高（最多支援 %2$@）"
           }
         }
       }
@@ -4274,6 +4330,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此私密金鑰受密語保護，匯入前需要先解密。"
+          }
+        }
+      }
+    },
+    "请在终端用 ssh-keygen -p -a %@ -f <key> 以较低的轮数重新保存私钥后再导入。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-save the private key with fewer rounds in Terminal (ssh-keygen -p -a %@ -f <key>), then import it again."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルで ssh-keygen -p -a %@ -f <key> を実行し、ラウンド数を下げて秘密鍵を保存し直してから読み込んでください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널에서 ssh-keygen -p -a %@ -f <key>로 라운드 수를 낮춰 개인 키를 다시 저장한 뒤 가져오세요."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "請在終端機用 ssh-keygen -p -a %@ -f <key> 以較低的輪數重新儲存私密金鑰後再匯入。"
           }
         }
       }

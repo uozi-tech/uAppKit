@@ -139,3 +139,87 @@ final class KeyImportLimitsTests: XCTestCase {
     /// Debug 构建的上限（Release 快一个数量级）。迁移前的概率算法在这里要两三分钟。
     static let recoveryBudget: Duration = .seconds(5)
 }
+
+/// 带口令的 OpenSSH 容器的 bcrypt 参数：轮数有上限（每次连接都要解一遍），salt 长度合理，kdfoptions 不多不少。
+final class BcryptLimitsTests: XCTestCase {
+
+    /// 把容器的 kdfoptions 换成 `string salt ‖ uint32 rounds ‖ extra`。
+    private func withKDFOptions(_ pem: String, salt: [UInt8], rounds: UInt32, extra: [UInt8] = []) throws -> String {
+        let der = try PEMDocument.parse(pem).der
+        let magic = Array("openssh-key-v1\u{0}".utf8)
+        var reader = SSHWireReader(Array(der.dropFirst(magic.count)))
+        let cipher = try reader.readString()
+        let kdf = try reader.readString()
+        _ = try reader.readString()
+        let count = try reader.readUInt32()
+        let publicKey = try reader.readString()
+        let privateSection = try reader.readString()
+        var options = SSHWireWriter()
+        options.writeString(salt)
+        options.writeUInt32(rounds)
+        options.writeRawBytes(extra)
+        var out = SSHWireWriter()
+        out.writeRawBytes(magic)
+        out.writeString(cipher)
+        out.writeString(kdf)
+        out.writeString(options.bytes)
+        out.writeUInt32(count)
+        out.writeString(publicKey)
+        out.writeString(privateSection)
+        return OpenSSHTestContainers.armor(out.bytes)
+    }
+
+    private func importing(_ pem: String) throws -> ParsedPrivateKey {
+        try PrivateKeyImporter.resolve(pem: pem, passphrase: KeyImportFixtures.passphrase)
+    }
+
+    /// 轮数超过上限：立刻报「派生轮数过高」，不先花几分钟算 bcrypt。
+    func testRoundsAboveTheCapAreATypedErrorWithoutDerivation() throws {
+        let salt = [UInt8](repeating: 7, count: 16)
+        for rounds in [OpenSSHKeyDecryption.maxRounds + 1, 10_000, .max] {
+            let pem = try withKDFOptions(KeyImportFixtures.ed25519OpenSSHEnc, salt: salt, rounds: rounds)
+            let start = ContinuousClock.now
+            XCTAssertThrowsError(try importing(pem)) {
+                guard case PrivateKeyImportError.unsupportedKDFCost(let got, let maximum) = $0 else {
+                    return XCTFail("\($0)")
+                }
+                XCTAssertEqual(got, Int(rounds))
+                XCTAssertEqual(maximum, Int(OpenSSHKeyDecryption.maxRounds))
+            }
+            XCTAssertLessThan(ContinuousClock.now - start, .milliseconds(100))
+        }
+        XCTAssertNotNil(PrivateKeyImportError.unsupportedKDFCost(rounds: 500, maximum: 128).recoverySuggestion)
+    }
+
+    /// 轮数正好到上限的照样能导入（口令对、结果是同一把钥匙）。用 ssh-keygen 现做一把；没有它就跳过。
+    func testRoundsAtTheCapStillImport() throws {
+        let keygen = "/usr/bin/ssh-keygen"
+        guard FileManager.default.isExecutableFile(atPath: keygen) else { throw XCTSkip("没有 ssh-keygen") }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("usshkit-bcrypt-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("key").path
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: keygen)
+        process.arguments = ["-q", "-t", "ed25519", "-N", "pw", "-a", String(OpenSSHKeyDecryption.maxRounds), "-f", path]
+        try process.run()
+        process.waitUntilExit()
+        let pem = try String(contentsOfFile: path, encoding: .utf8)
+        guard case .ed25519 = try PrivateKeyImporter.resolve(pem: pem, passphrase: "pw") else { return XCTFail("应为 ed25519") }
+    }
+
+    func testSaltLengthAndTrailingOptionsAreMalformed() throws {
+        let cases: [(salt: [UInt8], rounds: UInt32, extra: [UInt8])] = [
+            ([], 16, []),                                      // 空 salt
+            ([UInt8](repeating: 1, count: 65), 16, []),        // 超长 salt
+            ([UInt8](repeating: 1, count: 16), 0, []),         // 0 轮
+            ([UInt8](repeating: 1, count: 16), 16, [0, 0, 0]), // kdfoptions 后面还有东西
+        ]
+        for item in cases {
+            let pem = try withKDFOptions(KeyImportFixtures.ed25519OpenSSHEnc, salt: item.salt, rounds: item.rounds, extra: item.extra)
+            XCTAssertThrowsError(try importing(pem)) {
+                XCTAssertEqual($0 as? PrivateKeyImportError, .malformedKey(reason: ""), "\(item)")
+            }
+        }
+    }
+}
