@@ -39,7 +39,7 @@ nonisolated enum SSHErrorText {
         }
         if let sshError = error as? NIOSSHError {
             // 有的带对端的原话（协议错误里的 DEBUG 文本、拒绝开通道的说明）。
-            return SSHPeerText.sanitize(String(describing: sshError))
+            return SSHPeerText.isolated(String(describing: sshError))
         }
         if error is LocalizedError || type(of: error) is NSError.Type {
             let localized = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -51,7 +51,8 @@ nonisolated enum SSHErrorText {
         if described.isEmpty || described == typeName {
             return typeName
         }
-        return described.contains(typeName) ? described : "\(described)（\(typeName)）"
+        let isolated = "\u{2068}\(described)\u{2069}"
+        return described.contains(typeName) ? isolated : "\(isolated)（\(typeName)）"
     }
 
     /// 连接为什么断了。
@@ -85,7 +86,7 @@ nonisolated enum SSHErrorText {
             if detail.isEmpty {
                 return String(localized: "服务器拒绝打开通道（原因码 \(code)）", bundle: ModuleBundle.bundle)
             }
-            return String(localized: "服务器拒绝打开通道（原因码 \(code)）：\(detail)", bundle: ModuleBundle.bundle)
+            return String(localized: "服务器拒绝打开通道（原因码 \(code)）：\(SSHPeerText.isolated(detail))", bundle: ModuleBundle.bundle)
         }
     }
 
@@ -102,7 +103,7 @@ nonisolated enum SSHErrorText {
         let name = describe(category)
         let offer = failure.serverOffer.isEmpty
             ? String(localized: "无", bundle: ModuleBundle.bundle, comment: "服务器在这一类里什么算法都没报")
-            : SSHPeerText.sanitize(failure.serverOffer.joined(separator: ", "))
+            : SSHPeerText.isolated(failure.serverOffer.joined(separator: ", "))
         let server = Set(failure.serverOffer)
         if !server.isDisjoint(with: SSHAlgorithms.standard.names(of: category)) {
             return String(localized: "这次连接没有启用服务器提供的任何\(name)算法（服务器提供：\(offer)）", bundle: ModuleBundle.bundle)
@@ -259,13 +260,13 @@ extension SFTPError: LocalizedError {
         case .connectionClosed:
             return String(localized: "SFTP 通道已断开", bundle: ModuleBundle.bundle)
         case .invalidResponse(let detail):
-            return String(localized: "SFTP 服务器的回应不符合协议：\(SSHPeerText.sanitize(detail))", bundle: ModuleBundle.bundle)
+            return String(localized: "SFTP 服务器的回应不符合协议：\(SSHPeerText.isolated(detail))", bundle: ModuleBundle.bundle)
         case .unsupportedVersion(let version):
             return String(localized: "SFTP 服务器的协议版本 \(String(version)) 不受支持", bundle: ModuleBundle.bundle)
         case .requestTooLarge(let length, let limit):
             return String(localized: "SFTP 请求过大（\(length) 字节，上限 \(limit) 字节）", bundle: ModuleBundle.bundle)
         case .extensionUnsupported(let name):
-            return String(localized: "SFTP 服务器不支持 \(SSHPeerText.sanitize(name))", bundle: ModuleBundle.bundle)
+            return String(localized: "SFTP 服务器不支持 \(SSHPeerText.isolated(name))", bundle: ModuleBundle.bundle)
         case .handleClosed:
             return String(localized: "文件句柄已关闭", bundle: ModuleBundle.bundle)
         case .limitExceeded(let maximumBytes):
@@ -302,13 +303,13 @@ extension SFTPError: LocalizedError {
             if message.isEmpty {
                 return String(localized: "服务器操作失败", bundle: ModuleBundle.bundle)
             }
-            return String(localized: "服务器操作失败：\(message)", bundle: ModuleBundle.bundle)
+            return String(localized: "服务器操作失败：\(SSHPeerText.isolated(message))", bundle: ModuleBundle.bundle)
         default:
             let number = String(code.rawValue)
             if message.isEmpty {
                 return String(localized: "SFTP 错误（代码 \(number)）", bundle: ModuleBundle.bundle)
             }
-            return String(localized: "SFTP 错误（代码 \(number)）：\(message)", bundle: ModuleBundle.bundle)
+            return String(localized: "SFTP 错误（代码 \(number)）：\(SSHPeerText.isolated(message))", bundle: ModuleBundle.bundle)
         }
     }
 }
@@ -319,7 +320,7 @@ extension SSHCommandError: LocalizedError {
         case .nonZeroExit(.exited(let status), _):
             return String(localized: "命令以状态 \(String(status)) 退出", bundle: ModuleBundle.bundle)
         case .nonZeroExit(.signaled(let signal), _):
-            return String(localized: "命令被信号 \(SSHPeerText.sanitize(signal.name)) 终止", bundle: ModuleBundle.bundle)
+            return String(localized: "命令被信号 \(SSHPeerText.isolated(signal.name)) 终止", bundle: ModuleBundle.bundle)
         case .nonZeroExit(.unknown, _):
             return String(localized: "命令结束时没有报告退出状态", bundle: ModuleBundle.bundle)
         case .outputTooLarge(let limit):

@@ -108,7 +108,9 @@ final class SSHConnectionGuard: ChannelInboundHandler {
 
     func errorCaught(context: ChannelHandlerContext, error: any Error) {
         if firstError == nil { firstError = error }
-        logger.debug("SSH 连接出错，关闭连接", metadata: ["error": "\(String(reflecting: error))"])
+        // NIOSSH 的诊断文字里可能夹着对端的原话（DEBUG 消息、拒绝原因）。
+        logger.debug("SSH 连接出错，关闭连接",
+                     metadata: ["error": "\(SSHPeerText.sanitize(String(reflecting: error), maximumLength: 1000))"])
         if case .handshaking = phase, let failure = handshakeError(forCaught: error) {
             failHandshake(failure)
         }

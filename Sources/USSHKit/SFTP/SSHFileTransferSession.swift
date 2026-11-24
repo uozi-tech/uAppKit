@@ -29,11 +29,12 @@ public enum SSHFileTransferError: Error, LocalizedError, Sendable {
         case .downloadTooLarge(let observed, let maximum):
             return String(localized: "远程文件过大（\(observed) 字节，超过上限 \(maximum) 字节）", bundle: ModuleBundle.bundle)
         case .localFileUnavailable(let path):
-            return String(localized: "无法访问本地文件：\(path)", bundle: ModuleBundle.bundle)
+            return String(localized: "无法访问本地文件：\(SSHPeerText.isolated(path))", bundle: ModuleBundle.bundle)
         case .uploadNotMovedIntoPlace(let temporaryPath, let destination, let reason):
-            return String(localized: "文件已上传到 \(temporaryPath)，但没能替换 \(destination)（旧文件已删除）：\(reason)", bundle: ModuleBundle.bundle)
+            // 远程路径里有服务器那边的文件名。
+            return String(localized: "文件已上传到 \(SSHPeerText.isolated(temporaryPath))，但没能替换 \(SSHPeerText.isolated(destination))（旧文件已删除）：\(reason)", bundle: ModuleBundle.bundle)
         case .uploadOutcomeUnknown(let temporaryPath, let destination, let reason):
-            return String(localized: "文件已上传到 \(temporaryPath)，替换 \(destination) 的结果无法确定（旧文件可能已删除，新文件可能已就位）：\(reason)", bundle: ModuleBundle.bundle)
+            return String(localized: "文件已上传到 \(SSHPeerText.isolated(temporaryPath))，替换 \(SSHPeerText.isolated(destination)) 的结果无法确定（旧文件可能已删除，新文件可能已就位）：\(reason)", bundle: ModuleBundle.bundle)
         }
     }
 }

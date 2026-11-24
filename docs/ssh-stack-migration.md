@@ -312,6 +312,15 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
   换行变空格，截断到 300 个字符加「…」。app 自己把服务器原话（`SFTPError.status` 的 `message`、`SSHChannelOpenFailure.description`）
   直接拿去显示或写日志的地方，也应该这样处理（`SSHPeerText.sanitize` 是 public 的，直接用它，别抄一份规则）。
+  - `SSHPeerText` 现在定义在 **USSHCore**（USSHKit 照常能用；写成 `USSHKit.SSHPeerText` 的地方改成 `SSHPeerText`），
+    USSHCore 自己的调试日志（NIOSSH 的诊断文字）也过它。
+  - 规则补全：私用区字符、看不见的填充符（U+115F / U+1160 / U+3164 / U+FFA0 等）去掉；每个字符后面的组合字符 / 变体选择符
+    最多留 4 个（`maximumMarksPerCharacter`）；U+200D 只在两个 emoji 之间保留（emoji 组合序列不坏）；`maximumLength` 是负数或
+    极大值时不再崩。
+  - **新增 `SSHPeerText.isolated(_:)`**：消毒后包在 FSI … PDI（U+2068 … U+2069）里。USSHKit 把对端文字插进本地化句子时一律用它
+    （SFTP 状态消息、开通道失败的说明、算法报价、信号名、上传失败消息里的远程路径、私钥文件里的类型名……），从右往左的文字
+    不会搅乱整句话。**这些 `errorDescription` 里因此多了这两个不可见字符**；app 若拿文案做字符串比较（本来就不该），要改。
+    日志与给程序读的输出里别用 `isolated`。
 - **多步认证**（RFC 4252 §5.1 的部分成功，例如 sshd 的 `AuthenticationMethods publickey,password`）：部分通过的方式不再提交
   （RSA 私钥不再换签名算法重递，通过的算法记进 `SSHClient.rsaUserAuthenticationAlgorithm`，是 `ssh-rsa` 时
   `legacyAlgorithmsInUse` 照样报出）；下一个从配置的方式里从头挑服务器还要的（上一阶段被拒或跳过的方式还有一次机会）。

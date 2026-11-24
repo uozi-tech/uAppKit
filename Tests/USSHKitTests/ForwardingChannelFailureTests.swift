@@ -105,6 +105,6 @@ final class ForwardingChannelOpenFailureTests: XCTestCase {
         XCTAssertEqual(text(3), String(localized: "服务器不支持这类通道", bundle: ModuleBundle.bundle))
         XCTAssertEqual(text(4), String(localized: "服务器资源不足，暂时打不开新通道（例如超过了 MaxSessions）", bundle: ModuleBundle.bundle))
         XCTAssertEqual(text(77), String(localized: "服务器拒绝打开通道（原因码 \(String(77))）", bundle: ModuleBundle.bundle))
-        XCTAssertEqual(text(77, "nope"), String(localized: "服务器拒绝打开通道（原因码 \(String(77))）：\("nope")", bundle: ModuleBundle.bundle))
+        XCTAssertEqual(text(77, "nope"), String(localized: "服务器拒绝打开通道（原因码 \(String(77))）：\(SSHPeerText.isolated("nope"))", bundle: ModuleBundle.bundle))
     }
 }
