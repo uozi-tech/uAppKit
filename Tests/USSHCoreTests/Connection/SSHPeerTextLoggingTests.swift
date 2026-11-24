@@ -15,9 +15,8 @@ final class SSHPeerTextLoggingTests: XCTestCase {
             get { metadata[key] }
             set { metadata[key] = newValue }
         }
-        func log(level: Logger.Level, message: Logger.Message, metadata: Logger.Metadata?,
-                 source: String, file: String, function: String, line: UInt) {
-            let text = "\(message) \(metadata.map { "\($0)" } ?? "")"
+        func log(event: LogEvent) {
+            let text = "\(event.message) \(event.metadata.map { "\($0)" } ?? "")"
             lines.withLockedValue { $0.append(text) }
         }
     }

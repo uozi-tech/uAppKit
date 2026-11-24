@@ -56,6 +56,14 @@ final class SSHChannelRequestHandler: ChannelInboundHandler, RemovableChannelHan
         self.exitStatusArrival = eventLoop.makePromise(of: SSHExitStatus?.self)
     }
 
+    /// 从来没被加进 pipeline（通道已经拆了，`addHandler` 失败）时 `handlerRemoved` 不会来：在这里把 promise 完成掉，
+    /// 不然 NIO 在 Debug 下的「漏完成的 promise」检查会让进程崩掉。
+    deinit {
+        if !exitStatusDelivered {
+            exitStatusArrival.succeed(nil)
+        }
+    }
+
     func handlerAdded(context: ChannelHandlerContext) {
         self.context = context
     }
