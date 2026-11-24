@@ -150,6 +150,8 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **保活**：`keepAliveInterval: .seconds(n)` 之后，认证成功每隔 n 秒发一个 `keepalive@openssh.com`；连续 3 个
   （`Configuration.keepAliveMaximumUnanswered`）没回应就关连接，断开原因 `SSHDisconnectReason.keepAliveTimeout(unansweredProbes:)`，
   判死约需 `n × 4` 秒。默认 `nil`（不发，今天的行为）。跳板机两跳各自保活。uTerm 自己的看门狗可以改用它，或继续用 `ping()`。
+  `ping()` 与 `startRemotePortForward` 只在连接确实已断或正在断时抛 `SSHChannelError.connectionClosed`；连接还在时的别的失败原样
+  抛出（以前一律说成断开，看门狗会据此去重连一条好好的连接）。
 - **隧道与 SFTP 会话**（`SSHLocalForwardingTunnel` / `SSHFileTransferSession`）：
   - `keepAliveInterval:` 给了就每一跳都保活（同上），判死约需 `n × 4` 秒；默认 nil，不发。没开保活时链路卡死（NAT 掐了、
     防火墙丢包、对端失联但 TCP 不复位）**什么都察觉不到**：在途的请求、隧道里的查询一直挂着。长期挂着的隧道建议开（uTable 用 30 秒）。
