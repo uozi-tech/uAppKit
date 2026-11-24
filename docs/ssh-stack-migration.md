@@ -110,6 +110,7 @@ public struct SSHLegacyAlgorithm: Sendable, Hashable {
 | `try await client.executeCommandStream(cmd)`，元素 `.stdout` / `.stderr` | 同名同元素；消费者提前退出或任务取消会结束远端命令 |
 | `withPTY(SSHChannelRequestEvent.PseudoTerminalRequest(…)) { inbound, outbound in }` | `withPTY(SSHPseudoTerminal(term:columns:rows:)) { output, handle in }`；或 `let shell = try await client.openShell(pty:)` 拿句柄（`write` / `resize` / `exitStatus()` / `close()`），不用挂着闭包 |
 | `withExec(cmd) { … }` | `withExec(cmd) { output, handle in }` 或 `openExec(_:)`；任务取消会发 `signal TERM` 再关通道 |
+| — | `await handle.exitStatusReported()`：远端**报告**结束（exit-status / exit-signal 到达）就返回，不等通道关、不碰输出；通道关了也没报返回 nil。后台进程占着伪终端（`sleep 1000 &` 再 `exit`）时通道一直不关，终端可以据此再给输出一点时间然后自己关 |
 | — | `await handle.exitStatus()`：**没人读 `output` 时会认领并丢弃之后的输出**（否则输出超过一个窗口的命令会卡住）。要输出就先开始读，再在别的任务里或读完之后等退出状态 |
 | `client.onDisconnect(perform:)`（只存一个回调） | `let token = client.onDisconnect { reason in }`，可挂任意多个，`removeDisconnectObserver(token)`；`await client.waitForDisconnect()`；`client.disconnectReason` |
 | `try await client.close()` | `await client.close()`（不抛错，幂等） |
@@ -294,7 +295,7 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，
   换行变空格，截断到 300 个字符加「…」。app 自己把服务器原话（`SFTPError.status` 的 `message`、`SSHChannelOpenFailure.description`）
-  直接拿去显示或写日志的地方，也应该这样处理。
+  直接拿去显示或写日志的地方，也应该这样处理（`SSHPeerText.sanitize` 是 public 的，直接用它，别抄一份规则）。
 - **多步认证**（RFC 4252 §5.1 的部分成功，例如 sshd 的 `AuthenticationMethods publickey,password`）：部分通过的方式不再提交
   （RSA 私钥不再换签名算法重递，通过的算法记进 `SSHClient.rsaUserAuthenticationAlgorithm`，是 `ssh-rsa` 时
   `legacyAlgorithmsInUse` 照样报出）；下一个从配置的方式里从头挑服务器还要的（上一阶段被拒或跳过的方式还有一次机会）。

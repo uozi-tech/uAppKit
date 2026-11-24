@@ -174,6 +174,18 @@ public final class SSHSessionHandle: Sendable {
         return (try? await channel.eventLoop.submit { requests.value.exitStatus ?? .unknown }.get()) ?? .unknown
     }
 
+    /// 等远端进程**报告**结束（exit-status / exit-signal 到达），不等通道关闭；不认领、不丢弃输出。
+    /// 通道关了也没等到时返回 nil；任务被取消时立刻返回 nil。
+    ///
+    /// 和 `exitStatus()` 的区别：远端 shell 退出了、但后台进程还占着伪终端（`sleep 1000 &` 再 `exit`）时，sshd 先发
+    /// exit-status，通道要等那个进程结束才关——`exitStatus()` 会一直等，这里立刻返回，调用方可以自己决定再给输出
+    /// 一点时间、然后关通道（OpenSSH 的 `ssh` 这时也会卡住，这是给 app 选的另一条路）。
+    public func exitStatusReported() async -> SSHExitStatus? {
+        let requests = self.requests
+        let arrival = channel.eventLoop.flatSubmit { requests.value.exitStatusArrival.futureResult }
+        return (try? await arrival.getCancellable(lateValue: { _ in })) ?? nil
+    }
+
     /// 关闭通道。幂等。正常情况下返回时通道已关闭（对端回了 CHANNEL_CLOSE）；传输半死、对端迟迟不回时
     /// 最多等 `gracePeriod` 就返回，通道留给连接断开时一起收拾。
     public func close(gracePeriod: Duration = .seconds(5)) async {
