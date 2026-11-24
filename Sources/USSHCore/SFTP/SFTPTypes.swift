@@ -160,10 +160,27 @@ public struct SFTPFileTimes: Hashable, Sendable {
         self.modificationSeconds = modificationSeconds
     }
 
-    /// 由 `Date` 构造；早于 1970 或晚于 2106 的时间饱和到 `uint32` 的两端。
+    /// 由 `Date` 构造。v3 的时间是 `uint32` 秒：**早于 1970 或晚于 2106-02-07 的时间被夹到两端**，
+    /// 不足一秒的部分舍去。不能接受夹取的调用方用 `init?(exactAccessDate:modificationDate:)`。
     public init(accessDate: Date, modificationDate: Date) {
         self.accessSeconds = Self.seconds(accessDate)
         self.modificationSeconds = Self.seconds(modificationDate)
+    }
+
+    /// 同上，但任何一个时间超出 `uint32` 秒能表示的范围（1970-01-01 至 2106-02-07）就返回 nil，不夹取。
+    /// 不足一秒的部分仍然舍去（线上没有更细的精度）。
+    public init?(exactAccessDate accessDate: Date, modificationDate: Date) {
+        guard let access = Self.exactSeconds(accessDate), let modification = Self.exactSeconds(modificationDate) else {
+            return nil
+        }
+        self.accessSeconds = access
+        self.modificationSeconds = modification
+    }
+
+    private static func exactSeconds(_ date: Date) -> UInt32? {
+        let value = date.timeIntervalSince1970.rounded(.down)
+        guard value >= 0, value <= Double(UInt32.max) else { return nil }
+        return UInt32(value)
     }
 
     public var accessDate: Date { Date(timeIntervalSince1970: TimeInterval(accessSeconds)) }

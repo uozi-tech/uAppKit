@@ -152,12 +152,24 @@ public final class SFTPClient: Sendable {
             do {
                 let response = try await core.perform { .extended(id: $0, request: .limits) }
                 limits = try SFTPResponseReader.extendedReply(response, as: SFTPServerLimits.decode)
+            } catch let error as SFTPError where channel.isActive && Self.isLimitsReplyProblem(error) {
+                // 服务端宣告了却答不好（回错误状态、回的格式不对）：当它没宣告，用保守的回退值。
+                limits = nil
             } catch {
+                // 连接没了、任务被取消：照常失败。
                 channel.close(promise: nil)
+                if Task.isCancelled { throw CancellationError() }
                 throw error
             }
         }
         return SFTPClient(core: core, handshake: handshake, limits: limits, configuration: configuration)
+    }
+
+    private static func isLimitsReplyProblem(_ error: SFTPError) -> Bool {
+        switch error {
+        case .status, .invalidResponse: return true
+        default: return false
+        }
     }
 
     // MARK: - 通道
@@ -185,14 +197,29 @@ public final class SFTPClient: Sendable {
 
     // MARK: - 目录
 
+    /// 连续这么多次 READDIR 回空的 NAME 而不回 EOF，就当服务端坏了（否则会一直问下去）。
+    static let maximumConsecutiveEmptyDirectoryBatches = 64
+
     /// 列目录：OPENDIR → READDIR 直到 EOF → CLOSE。默认去掉 `.` 与 `..`。
+    ///
+    /// 服务端连续 `maximumConsecutiveEmptyDirectoryBatches` 次回空的 NAME（既不给项也不给 EOF）时
+    /// 抛 `invalidResponse`，不会无限循环。
     public func listDirectory(_ path: SFTPPath, includingDotEntries: Bool = false) async throws -> [SFTPDirectoryEntry] {
         let handle = try SFTPResponseReader.handle(try await core.perform { .opendir(id: $0, path: path) })
         var entries: [SFTPDirectoryEntry] = []
+        var emptyBatches = 0
         do {
             reading: while true {
                 switch try await core.perform({ .readdir(id: $0, handle: handle) }) {
                 case .name(_, let batch):
+                    if batch.isEmpty {
+                        emptyBatches += 1
+                        guard emptyBatches < Self.maximumConsecutiveEmptyDirectoryBatches else {
+                            throw SFTPError.invalidResponse("server keeps answering READDIR with empty SSH_FXP_NAME")
+                        }
+                        continue reading
+                    }
+                    emptyBatches = 0
                     if includingDotEntries {
                         entries.append(contentsOf: batch)
                     } else {
@@ -485,8 +512,14 @@ enum SFTPResponseReader {
         try throwUnexpected(response, expected: "SSH_FXP_STATUS")
     }
 
+    /// 句柄拷进一块自己的小缓冲：解码出来的是收帧缓冲里的切片，留着它就留着整块缓冲（可能好几 MB），
+    /// 而句柄要跟着文件活很久。
     static func handle(_ response: SFTPResponse) throws -> ByteBuffer {
-        if case .handle(_, let handle) = response { return handle }
+        if case .handle(_, let handle) = response {
+            var copy = ByteBufferAllocator().buffer(capacity: handle.readableBytes)
+            copy.writeImmutableBuffer(handle)
+            return copy
+        }
         try throwUnexpected(response, expected: "SSH_FXP_HANDLE")
     }
 

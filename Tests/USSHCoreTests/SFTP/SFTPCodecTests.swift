@@ -377,6 +377,13 @@ final class SFTPCodecTests: XCTestCase {
         let times = SFTPFileTimes(accessDate: Date(timeIntervalSince1970: -5), modificationDate: .distantFuture)
         XCTAssertEqual(times.accessSeconds, 0)
         XCTAssertEqual(times.modificationSeconds, .max)
+        XCTAssertNil(SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: -5), modificationDate: Date()))
+        XCTAssertNil(SFTPFileTimes(exactAccessDate: Date(), modificationDate: .distantFuture))
+        XCTAssertNil(SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: .nan), modificationDate: Date()))
+        let exact = SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: 0),
+                                  modificationDate: Date(timeIntervalSince1970: Double(UInt32.max) + 0.5))
+        XCTAssertEqual(exact, SFTPFileTimes(accessSeconds: 0, modificationSeconds: .max))
+        XCTAssertEqual(SFTPFileTimes(exactAccessDate: Date(timeIntervalSince1970: 1.9), modificationDate: Date(timeIntervalSince1970: 2))?.accessSeconds, 1)
         XCTAssertEqual(SFTPStatusCode.noSuchFile.description, "SSH_FX_NO_SUCH_FILE")
         XCTAssertEqual(SFTPStatusCode(999).description, "SSH_FX(999)")
     }

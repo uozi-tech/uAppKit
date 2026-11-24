@@ -1,3 +1,4 @@
+import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
 import XCTest
@@ -13,10 +14,12 @@ final class SFTPClientProtocolErrorTests: XCTestCase {
         typealias OutboundOut = ByteBuffer
 
         let version: UInt32
+        let extensions: [SFTPWireExtension]
         let reply: @Sendable (SFTPRequest) -> ByteBuffer?
 
-        init(version: UInt32, reply: @escaping @Sendable (SFTPRequest) -> ByteBuffer?) {
+        init(version: UInt32, extensions: [SFTPWireExtension], reply: @escaping @Sendable (SFTPRequest) -> ByteBuffer?) {
             self.version = version
+            self.extensions = extensions
             self.reply = reply
         }
 
@@ -27,10 +30,15 @@ final class SFTPClientProtocolErrorTests: XCTestCase {
             }
             var out = context.channel.allocator.buffer(capacity: 64)
             if case .initialize = request {
-                SFTPResponse.version(version: version, extensions: []).encode(into: &out)
+                SFTPResponse.version(version: version, extensions: extensions).encode(into: &out)
             } else if let bytes = reply(request) {
                 out = bytes
             } else {
+                return
+            }
+            if out.readableBytes == 0 {
+                // 空字节 = 脚本要求断开。
+                context.close(promise: nil)
                 return
             }
             context.writeAndFlush(wrapOutboundOut(out), promise: nil)
@@ -46,6 +54,7 @@ final class SFTPClientProtocolErrorTests: XCTestCase {
 
     private func connect(
         version: UInt32 = 3,
+        extensions: [SFTPWireExtension] = [],
         configuration: SFTPClient.Configuration = SFTPClient.Configuration(),
         reply: @escaping @Sendable (SFTPRequest) -> ByteBuffer?
     ) async throws -> (Channel, () async throws -> SFTPClient) {
@@ -54,7 +63,7 @@ final class SFTPClientProtocolErrorTests: XCTestCase {
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandlers([
                         ByteToMessageHandler(SFTPFrameDecoder(maximumFrameLength: 1 << 20)),
-                        ScriptedPeer(version: version, reply: reply),
+                        ScriptedPeer(version: version, extensions: extensions, reply: reply),
                     ])
                 }
             }
@@ -198,5 +207,122 @@ final class SFTPClientProtocolErrorTests: XCTestCase {
             XCTFail("should be cancelled")
         } catch is CancellationError {}
         try await channel.closeFuture.get()
+    }
+
+    // MARK: - limits@openssh.com 答不好
+
+    private static let advertisesLimits = [SFTPWireExtension(name: SFTPExtensionName.limits, data: "1")]
+
+    private static func encoded(_ response: SFTPResponse) -> ByteBuffer {
+        var out = ByteBuffer()
+        response.encode(into: &out)
+        return out
+    }
+
+    /// 宣告了 limits 却回错误状态：start 照常成功，按没有 limits 处理。
+    func testLimitsQueryFailingWithAStatusFallsBack() async throws {
+        let (_, start) = try await connect(extensions: Self.advertisesLimits) { request in
+            guard case .extended(let id, .limits) = request else { return nil }
+            return Self.encoded(.status(id: id, code: .operationUnsupported, message: "no", languageTag: ""))
+        }
+        let client = try await start()
+        XCTAssertNil(client.limits)
+        XCTAssertTrue(client.supportsExtension(SFTPExtensionName.limits))
+        XCTAssertEqual(client.maximumReadLength, 32 * 1024)
+        XCTAssertEqual(client.maximumWriteLength, 32 * 1024)
+        XCTAssertTrue(client.isActive)
+    }
+
+    /// 回的格式不对（太短）：同样回退。
+    func testMalformedLimitsReplyFallsBack() async throws {
+        let (_, start) = try await connect(extensions: Self.advertisesLimits) { request in
+            guard case .extended(let id, .limits) = request else { return nil }
+            return Self.encoded(.extendedReply(id: id, data: ByteBuffer(bytes: [1, 2, 3])))
+        }
+        let client = try await start()
+        XCTAssertNil(client.limits)
+        XCTAssertEqual(client.maximumWriteLength, 32 * 1024)
+    }
+
+    /// 问 limits 的时候断开：start 照常失败。
+    func testLosingTheConnectionDuringTheLimitsQueryFails() async throws {
+        let (_, start) = try await connect(extensions: Self.advertisesLimits) { request in
+            guard case .extended(_, .limits) = request else { return nil }
+            return ByteBuffer()
+        }
+        await XCTAssertSFTPError(.connectionClosed) { _ = try await start() }
+    }
+
+    // MARK: - 句柄不拖住收帧缓冲
+
+    /// 句柄是收帧缓冲里的切片时，留着它就留着整块缓冲；客户端拷一份小的。
+    func testHandlesDoNotPinTheReceiveBuffer() async throws {
+        let (_, start) = try await connect { request in
+            guard case .open(let id, _, _, _) = request else { return nil }
+            // 句柄后面紧跟一大段别的回答，让它们落进同一块接收缓冲。
+            var out = Self.encoded(.handle(id: id, handle: ByteBuffer(string: "HNDL")))
+            var filler = Self.encoded(.status(id: 999_999, code: .ok, message: String(repeating: "x", count: 200_000), languageTag: ""))
+            out.writeBuffer(&filler)
+            return out
+        }
+        let client = try await start()
+        let file = try await client.openFile("/f", flags: .read)
+        XCTAssertEqual(file.handle, ByteBuffer(string: "HNDL"))
+        XCTAssertLessThan(file.handle.storageCapacity, 1024, "handle keeps \(file.handle.storageCapacity) bytes alive")
+    }
+
+    // MARK: - 空的 NAME 批次
+
+    /// READDIR 一直回空的 NAME、从不回 EOF：有限次之后报协议错误，而不是无限循环。
+    func testEndlessEmptyDirectoryBatchesAreRejected() async throws {
+        let readdirs = NIOLockedValueBox(0)
+        let (_, start) = try await connect { request in
+            switch request {
+            case .opendir(let id, _):
+                return Self.encoded(.handle(id: id, handle: ByteBuffer(string: "D")))
+            case .readdir(let id, _):
+                readdirs.withLockedValue { $0 += 1 }
+                return Self.encoded(.name(id: id, entries: []))
+            case .close(let id, _):
+                return Self.encoded(.status(id: id, code: .ok, message: "", languageTag: ""))
+            default:
+                return nil
+            }
+        }
+        let client = try await start()
+        do {
+            _ = try await client.listDirectory("/")
+            XCTFail("should give up")
+        } catch SFTPError.invalidResponse {}
+        XCTAssertEqual(readdirs.withLockedValue { $0 }, SFTPClient.maximumConsecutiveEmptyDirectoryBatches)
+    }
+
+    /// 偶尔一个空批次没关系：后面还有项、最后回 EOF，照常列出来。
+    func testOccasionalEmptyBatchesAreTolerated() async throws {
+        let calls = NIOLockedValueBox(0)
+        let (_, start) = try await connect { request in
+            switch request {
+            case .opendir(let id, _):
+                return Self.encoded(.handle(id: id, handle: ByteBuffer(string: "D")))
+            case .readdir(let id, _):
+                let call = calls.withLockedValue { value -> Int in
+                    value += 1
+                    return value
+                }
+                switch call {
+                case 1, 3: return Self.encoded(.name(id: id, entries: []))
+                case 2, 4:
+                    return Self.encoded(.name(id: id, entries: [SFTPDirectoryEntry(filename: "e\(call)", longname: "", attributes: .none)]))
+                default: return Self.encoded(.status(id: id, code: .eof, message: "", languageTag: ""))
+                }
+            case .close(let id, _):
+                return Self.encoded(.status(id: id, code: .ok, message: "", languageTag: ""))
+            default:
+                return nil
+            }
+        }
+        let client = try await start()
+        let entries = try await client.listDirectory("/")
+        XCTAssertEqual(entries.map(\.filename), ["e2", "e4"])
     }
 }
