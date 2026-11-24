@@ -677,8 +677,9 @@ extension SSHChildChannel {
     private func deliverSingleRead(_ data: PendingContent) {
         switch data {
         case .data(let data):
-            // We only futz with the window manager if the channel is not already closed.
-            if !self.didClose, !self.state.sentClose,
+            // We only futz with the window manager if the channel is not already closed, and only in states
+            // that may send a window adjust: `!sentClose` alone lets `.closedRemotely` through.
+            if !self.didClose, self.state.canSendWindowAdjust,
                 let increment = self.windowManager.unbufferBytes(data.data.readableBytes)
             {
                 let update = SSHMessage.ChannelWindowAdjustMessage(

@@ -687,6 +687,18 @@ extension ChildChannelStateMachine {
         }
     }
 
+    // Whether sending a CHANNEL_WINDOW_ADJUST is legal in the current state: exactly the states that
+    // `sendChannelWindowAdjust` accepts. This is narrower than `isActiveOnChannel` and `!sentClose`, both of
+    // which are also true in `.closedRemotely`, where a window adjust hits a `preconditionFailure`.
+    var canSendWindowAdjust: Bool {
+        switch self.state {
+        case .active, .halfClosedLocal, .halfClosedRemote, .quiescent:
+            return true
+        case .idle, .requestedLocally, .requestedRemotely, .closedRemotely, .closedLocally, .closed:
+            return false
+        }
+    }
+
     // Whether we've sent a channel close message.
     var sentClose: Bool {
         switch self.state {
