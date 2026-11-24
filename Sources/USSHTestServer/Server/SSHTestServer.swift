@@ -157,6 +157,8 @@ public struct SSHTestServerEvents: Sendable {
     public var cancelledRemoteForwards: [String] = []
     /// 断开过的连接数。
     public var closedConnections = 0
+    /// 接受过的 TCP 连接数（含已断开的）。
+    public var acceptedConnections = 0
 }
 
 /// 服务端共享的状态（所有连接共用）。
@@ -197,6 +199,7 @@ final class SSHTestServerState: Sendable {
         try channel.pipeline.syncOperations.addHandler(freezer)
         let boundFreezer = NIOLoopBound(freezer, eventLoop: channel.eventLoop)
         connections.withLockedValue { $0[id] = Connection(channel: channel, freezer: boundFreezer, handler: nil) }
+        record { $0.acceptedConnections += 1 }
         channel.closeFuture.whenComplete { [self] _ in
             _ = connections.withLockedValue { $0.removeValue(forKey: id) }
             record { $0.closedConnections += 1 }
@@ -286,10 +289,16 @@ final class SSHTestFreezeHandler: ChannelDuplexHandler {
 }
 
 /// 连接上出了错就关掉它（NIOSSH 自己只报错不关）。
+///
+/// 关之前先 flush：NIOSSH 只在 `channelReadComplete` 里 flush，客户端的版本行与 KEXINIT 在同一次读里到达时，
+/// 服务端被版本行触发写出的 KEXINIT 还没 flush，处理客户端的 KEXINIT 就已经协商失败、报错——不 flush 就关，
+/// 这个 KEXINIT 永远发不出去，客户端只看到对端关闭（分不出是不是协商失败）。真实的服务器（OpenSSH）在读对方的
+/// KEXINIT 之前就已经发出自己的，失败时还会先发 DISCONNECT。
 final class SSHTestErrorCloser: ChannelInboundHandler {
     typealias InboundIn = Never
 
     func errorCaught(context: ChannelHandlerContext, error: any Error) {
+        context.flush()
         context.close(promise: nil)
     }
 }

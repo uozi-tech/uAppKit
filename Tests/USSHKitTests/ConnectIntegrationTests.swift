@@ -123,7 +123,8 @@ final class ConnectIntegrationTests: XCTestCase {
         }
     }
 
-    /// 服务端不认这把公钥：报认证失败（RSA 两种签名算法都试过，没有 SHA-1）。
+    /// 服务端不认这把公钥：报认证失败。服务器没宣告 `server-sig-algs`，自动退级开着，所以 SHA-2 两种都被拒后
+    /// 同一条连接里最后试 `ssh-rsa`；关掉自动退级就只有两次。
     func testUnauthorizedRSAKeyIsRejected() async throws {
         let server = try await TestSSH.startServer(authentication: SSHTestAuthentication(
             authorizedKeys: [TestSSH.username: []]))
@@ -136,7 +137,14 @@ final class ConnectIntegrationTests: XCTestCase {
         let publicKeyAttempts = server.events.authAttempts.filter {
             if case .publicKey = $0.method { return true } else { return false }
         }
-        XCTAssertEqual(publicKeyAttempts.count, 2, "rsa-sha2-512 被拒再试 rsa-sha2-256")
+        XCTAssertEqual(publicKeyAttempts.map(\.rsaSignatureAlgorithm), [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
+
+        await assertConnectionError({
+            _ = try await TestSSH.connect(server, credential: .privateKey(pem: KeyImportFixtures.rsaPKCS1, passphrase: nil),
+                                          legacyFallback: false)
+        }) { if case .authenticationFailed(let message) = $0 { return message } else { return nil } }
+        XCTAssertEqual(server.events.authAttempts.suffix(2).map(\.rsaSignatureAlgorithm), [.rsaSHA2_512, .rsaSHA2_256])
+        XCTAssertEqual(server.events.authAttempts.count, 5)
     }
 
     // MARK: - 连接失败

@@ -17,10 +17,77 @@ public enum SSHClientError: Error, Sendable {
     case authenticationFailed(SSHAuthenticationFailure)
     /// `.delegate` 认证方式的委托以错误完成了它的 promise（例如读不了钥匙串）。委托的错误原样保留。
     case authenticationDelegateFailed(any Error)
-    /// 握手期间的协议错误（算法协商失败、报文格式错误、签名不对……），NIOSSH 的错误原样保留。
+    /// 握手期间的协议错误（报文格式错误、签名不对……），NIOSSH 的错误原样保留。算法协商不成不在这里，见下一项。
     case handshakeFailed(any Error)
+    /// 双方没有共同支持的算法（RFC 4253 §7.1），带是哪一类、双方各报了什么。不是网络问题，重试不会好：
+    /// 要么对端只剩我们没启用的算法（放宽 `SSHAlgorithms`），要么配置本身对不上。
+    ///
+    /// 不论是我们先发现（NIOSSH 的 `keyExchangeNegotiationFailure`），还是对端先发现、先关了连接，只要对端的
+    /// KEXINIT 到了，结果都是这一项（见 `SSHKeyExchangeInitSniffer`）。
+    case noCommonAlgorithm(SSHAlgorithmNegotiationFailure)
     /// 握手完成之前连接就断了。
     case connectionClosed(SSHDisconnectReason)
+}
+
+/// 算法协商不成的详情（`SSHClientError.noCommonAlgorithm`）。
+public struct SSHAlgorithmNegotiationFailure: Error, Sendable, Hashable {
+    /// 卡在哪一类（RFC 4253 §7.1 的 KEXINIT 各个列表）。
+    public enum Category: Sendable, Hashable {
+        /// `kex_algorithms`。
+        case keyExchange
+        /// `server_host_key_algorithms`。
+        case hostKey
+        /// `encryption_algorithms_*`。
+        case encryption
+        /// `mac_algorithms_*`。
+        case mac
+        /// `compression_algorithms_*`（我们只有 `none`）。
+        case compression
+    }
+
+    /// 卡住的类别；`nil` 表示 NIOSSH 报了协商失败，但我们没能读到双方的 KEXINIT（读不懂或不完整），说不出是哪一类。
+    public var category: Category?
+    /// 我们这一方报的这一类算法，按偏好排序（不含 `ext-info-c` / `kex-strict-*` 这类标记）。
+    public var clientOffer: [String]
+    /// 服务器报的这一类算法。
+    public var serverOffer: [String]
+
+    public init(category: Category?, clientOffer: [String], serverOffer: [String]) {
+        self.category = category
+        self.clientOffer = clientOffer
+        self.serverOffer = serverOffer
+    }
+}
+
+/// 第一次密钥交换选中的算法（RFC 4253 §7.1 的协商结果）。
+///
+/// NIOSSH 不公开它自己的协商结果（`SSHKeyExchangeStateMachine` 里的 `NegotiationResult` 是 internal），
+/// 这里是 USSHCore 从双方的 KEXINIT 按与 NIOSSH 相同的规则（第一个双方都有的；加密 / MAC 两个方向必须一致）
+/// 算出来的。换钥时双方报的列表不变，结果也不变。
+public struct SSHNegotiatedAlgorithms: Sendable, Hashable {
+    public var keyExchange: String
+    public var hostKey: String
+    /// 加密方式（两个方向相同）。
+    public var encryption: String
+    /// KEXINIT 里商定的 MAC 名（两个方向相同）。加密方式是 AEAD（AES-GCM）时这个 MAC 并不使用——NIOSSH
+    /// 仍要求名字对得上，所以协商照样要它；实际在用的看 `macInUse`。
+    public var mac: String
+    /// 加密方式是 AEAD（自带完整性校验，不用 MAC）。
+    public var encryptionIsAEAD: Bool
+    public var compression: String
+
+    /// 实际在用的 MAC；AEAD 时为 nil。
+    public var macInUse: String? { encryptionIsAEAD ? nil : mac }
+
+    public init(keyExchange: String, hostKey: String, encryption: String, mac: String, encryptionIsAEAD: Bool,
+                compression: String) {
+        self.keyExchange = keyExchange
+        self.hostKey = hostKey
+        self.encryption = encryption
+        self.mac = mac
+        self.encryptionIsAEAD = encryptionIsAEAD
+        self.compression = compression
+    }
 }
 
 /// 连接为什么断了。

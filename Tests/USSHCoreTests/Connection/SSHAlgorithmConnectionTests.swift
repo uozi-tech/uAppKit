@@ -111,6 +111,59 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         XCTAssertEqual(rsaAttempts(server), [.sshRSA])
     }
 
+    /// 只开 SHA-1 用户认证回退（主机密钥 / 密钥交换仍是 `.standard`）：同一条连接上 512、256 被拒后最后试 `ssh-rsa`，
+    /// 成功的算法记在 `rsaUserAuthenticationAlgorithm`；协商结果里没有任何旧算法。
+    func testSHA1UserAuthFallbackWithoutServerSigAlgs() async throws {
+        let server = try await rsaServer(accepting: [.sshRSA], acceptsLegacy: true)
+        defer { Task { await server.stop() } }
+        var configuration = client([.rsaPrivateKey(Self.rsaKey)])
+        configuration.allowsSHA1RSAUserAuthenticationFallback = true
+        let client = try await Harness.connect(server, configuration)
+        defer { Task { await client.close() } }
+        XCTAssertEqual(rsaAttempts(server), [.rsaSHA2_512, .rsaSHA2_256, .sshRSA])
+        XCTAssertEqual(server.events.acceptedConnections, 1, "三次尝试都在同一条连接上")
+        XCTAssertEqual(client.rsaUserAuthenticationAlgorithm, .sshRSA)
+        XCTAssertEqual(client.negotiatedAlgorithms?.hostKey, "ssh-ed25519")
+    }
+
+    /// 宣告了不含 RSA 的 `server-sig-algs`：开了回退也一次 RSA 都不试。
+    func testSHA1UserAuthFallbackFollowsServerSigAlgs() async throws {
+        let server = try await rsaServer(accepting: [.sshRSA], serverSignatureAlgorithms: ["ssh-ed25519"], acceptsLegacy: true)
+        defer { Task { await server.stop() } }
+        var configuration = client([.rsaPrivateKey(Self.rsaKey)])
+        configuration.allowsSHA1RSAUserAuthenticationFallback = true
+        await XCTAssertThrowsAsync(try await Harness.connect(server, configuration)) { error in
+            guard case SSHClientError.authenticationFailed(let failure) = error else { return XCTFail("\(error)") }
+            XCTAssertEqual(failure.attemptedMethods, [])
+        }
+        XCTAssertEqual(server.events.authAttempts.count, 0)
+    }
+
+    /// `SSHClient` 报出的协商结果：AES-GCM 时 MAC 不在用（`macInUse == nil`）；AES-CTR 时是协商到的 MAC；
+    /// 口令登录时没有 RSA 算法。
+    func testNegotiatedAlgorithmsAreExposed() async throws {
+        let gcm = try await SSHTestServer.start(Harness.serverConfiguration())
+        defer { Task { await gcm.stop() } }
+        let first = try await Harness.connect(gcm, client(algorithms: .builtInOnly))
+        XCTAssertEqual(first.negotiatedAlgorithms, SSHNegotiatedAlgorithms(
+            keyExchange: "curve25519-sha256", hostKey: "ssh-ed25519", encryption: "aes256-gcm@openssh.com",
+            mac: "hmac-sha2-256", encryptionIsAEAD: true, compression: "none"))
+        XCTAssertNil(first.negotiatedAlgorithms?.macInUse)
+        XCTAssertNil(first.rsaUserAuthenticationAlgorithm)
+        await first.close()
+
+        var configuration = Harness.serverConfiguration()
+        configuration.transportProtectionSchemes = [SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self]
+        configuration.keyExchangeAlgorithms = [SSHDiffieHellmanAlgorithm.group14SHA1.name]
+        let old = try await SSHTestServer.start(configuration)
+        defer { Task { await old.stop() } }
+        let second = try await Harness.connect(old, client(algorithms: .legacyCompatible))
+        XCTAssertEqual(second.negotiatedAlgorithms?.keyExchange, "diffie-hellman-group14-sha1")
+        XCTAssertEqual(second.negotiatedAlgorithms?.encryption, "aes128-ctr")
+        XCTAssertEqual(second.negotiatedAlgorithms?.macInUse, "hmac-sha1")
+        await second.close()
+    }
+
     /// 请求里写 `rsa-sha2-512`、签名却是 `ssh-rsa`（SHA-1）的：服务端必须拒绝（防降级）。
     func testUserAuthSignatureLabelledSSHRSAUnderRSASHA2512IsRejected() async throws {
         let server = try await rsaServer(acceptsLegacy: true)
@@ -166,8 +219,8 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         await XCTAssertThrowsAsync(try await Harness.connect(server, client(algorithms: .builtInOnly, hostKey: .custom { _ in
             asked.withLockedValue { $0 = true }
         }))) { error in
-            guard case SSHClientError.handshakeFailed(let underlying) = error,
-                  (underlying as? NIOSSHError)?.type == .keyExchangeNegotiationFailure else { return XCTFail("\(error)") }
+            guard case SSHClientError.noCommonAlgorithm(let failure) = error, failure.category == .hostKey
+            else { return XCTFail("\(error)") }
         }
         XCTAssertFalse(asked.withLockedValue { $0 })
     }
@@ -185,8 +238,8 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         sneaky.hostKeyAlgorithms.append("ssh-rsa")
         for algorithms in [SSHAlgorithms.standard, sneaky] {
             await XCTAssertThrowsAsync(try await Harness.connect(server, client(algorithms: algorithms))) { error in
-                guard case SSHClientError.handshakeFailed(let underlying) = error,
-                      (underlying as? NIOSSHError)?.type == .keyExchangeNegotiationFailure else { return XCTFail("\(error)") }
+                guard case SSHClientError.noCommonAlgorithm(let failure) = error, failure.category == .hostKey,
+                      failure.serverOffer == ["ssh-rsa"] else { return XCTFail("\(error)") }
             }
         }
         let again = try await Harness.connect(server, client(algorithms: .legacyCompatible))
@@ -316,7 +369,8 @@ final class SSHAlgorithmConnectionTests: XCTestCase {
         sneaky.keyExchangeAlgorithms.append(SSHDiffieHellmanAlgorithm.group14SHA1.name)
         for algorithms in [SSHAlgorithms.standard, sneaky] {
             await XCTAssertThrowsAsync(try await Harness.connect(server, client(algorithms: algorithms))) { error in
-                guard case SSHClientError.handshakeFailed = error else { return XCTFail("\(error)") }
+                guard case SSHClientError.noCommonAlgorithm(let failure) = error, failure.category == .keyExchange
+                else { return XCTFail("\(error)") }
             }
         }
         let client = try await Harness.connect(server, client(algorithms: .legacyCompatible))

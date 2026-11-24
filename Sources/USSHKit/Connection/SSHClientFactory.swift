@@ -21,6 +21,17 @@ public nonisolated struct ConnectedClient: Sendable {
         await bastion?.close()
     }
 
+    /// 目标连接用上的 SHA-1 时代旧算法（自动退级的结果，见 `SSHLegacyFallback`）：协商到的密钥交换 / 主机密钥 / MAC
+    /// 是旧算法时各一项，RSA 用户私钥以 `ssh-rsa` 认证成功时一项。没有用上时为空。
+    public var legacyAlgorithmsInUse: [SSHLegacyAlgorithm] {
+        SSHLegacyFallback.legacyAlgorithms(of: target)
+    }
+
+    /// 跳板机那一跳用上的旧算法（没有跳板机时为空）。
+    public var bastionLegacyAlgorithmsInUse: [SSHLegacyAlgorithm] {
+        bastion.map(SSHLegacyFallback.legacyAlgorithms(of:)) ?? []
+    }
+
     /// 两条连接（有跳板机时）都还连着。
     public var isConnected: Bool {
         target.isConnected && (bastion?.isConnected ?? true)
@@ -76,6 +87,11 @@ nonisolated enum SSHClientFactory {
         var maximumPacketSize: Int
         var algorithms: SSHAlgorithms
         var keepAliveInterval: Duration?
+        /// 自动退到旧算法（见 `SSHLegacyFallback`）；关掉时只用 `algorithms`，RSA 用户私钥也不试 `ssh-rsa`
+        /// （除非 `algorithms` 本身允许旧算法）。
+        var legacyFallback: Bool = true
+        var legacyMemory: SSHLegacyEndpointMemory = .shared
+        var logger: any SSHLogger = NoOpSSHLogger()
     }
 
     static func connect(
@@ -87,8 +103,11 @@ nonisolated enum SSHClientFactory {
         approvalTimeout: Duration,
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool,
         maximumPacketSize: Int = SSHClient.defaultMaximumPacketSize,
-        algorithms: SSHAlgorithms = .builtInOnly,
-        keepAliveInterval: Duration? = nil
+        algorithms: SSHAlgorithms = .standard,
+        keepAliveInterval: Duration? = nil,
+        legacyFallback: Bool = true,
+        legacyMemory: SSHLegacyEndpointMemory = .shared,
+        logger: any SSHLogger = NoOpSSHLogger()
     ) async throws -> ConnectedClient {
         let options = Options(
             hostKeyStore: hostKeyStore,
@@ -98,7 +117,10 @@ nonisolated enum SSHClientFactory {
             approver: approver,
             maximumPacketSize: maximumPacketSize,
             algorithms: algorithms,
-            keepAliveInterval: keepAliveInterval
+            keepAliveInterval: keepAliveInterval,
+            legacyFallback: legacyFallback,
+            legacyMemory: legacyMemory,
+            logger: logger
         )
         let target = Hop(host: endpoint.host, port: endpoint.port, username: endpoint.username,
                          credential: credential)
@@ -115,7 +137,11 @@ nonisolated enum SSHClientFactory {
     ///
     /// 时限：TCP 建连与「握手 + 认证」各给 `connectTimeout`；等主机密钥回调的那段不计入握手（USSHCore
     /// 暂停计时），单独给 `HostKeyTrust.validationTimeout`。保活默认关（`keepAliveInterval == nil`，今天的行为）。
-    static func makeConfiguration(_ hop: Hop, options: Options) throws -> SSHClient.Configuration {
+    ///
+    /// `algorithms` 不给时用 `options.algorithms`；`legacyFallback` 开着、而这一跳在进程内记着需要旧算法时，
+    /// 直接用补上旧算法的那一套。`legacyFallback` 开着时也打开同一条连接里 RSA 用户私钥的 `ssh-rsa` 回退。
+    static func makeConfiguration(_ hop: Hop, options: Options,
+                                  algorithms: SSHAlgorithms? = nil) throws -> SSHClient.Configuration {
         let trust = HostKeyTrust(
             host: hop.host,
             port: hop.port,
@@ -134,17 +160,74 @@ nonisolated enum SSHClientFactory {
                 approvalTimeout: options.approvalTimeout
             ),
             maximumPacketSize: options.maximumPacketSize,
-            algorithms: options.algorithms
+            algorithms: algorithms ?? firstAttemptAlgorithms(hop, options: options)
         )
+        configuration.allowsSHA1RSAUserAuthenticationFallback = options.legacyFallback
         // 两跳各自保活：外层断了内层随之断，但外层还活着、内层的服务器卡死时只有内层的保活看得见。
         configuration.keepAliveInterval = options.keepAliveInterval
         return configuration
     }
 
-    private static func connectDirect(_ hop: Hop, options: Options) async throws -> SSHClient {
-        let configuration = try makeConfiguration(hop, options: options)
+    /// 第一次用的算法：记着需要旧算法的就直接补上。
+    private static func firstAttemptAlgorithms(_ hop: Hop, options: Options) -> SSHAlgorithms {
+        guard options.legacyFallback,
+              options.legacyMemory.needsLegacy(host: hop.host, port: hop.port),
+              let fallback = SSHLegacyFallback.algorithms(addingLegacyTo: options.algorithms) else {
+            return options.algorithms
+        }
+        return fallback
+    }
+
+    /// 连一跳，按 `SSHLegacyFallback` 的规则至多再试一次。抛的是 USSHCore 的原始错误，由调用方归类。
+    /// `open` 用给定的配置建这一跳（直连或经跳板机）。
+    private static func connectHop(
+        _ hop: Hop,
+        options: Options,
+        open: (SSHClient.Configuration) async throws -> SSHClient
+    ) async throws -> SSHClient {
+        let first = firstAttemptAlgorithms(hop, options: options)
+        let fallback = options.legacyFallback && !first.allowsLegacyAlgorithms
+            ? SSHLegacyFallback.algorithms(addingLegacyTo: first) : nil
+        let watch = SSHApproverWatch()
+        var firstOptions = options
+        firstOptions.approver = watch.wrap(options.approver)
+        let client: SSHClient
         do {
-            return try await SSHClient.connect(host: hop.host, port: hop.port, configuration: configuration)
+            client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first))
+        } catch SSHClientError.noCommonAlgorithm(let failure) {
+            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure, with: fallback), !watch.wasCalled else {
+                throw SSHClientError.noCommonAlgorithm(failure)
+            }
+            // 第二次的错误（含又一次没有共同算法）原样交出去。
+            client = try await open(makeConfiguration(hop, options: options, algorithms: fallback))
+        }
+        note(client, hop: hop, options: options)
+        return client
+    }
+
+    /// 连上之后：记下这一跳要不要旧算法（用上了才记，没用上就忘掉），用上了旧算法时记一条警告。
+    private static func note(_ client: SSHClient, hop: Hop, options: Options) {
+        if options.legacyFallback {
+            options.legacyMemory.record(host: hop.host, port: hop.port,
+                                        needsLegacy: SSHLegacyFallback.negotiationNeededLegacy(client))
+        }
+        let legacy = SSHLegacyFallback.legacyAlgorithms(of: client)
+        guard !legacy.isEmpty else { return }
+        options.logger.log(SSHLogEvent(
+            level: .warning,
+            message: "SSH 连接用上了 SHA-1 时代的旧算法（服务器不支持更好的）",
+            metadata: [
+                "host": hop.host,
+                "port": String(hop.port),
+                "algorithms": legacy.map(\.description).joined(separator: ","),
+            ]))
+    }
+
+    private static func connectDirect(_ hop: Hop, options: Options) async throws -> SSHClient {
+        do {
+            return try await connectHop(hop, options: options) { configuration in
+                try await SSHClient.connect(host: hop.host, port: hop.port, configuration: configuration)
+            }
         } catch {
             throw try connectionError(for: error)
         }
@@ -163,17 +246,15 @@ nonisolated enum SSHClientFactory {
             )
         }
 
-        let configuration: SSHClient.Configuration
         do {
-            configuration = try makeConfiguration(target, options: options)
-        } catch {
+            let client = try await connectHop(target, options: options) { configuration in
+                try await bastion.jump(to: target.host, port: target.port, configuration: configuration)
+            }
+            return ConnectedClient(target: client, bastion: bastion)
+        } catch let error as SSHConnectionError {
+            // 组配置时的失败（私钥导入等）。
             await bastion.close()
             throw SSHConnectionError.jumpHostFailed(SSHErrorText.describe(error))
-        }
-
-        do {
-            let client = try await bastion.jump(to: target.host, port: target.port, configuration: configuration)
-            return ConnectedClient(target: client, bastion: bastion)
         } catch {
             await bastion.close()
             if error is CancellationError { throw error }
@@ -217,7 +298,8 @@ nonisolated enum SSHClientFactory {
                 return .hostKeyRejected(SSHErrorText.describe(error))
             case .authenticationFailed, .authenticationDelegateFailed:
                 return .authenticationFailed(SSHErrorText.describe(error))
-            case .connectTimeout, .connectFailed, .handshakeTimeout, .handshakeFailed, .connectionClosed:
+            case .connectTimeout, .connectFailed, .handshakeTimeout, .handshakeFailed, .noCommonAlgorithm,
+                 .connectionClosed:
                 return .connectFailed(SSHErrorText.describe(error))
             }
         default:

@@ -11,6 +11,12 @@ import NIOSSH
 ///
 /// `authenticated` 在握手失败的那一刻就完成，不等 closeFuture：跳板机内层的传输是外层的子通道，
 /// 外层链路卡死时子通道的关闭要等一个永远不来的 CHANNEL_CLOSE。
+/// 认证成功那一刻记下的、之后不再变的连接事实。
+struct SSHSessionFacts: Sendable {
+    var negotiatedAlgorithms: SSHNegotiatedAlgorithms?
+    var rsaUserAuthenticationAlgorithm: SSHRSASignatureAlgorithm?
+}
+
 final class SSHConnectionGuard: ChannelInboundHandler {
     typealias InboundIn = Never
 
@@ -26,12 +32,13 @@ final class SSHConnectionGuard: ChannelInboundHandler {
     }
 
     private let lifecycle: SSHConnectionLifecycle
-    private let authenticated: EventLoopPromise<Void>
+    private let authenticated: EventLoopPromise<SSHSessionFacts>
     private var authenticatedCompleted = false
     private let clock: SSHHandshakeClock
     private let hostKeyDelegate: SSHHostKeyDelegate
     private let authDelegate: SSHClientAuthDelegate
     private let sshHandler: NIOSSHHandler
+    private let sniffer: SSHKeyExchangeInitSniffer
     private let handshakeTimeout: Duration
     private let keepAlive: KeepAlive?
     private let logger: Logger
@@ -43,8 +50,9 @@ final class SSHConnectionGuard: ChannelInboundHandler {
     private var unansweredProbes = 0
     private var keepAliveExpired = false
 
-    init(lifecycle: SSHConnectionLifecycle, authenticated: EventLoopPromise<Void>, clock: SSHHandshakeClock,
+    init(lifecycle: SSHConnectionLifecycle, authenticated: EventLoopPromise<SSHSessionFacts>, clock: SSHHandshakeClock,
          hostKeyDelegate: SSHHostKeyDelegate, authDelegate: SSHClientAuthDelegate, sshHandler: NIOSSHHandler,
+         sniffer: SSHKeyExchangeInitSniffer,
          handshakeTimeout: Duration, keepAlive: KeepAlive?, logger: Logger) {
         self.lifecycle = lifecycle
         self.authenticated = authenticated
@@ -52,12 +60,18 @@ final class SSHConnectionGuard: ChannelInboundHandler {
         self.hostKeyDelegate = hostKeyDelegate
         self.authDelegate = authDelegate
         self.sshHandler = sshHandler
+        self.sniffer = sniffer
         self.handshakeTimeout = handshakeTimeout
         self.keepAlive = keepAlive
         self.logger = logger
         clock.onExpire = { [weak self] in
             guard let self else { return }
             self.failHandshake(.handshakeTimeout(self.handshakeTimeout))
+        }
+        // 双方的 KEXINIT 一到齐就知道协商成不成：不成就立刻以 noCommonAlgorithm 结束，不等 NIOSSH 报错、也不管
+        // 对端是不是正在关连接（两者谁先被处理都不影响结果）。
+        sniffer.onNegotiationFailure = { [weak self] failure in
+            self?.failHandshake(.noCommonAlgorithm(failure))
         }
     }
 
@@ -80,10 +94,13 @@ final class SSHConnectionGuard: ChannelInboundHandler {
         if event is UserAuthSuccessEvent, case .handshaking = phase {
             phase = .connected
             clock.stop()
+            let facts = SSHSessionFacts(
+                negotiatedAlgorithms: sniffer.negotiated,
+                rsaUserAuthenticationAlgorithm: authDelegate.lastOfferedRSAAlgorithm)
             authDelegate.forgetCredentials()
             lifecycle.markConnected()
             logger.debug("SSH 认证成功")
-            completeAuthenticated(.success(()))
+            completeAuthenticated(.success(facts))
             startKeepAlive(context: context)
         }
         context.fireUserInboundEventTriggered(event)
@@ -98,7 +115,7 @@ final class SSHConnectionGuard: ChannelInboundHandler {
         context.close(promise: nil)
     }
 
-    private func completeAuthenticated(_ result: Result<Void, any Error>) {
+    private func completeAuthenticated(_ result: Result<SSHSessionFacts, any Error>) {
         guard !authenticatedCompleted else { return }
         authenticatedCompleted = true
         authenticated.completeWith(result)
@@ -186,6 +203,9 @@ final class SSHConnectionGuard: ChannelInboundHandler {
             return .authenticationDelegateFailed(failure.underlying)
         case let sshError as NIOSSHError where sshError.type == .noFurtherAuthenticationOffers:
             return .authenticationFailed(authDelegate.failure)
+        case let sshError as NIOSSHError where sshError.type == .keyExchangeNegotiationFailure:
+            return .noCommonAlgorithm(sniffer.failure
+                ?? SSHAlgorithmNegotiationFailure(category: nil, clientOffer: [], serverOffer: []))
         case let sshError as NIOSSHError where sshError.type != .tcpShutdown:
             return .handshakeFailed(error)
         case is any SSHAlgorithmFailure:
@@ -197,6 +217,8 @@ final class SSHConnectionGuard: ChannelInboundHandler {
     }
 
     private func handshakeError(for reason: SSHDisconnectReason) -> SSHClientError {
+        // 对端先发现协商不成、先关了连接：只要它的 KEXINIT 到了，就报协商失败而不是「对端关闭」。
+        if let negotiation = sniffer.failure { return .noCommonAlgorithm(negotiation) }
         if let firstError, let failure = handshakeError(forCaught: firstError) { return failure }
         return .connectionClosed(reason)
     }

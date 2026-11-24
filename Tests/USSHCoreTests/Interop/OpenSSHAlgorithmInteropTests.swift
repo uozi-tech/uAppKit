@@ -109,7 +109,8 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
 
             // `.builtInOnly` 不报 RSA 主机密钥算法：协商失败。
             await XCTAssertThrowsAsync(try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)])) { error in
-                guard case SSHClientError.handshakeFailed = error else { return XCTFail("\(error)") }
+                guard case SSHClientError.noCommonAlgorithm(let failure) = error, failure.category == .hostKey
+                else { return XCTFail("\(error)") }
             }
         }
     }
@@ -118,7 +119,8 @@ final class OpenSSHAlgorithmInteropTests: XCTestCase {
     func testSSHRSAHostKeyNeedsLegacy() async throws {
         let fixture = try await start(rsaHostKeyBits: 2048, logLevel: "DEBUG1", extraConfig: ["HostKeyAlgorithms ssh-rsa"])
         await XCTAssertThrowsAsync(try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: .standard)) { error in
-            guard case SSHClientError.handshakeFailed = error else { return XCTFail("\(error)") }
+            guard case SSHClientError.noCommonAlgorithm(let failure) = error, failure.category == .hostKey,
+                  failure.serverOffer == ["ssh-rsa"] else { return XCTFail("\(error)") }
         }
         let client = try await fixture.connect(methods: [.privateKey(fixture.ed25519Key)], algorithms: .legacyCompatible)
         await client.close()
