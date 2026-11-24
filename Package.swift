@@ -129,7 +129,8 @@ let package = Package(
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
                 .product(name: "BigInt", package: "BigInt"),
                 .product(name: "Logging", package: "swift-log"),
-            ]
+            ],
+            exclude: ["Algorithms/README.md"]
         ),
         // 进程内的 SSH 服务端，只给测试用（本包的测试和 app 的测试宿主都用它）：
         // 架在 NIOSSH 的服务端角色上，带脚本化的 exec、回显 PTY、SFTP、TCP 转发。
@@ -216,7 +217,10 @@ let package = Package(
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
                 .product(name: "_CryptoExtras", package: "swift-crypto"),
-            ]
+                .product(name: "BigInt", package: "BigInt"),
+            ],
+            // 测试夹具的生成脚本（用 ssh-keygen / openssl / python3 重新生成 *Fixtures.swift）。
+            exclude: ["Algorithms/Fixtures/generate-fixtures.sh"]
         ),
     ]
 )
