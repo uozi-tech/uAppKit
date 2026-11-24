@@ -217,7 +217,9 @@ nonisolated enum SSHClientFactory {
                 return .hostKeyRejected(SSHErrorText.describe(error))
             case .authenticationFailed, .authenticationDelegateFailed:
                 return .authenticationFailed(SSHErrorText.describe(error))
-            case .connectTimeout, .connectFailed, .handshakeTimeout, .handshakeFailed, .connectionClosed:
+            case .handshakeFailed:
+                return .handshakeFailed(SSHErrorText.describe(error))
+            case .connectTimeout, .connectFailed, .handshakeTimeout, .connectionClosed:
                 return .connectFailed(SSHErrorText.describe(error))
             }
         default:

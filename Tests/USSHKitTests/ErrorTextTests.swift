@@ -50,10 +50,13 @@ final class ErrorTextTests: XCTestCase {
         guard case .hostKeyRejected("x") = try map(SSHClientError.hostKeyRejected(SSHConnectionError.hostKeyRejected("x")))
         else { return XCTFail("信任判定自己的拒绝原样交出") }
         for error in [SSHClientError.connectTimeout(.seconds(1)), .handshakeTimeout(.seconds(1)),
-                      .handshakeFailed(ChannelError.eof), .connectionClosed(.remoteClosed),
-                      .connectFailed(ChannelError.eof)] {
+                      .connectionClosed(.remoteClosed), .connectFailed(ChannelError.eof)] {
             guard case .connectFailed = try map(error) else { return XCTFail("\(error)") }
         }
+        // 握手失败单列（app 据此不重连），文案与连不上相同。
+        let handshake = try map(SSHClientError.handshakeFailed(ChannelError.eof))
+        guard case .handshakeFailed(let detail) = handshake else { return XCTFail("\(handshake)") }
+        XCTAssertEqual(handshake.errorDescription, SSHConnectionError.connectFailed(detail).errorDescription)
         XCTAssertThrowsError(try map(CancellationError())) { XCTAssertTrue($0 is CancellationError) }
     }
 

@@ -62,9 +62,14 @@ final class AlgorithmPolicyTests: XCTestCase {
 
         let message = await assertConnectionError({
             _ = try await TestSSH.connect(server, algorithms: .builtInOnly)
-        }) { if case .connectFailed(let message) = $0 { return message } else { return nil } }
-        // 协商不出主机密钥算法时，往往是服务端先发现、先关连接，客户端只看到对端关闭；本端先发现时是
-        // 「没有共同支持的算法」。两种都是 `.connectFailed`，都没走到认证。
+        }) {
+            switch $0 {
+            case .connectFailed(let message), .handshakeFailed(let message): return message
+            default: return nil
+            }
+        }
+        // 协商不出主机密钥算法时，往往是服务端先发现、先关连接，客户端只看到对端关闭（`.connectFailed`）；
+        // 本端先发现时是「没有共同支持的算法」（`.handshakeFailed`）。两种都没走到认证。
         let negotiation = String(localized: "与服务器没有共同支持的算法（服务器可能只支持旧算法）", bundle: ModuleBundle.bundle)
         let expected = [
             String(localized: "SSH 握手失败：\(negotiation)", bundle: ModuleBundle.bundle),

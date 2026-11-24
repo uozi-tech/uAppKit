@@ -84,7 +84,7 @@ public enum USSHKitIntegration {
 | 之前 | 之后 |
 |---|---|
 | `struct SSHPrivateKey: @unchecked Sendable` | `struct SSHPrivateKey: Sendable` |
-| `SSHConnectionError` | case 不变；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
+| `SSHConnectionError` | **新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
 | `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
 | USSHCore 的错误类型没有文案 | USSHKit 给 `SSHClientError`、`SSHChannelError`、`SFTPError`、`SSHCommandError`、`SSHRSAError` 补上 `LocalizedError`（四种语言），`error.localizedDescription` 直接可用。判断一律看类型与 case，不看文案 |
 
@@ -189,7 +189,7 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 | `SSHClientError` | USSHKit 抛的 | 值得重试？ |
 |---|---|---|
 | `.connectTimeout`、`.connectFailed`、`.handshakeTimeout`、`.connectionClosed` | `.connectFailed` | 是（网络问题） |
-| `.handshakeFailed`（协议错误、算法协商不成，包括 USSHCore 算法实现抛的错） | `.connectFailed`（「SSH 握手失败：…」） | 否（配置问题，重试不会好；协商不成时文案提示可能要放宽算法） |
+| `.handshakeFailed`（协议错误、算法协商不成，包括 USSHCore 算法实现抛的错） | `.handshakeFailed`（「SSH 握手失败：…」，显示同 `.connectFailed`） | 否（配置问题，重试不会好；协商不成时文案提示可能要放宽算法） |
 | `.authenticationFailed`、`.authenticationDelegateFailed` | `.authenticationFailed` | 否 |
 | `.hostKeyRejected`、`.hostKeyValidationTimeout` | `.hostKeyRejected` | 否 |
 
