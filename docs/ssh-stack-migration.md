@@ -107,6 +107,7 @@ public struct SSHLegacyAlgorithm: Sendable, Hashable {
 | `try await client.executeCommandStream(cmd)`，元素 `.stdout` / `.stderr` | 同名同元素；消费者提前退出或任务取消会结束远端命令 |
 | `withPTY(SSHChannelRequestEvent.PseudoTerminalRequest(…)) { inbound, outbound in }` | `withPTY(SSHPseudoTerminal(term:columns:rows:)) { output, handle in }`；或 `let shell = try await client.openShell(pty:)` 拿句柄（`write` / `resize` / `exitStatus()` / `close()`），不用挂着闭包 |
 | `withExec(cmd) { … }` | `withExec(cmd) { output, handle in }` 或 `openExec(_:)`；任务取消会发 `signal TERM` 再关通道 |
+| — | `await handle.exitStatusReported()`：远端**报告**结束（exit-status / exit-signal 到达）就返回，不等通道关、不碰输出；通道关了也没报返回 nil。后台进程占着伪终端（`sleep 1000 &` 再 `exit`）时通道一直不关，终端可以据此再给输出一点时间然后自己关 |
 | — | `await handle.exitStatus()`：**没人读 `output` 时会认领并丢弃之后的输出**（否则输出超过一个窗口的命令会卡住）。要输出就先开始读，再在别的任务里或读完之后等退出状态 |
 | `client.onDisconnect(perform:)`（只存一个回调） | `let token = client.onDisconnect { reason in }`，可挂任意多个，`removeDisconnectObserver(token)`；`await client.waitForDisconnect()`；`client.disconnectReason` |
 | `try await client.close()` | `await client.close()`（不抛错，幂等） |

@@ -44,12 +44,16 @@ final class SSHChannelRequestHandler: ChannelInboundHandler, RemovableChannelHan
     private let eventLoop: any EventLoop
     private var context: ChannelHandlerContext?
     private(set) var exitStatus: SSHExitStatus?
+    /// exit-status / exit-signal 到了（值），或者通道关了也没等到（nil）。只完成一次。
+    let exitStatusArrival: EventLoopPromise<SSHExitStatus?>
+    private var exitStatusDelivered = false
     /// 收到 SUCCESS 时、在同一个 EventLoop tick 里要跑的动作（subsystem 的 initializer），按请求顺序。
     /// 抛错则这个请求按失败（带那个错误）完成，通道随之关闭。
     var onSuccess: [SSHChannelRequestKind: () throws -> Void] = [:]
 
     init(eventLoop: any EventLoop) {
         self.eventLoop = eventLoop
+        self.exitStatusArrival = eventLoop.makePromise(of: SSHExitStatus?.self)
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
@@ -58,7 +62,14 @@ final class SSHChannelRequestHandler: ChannelInboundHandler, RemovableChannelHan
 
     func handlerRemoved(context: ChannelHandlerContext) {
         failAll(SSHChannelError.channelClosed)
+        deliverExitStatus(nil)
         self.context = nil
+    }
+
+    private func deliverExitStatus(_ status: SSHExitStatus?) {
+        guard !exitStatusDelivered else { return }
+        exitStatusDelivered = true
+        exitStatusArrival.succeed(status)
     }
 
     /// 发一个请求。`wantReply` 为 false 时写出去就算完成。
@@ -107,9 +118,11 @@ final class SSHChannelRequestHandler: ChannelInboundHandler, RemovableChannelHan
             }
         case let status as SSHChannelRequestEvent.ExitStatus:
             exitStatus = .exited(status.exitStatus)
+            deliverExitStatus(exitStatus)
         case let signal as SSHChannelRequestEvent.ExitSignal:
             exitStatus = .signaled(SSHExitSignal(
                 name: signal.signalName, coreDumped: signal.dumpedCore, message: signal.errorMessage))
+            deliverExitStatus(exitStatus)
         default:
             context.fireUserInboundEventTriggered(event)
         }
@@ -117,6 +130,7 @@ final class SSHChannelRequestHandler: ChannelInboundHandler, RemovableChannelHan
 
     func channelInactive(context: ChannelHandlerContext) {
         failAll(SSHChannelError.channelClosed)
+        deliverExitStatus(nil)
         context.fireChannelInactive()
     }
 

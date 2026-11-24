@@ -50,6 +50,47 @@ final class SSHSessionChannelTests: XCTestCase {
         XCTAssertEqual(status, .signaled(SSHExitSignal(name: "KILL", coreDumped: false, message: "")))
     }
 
+    /// 远端报了退出状态、但通道还开着（后台进程占着伪终端）：`exitStatusReported()` 不等通道关就返回，
+    /// 之后的输出照样读得到；`exitStatus()` 那条路不受影响。
+    func testExitStatusReportedBeforeTheChannelCloses() async throws {
+        let (server, client) = try await start(SSHTestExecHandler { context in
+            try await context.write("bye\n")
+            context.channel.triggerUserOutboundEvent(SSHChannelRequestEvent.ExitStatus(exitStatus: 0), promise: nil)
+            try await Task.sleep(for: .milliseconds(200))
+            try await context.write("late\n")           // 后台进程还在写
+            for await _ in context.stdin {}             // 一直占着，直到客户端关通道
+            return .noStatus
+        })
+        defer { Task { await client.close(); await server.stop() } }
+        let shell = try await client.openExec("sleep 1000 & exit")
+        let reported = await withTaskGroup(of: SSHExitStatus??.self) { group in
+            group.addTask { await shell.exitStatusReported() }
+            group.addTask { try? await Task.sleep(for: .seconds(5)); return .some(nil) }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
+        XCTAssertEqual(reported, .some(.exited(0)), "退出状态一到就返回，不等通道关")
+        XCTAssertTrue(shell.isActive, "通道还开着")
+        var collected = ""
+        for try await chunk in shell.output {
+            collected += String(buffer: chunk.buffer)
+            if collected.contains("late") { break }
+        }
+        XCTAssertTrue(collected.contains("bye") && collected.contains("late"), collected)
+        await shell.close()
+    }
+
+    /// 通道关了也没等到退出状态：返回 nil，不挂住。
+    func testExitStatusReportedReturnsNilWhenTheChannelClosesWithoutOne() async throws {
+        let (server, client) = try await start(SSHTestExecHandler { _ in .noStatus })
+        defer { Task { await client.close(); await server.stop() } }
+        let handle = try await client.openExec("x")
+        _ = try await collect(handle.output)
+        let reported = await handle.exitStatusReported()
+        XCTAssertNil(reported)
+    }
+
     func testExecuteCommandConveniences() async throws {
         let (server, client) = try await start(.routes([
             "ok": .scripted(stdout: "fine", stderr: "noise"),
