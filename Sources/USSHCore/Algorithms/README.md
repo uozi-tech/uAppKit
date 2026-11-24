@@ -54,12 +54,12 @@ RFC 6668 要 64 字节的 MAC 密钥。NIOSSH 0.15.2 原本推导会话密钥时
   `package init(algorithm:readingBodyFrom:)` / `writeBody(to:)`。
 - `SSHRSAPublicKey.isValidSignature(_:for:algorithm:)`：`algorithm` 是**调用方期望的**算法；签名里的算法不同直接判假
   （防降级到 SHA-1）。签名比模数短时左侧补零（RFC 8332 §3 的宽松规则），比模数长判假。
-- `SSHRSAPrivateKey`：`init(components:)`（PKCS#1 九项 / OpenSSH 私钥段的 n e d iqmp p q / 今天 USSHKit 的
+- `SSHRSAPrivateKey`：`init(components:)`（PKCS#1 九项 / OpenSSH 私钥段的 n e d iqmp p q / USSHKit 导入时给的
   n e d p q，缺的 CRT 值用 BigInt 算）、`init(derRepresentation:)`、`init(pemRepresentation:)`、
   `init(generatingModulusBits:)`（≥ 2048）。`signature(for:algorithm:)` 输出恒为模数长度。
   分量一律拼成 PKCS#1 DER 交给 `_RSA.Signing.PrivateKey(unsafeDERRepresentation:)`（swift-crypto 按分量构造的入口
   要求 ≥ 2048 位），BoringSSL 解析时做 `RSA_check_key`，分量不一致会被拒绝。
-  这一套可以替掉 USSHKit 的 `RSASHA512Signer` / `RSAKeyComponents` 路径和 Citadel 的 `Insecure.RSA`。
+  USSHKit 的私钥导入（PEM 与 OpenSSH 容器）就把分量交给它，用户认证走 `SSHAuthenticationMethod.rsaPrivateKey`。
 
 ### 接到 NIOSSH 密钥扩展接口时要调的
 
