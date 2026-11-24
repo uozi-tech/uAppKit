@@ -53,10 +53,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## Citadel
+## bcrypt_pbkdf（OpenBSD）
 
-`Sources/Citadel`、`Sources/CCitadelBcrypt` 取自 [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) 0.12.1，带本仓库的补丁（`ThirdParty/Citadel/`）。
-`Sources/CCitadelBcrypt` 里的 bcrypt / Blowfish 实现来自 OpenBSD，各文件头部保留了原许可声明。
+`Sources/CBcryptPBKDF` 是 OpenBSD 的 `bcrypt_pbkdf` 与 Blowfish（解密带口令的 OpenSSH 私钥容器用）。
+`bcrypt.c` 与 `blf.c` / `blf.h` 头部保留了原许可声明（Niels Provos、Ted Unangst 的 ISC / BSD 许可）；
+`bcrypt-kdf.c` 对应 OpenBSD 的 `bcrypt_pbkdf.c`（Ted Unangst，ISC 许可），我们拿到的副本没带文件头。
+
+这份代码是经 [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) 0.12.1（`ae8562f895de06ccb86fdb1cbb65fd99c8976e12`）
+拿到的：Citadel 把它作为 C target `CCitadelBcrypt` 随包带着，给符号加了前缀、把 SHA-512 改成由调用方注入。
+2026-11 起 Citadel 不再编进本包，这份 C 代码改名为 `CBcryptPBKDF` 由我们自己维护（符号前缀改成 `uappkit_`，
+另加一行 `#undef BCRYPT_WORDS` 消掉宏重定义的警告）。Citadel 那部分改动的许可如下。
 
 ```
 MIT License

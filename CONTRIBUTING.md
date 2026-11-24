@@ -28,5 +28,5 @@ Make sure your commit email is linked to your GitHub account.
 
 ## 开发
 
-见 [README.md](README.md)。改动包源码后跑 `swift test`；动了 `Sources/NIOSSH`、`Sources/Citadel`、
-`Sources/CCitadelBcrypt` 要写成补丁，见 [ThirdParty/README.md](ThirdParty/README.md)。
+见 [README.md](README.md)。改动包源码后跑 `swift test`；动了 `Sources/NIOSSH` 或 `Tests/NIOSSHTests`
+要写成补丁，见 [ThirdParty/README.md](ThirdParty/README.md)。

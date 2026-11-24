@@ -7,7 +7,9 @@ uTable、uTerm 与 uGit 共用的包，一个 SwiftPM 包多个产品。
 | `UDesignKit` | 设计语言 token 与 UD 组件；设置页原语 `UDSettings*`（分组卡片、行、列表行、行内提示等，来自 uTerm 的 `SettingsPrimitives`，需 macOS 15+） | macOS 14+ / iOS 18+ |
 | `UAppKitBridge` | SwiftUI ↔ AppKit 事件桥（`.onPointerDown`、带位移死区的拖拽源 `.dragSource`）；跨屏拖窗口修正（`WindowMoveBehavior`、`TitlebarDragRegion`） | macOS 14+ |
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
-| `USSHKit` | SSH 连接、隧道与 SFTP | macOS 14+ / iOS 18+ |
+| `USSHKit` | SSH 产品层：主机密钥库与策略、凭据与私钥导入、`-L` 隧道、SFTP 文件传输、面向用户的错误文案；`@_exported` 了 `USSHCore`，`import USSHKit` 即可 | macOS 14+ / iOS 18+ |
+| `USSHCore` | SSH 客户端层，架在打过补丁的 swift-nio-ssh（`NIOSSH`）上：连接、认证、跳板机、exec / PTY、TCP 转发、SFTP v3、NIOSSH 没带的算法；只有类型与错误，不带文字 | macOS 14+ / iOS 18+ |
+| `USSHTestServer` | 进程内的 SSH / SFTP 服务端，只给测试用（本包与 app 的测试宿主都用，沙盒里起不了 sshd） | macOS 14+ / iOS 18+ |
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
 | `UPaneGroups` | 「分屏里装标签」的 VSCode 编辑组（模型 + 区域视图） | 模型 macOS/iOS；视图 macOS 14+ |
 | `UControlKit` | 本机 IPC 外部 agent 通道核心（Unix socket 服务端、请求分发与门禁、开关设置）；AI 技能安装（`SkillCatalog` / `SkillInstaller` / `ClientLinkInstaller` / `SkillManagerModel` / `SkillReconciler`）；后台模式（`BackgroundServiceSettings` / `BackgroundLaunchMode` / `BackgroundWindowController` / `BackgroundLifecycleCommands`） | macOS 14+ |
@@ -28,7 +30,7 @@ uTable、uTerm 与 uGit 共用的包，一个 SwiftPM 包多个产品。
 | `Tools/xcode/embed-login-item.sh` | Run Script「Embed Background Login Item」：`LAUNCHER` |
 | `Tools/launcher/main.swift.template` | 后台登录项 launcher（沙盒 helper，不链本包） |
 | `Tools/verify-background-launcher.py` | 发版前核 launcher 签名与沙盒 |
-| `Tools/ssh-stack/sync.sh` | 由上游源码 + `ThirdParty/*/patches/` 生成 `Sources/NIOSSH`、`Sources/Citadel`、`Sources/CCitadelBcrypt`（`check` / `apply` / `finish`）；自测 `sync.test.sh`。见 `ThirdParty/README.md` |
+| `Tools/ssh-stack/sync.sh` | 由上游源码 + `ThirdParty/*/patches/` 生成 `Sources/NIOSSH` 与 `Tests/NIOSSHTests`（`check` / `apply` / `finish`）；自测 `sync.test.sh`。见 `ThirdParty/README.md` |
 
 vendor 规则：app 把模板拷到自己仓库（build phase 脚本放 `scripts/build-phases/`），pbxproj 的
 shellScript 只调它；改模板先改这里、再拷回各 app，不在 app 里分叉。
@@ -122,9 +124,10 @@ package 'X' is required using a stable-version but
 'X' depends on an unstable-version package 'Y'
 ```
 
-`USSHKit` 迁进来时正是撞上这条：它依赖打过补丁的 Citadel 和 swift-nio-ssh。现在的
-解法是把这两个上游的源码作为本包的 target（`Citadel` / `CCitadelBcrypt` / `NIOSSH`）
-编进来，补丁存成 `.patch` 文件、由 `Tools/ssh-stack/sync.sh` 重放，不再维护 fork 仓库。
+`USSHKit` 迁进来时正是撞上这条：它依赖打过补丁的 swift-nio-ssh（当时还有 Citadel）。现在的
+解法是把上游源码作为本包的 target（`NIOSSH`）编进来，补丁存成 `.patch` 文件、由
+`Tools/ssh-stack/sync.sh` 重放，不维护 fork 仓库。客户端层 `USSHCore` 是我们自己写的，Citadel 已经删掉
+（app 的迁移见 [`docs/ssh-stack-migration.md`](docs/ssh-stack-migration.md)）。
 来源、补丁清单与升级步骤见 [`ThirdParty/README.md`](ThirdParty/README.md)。
 
 往本包加依赖时记住这条约束——一条 path 依赖就会让两个 app 都解析失败。
@@ -135,7 +138,8 @@ package 'X' is required using a stable-version but
 
 ## 许可证
 
-[AGPL-3.0](LICENSE)。编进本包的第三方源码各自保留原许可证（Citadel：MIT；swift-nio-ssh：Apache-2.0；
-bcrypt：OpenBSD 的 BSD 许可；Lucide / Feather 图标：ISC / MIT），见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
+[AGPL-3.0](LICENSE)。编进本包的第三方源码各自保留原许可证（swift-nio-ssh：Apache-2.0；
+bcrypt_pbkdf：OpenBSD 的 ISC / BSD 许可，经 Citadel 取得的那部分改动为 MIT；Lucide / Feather 图标：ISC / MIT），
+见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)
 与 [`ThirdParty/`](ThirdParty/)。
 

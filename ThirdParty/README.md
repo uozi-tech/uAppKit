@@ -1,12 +1,11 @@
 # ThirdParty：编进本包的上游源码
 
-USSHKit 依赖的 SSH 栈带着补丁，没法作为普通依赖引用（SwiftPM 没有「解析时打补丁」的机制，
+SSH 栈最底下的 swift-nio-ssh 带着补丁，没法作为普通依赖引用（SwiftPM 没有「解析时打补丁」的机制，
 本包又按 tag 发布、不能带 path 依赖）。所以上游源码直接作为本包的 target 编进来：
 
 | target | 上游 | 基线 | 许可证 | 补丁 |
 |---|---|---|---|---|
 | `NIOSSH`（及测试 `NIOSSHTests`） | [apple/swift-nio-ssh](https://github.com/apple/swift-nio-ssh) | `0.15.2`（`e8de09a2`） | Apache-2.0 | 5 个，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md) |
-| `Citadel`、`CCitadelBcrypt` | [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) | `0.12.1`（`ae8562f8`） | MIT（bcrypt 部分为 OpenBSD 的 BSD 许可） | 1 个，见 [Citadel/PATCHES.md](Citadel/PATCHES.md) |
 
 每个组件一个目录：`UPSTREAM`（来源与基线）、`patches/`（按序重放的补丁，`git format-patch` 格式）、
 `PATCHES.md`（每个补丁为什么存在、什么时候能去掉）、上游的 `LICENSE`。
@@ -15,18 +14,28 @@ USSHKit 依赖的 SSH 栈带着补丁，没法作为普通依赖引用（SwiftPM
 之后 Apple 的加固（超长 mpint、认证次数上限、缓冲上限、最大包长、`readVersion` 崩溃等）全都没有；而我们真正需要
 fork 的只有「自定义密钥 / 签名 / 密钥交换」的注册接口。现在这两个接口在 Apple 0.15.2 上作为补丁 0003 / 0004
 重做（公开 API 见 [swift-nio-ssh/EXTENSION-API.md](swift-nio-ssh/EXTENSION-API.md)），RSA、DH 等算法在
-USSHCore 里实现，不进 NIOSSH。Citadel 0.12.1 依赖那个 fork 的 API，在 Apple 版上编不过，重写期间停编、之后删除。
+USSHCore 里实现，不进 NIOSSH。
+
+客户端层原先是 [orlandos-nl/Citadel](https://github.com/orlandos-nl/Citadel) 0.12.1（同样编进本包、带一个补丁）。
+它依赖那个 fork 的 API，在 Apple 版上编不过；而且上游 2026-04 之后没有提交，我们为它的设计绕了很多路
+（登录超时写死、`withPTY` 只能挂着闭包、断开回调只能挂一个、exec 取消不了、`SFTPFile` 不是 Sendable）。
+2026-11 换成我们自己的 `USSHCore`，Citadel 连同它的补丁、`Citadel` product 一起删掉了，app 的迁移见
+[`docs/ssh-stack-migration.md`](../docs/ssh-stack-migration.md)。
+
+**不在这里的**：`Sources/CBcryptPBKDF` 是 OpenBSD 的 `bcrypt_pbkdf`（解密带口令的 OpenSSH 私钥用），当年随 Citadel
+一起取来（Citadel 里叫 `CCitadelBcrypt`）。它没有要跟的上游，改名后作为我们自己的普通 target 维护，可以直接改，
+不走 `sync.sh`；来源与许可见仓库根目录的 `THIRD_PARTY_NOTICES.md`。
 
 NIOSSH 连同上游自己的测试一起取（`UPSTREAM` 的 `PATHS` 有两项），编成测试 target `NIOSSHTests`：升级时它是回归网，
 补丁的回归测试也写在那里。
 
 ## 规矩
 
-- **`Sources/NIOSSH`、`Tests/NIOSSHTests`、`Sources/Citadel`、`Sources/CCitadelBcrypt` 是生成出来的，别直接改。**
+- **`Sources/NIOSSH`、`Tests/NIOSSHTests` 是生成出来的，别直接改。**
   改动写成补丁放进 `patches/`，再跑 `apply`。`check` 会拦下「直接改了 Sources/」。
-- 模块名保持上游原名（`import Citadel` / `import NIOSSH` 不用改），代价是同一个构建图里不能再出现
-  上游的 Citadel / swift-nio-ssh 包，否则模块重名编不过。依赖本包的 app 不要再单独引用它们；
-  app 要直接链 Citadel 时用本包导出的 `Citadel` product。
+- 模块名保持上游原名（`import NIOSSH` 不用改），代价是同一个构建图里不能再出现上游的 swift-nio-ssh 包，
+  否则模块重名编不过。依赖本包的 app 不要再单独引用它（也别再引用上游的 Citadel：它依赖上游的 swift-nio-ssh）；
+  app 只要 `import USSHKit`，`USSHCore` 被它转出去了。
 - Apache-2.0 第 4 条：NIOSSH 被改过的文件头部带一行修改声明（swift-nio-ssh 的补丁 0005），LICENSE.txt 随包保留。
 
 ## 命令
@@ -38,7 +47,7 @@ Tools/ssh-stack/sync.sh finish <组件>    # apply 冲突、手工解决后收�
 bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 ```
 
-组件名就是这里的目录名：`swift-nio-ssh`、`Citadel`。设了 `SSH_STACK_CACHE=<目录>` 时从
+组件名就是这里的目录名，现在只有 `swift-nio-ssh`。设了 `SSH_STACK_CACHE=<目录>` 时从
 `<目录>/<组件>` 的现成 clone 取上游，不联网。
 
 ## 加一个补丁
@@ -65,7 +74,9 @@ bash Tools/ssh-stack/sync.test.sh        # 脚本自测（离线）
 
 2026-06 起这两份源码在 uTerm 的 `vendor/` 里，2026-09 为了让 USSHKit 搬进按 tag 发布的 uAppKit，
 拆成了两个独立的 fork 仓库（Citadel 1.0.2、swift-nio-ssh 1.0.0）。
-2026-11 改成现在这样：两个 fork 仓库不再需要，manifest 上的补丁（改依赖地址、裁掉示例与测试、放宽版本区间、
-导出 `CCitadelBcrypt`）随之全部消失，只剩源码补丁。`Sources/` 与那两个 fork 最后一版的源码逐字相同。
+2026-11 改成「上游源码 + 补丁重放」：两个 fork 仓库不再需要，manifest 上的补丁（改依赖地址、裁掉示例与测试、放宽版本区间、
+导出 `CCitadelBcrypt`）随之全部消失，只剩源码补丁。
 2026-11-24 起 NIOSSH 的基线从 Wellz26 fork 0.3.6 换成 apple/swift-nio-ssh 0.15.2（连同它的测试），旧的 4 个补丁
 在新基线上重做或去掉，另加两个扩展接口，见 [swift-nio-ssh/PATCHES.md](swift-nio-ssh/PATCHES.md)。
+2026-11-24 起客户端层换成 USSHCore，Citadel（`ThirdParty/Citadel/` 与它唯一的补丁「login timeout 可配置、登录失败关 channel」）
+删除：USSHCore 把握手时限做成配置项、等主机密钥确认的时间单独计，失败时关通道，那个补丁要解决的问题不存在了。
