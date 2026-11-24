@@ -322,9 +322,29 @@ extension SSHServerConfiguration {
 - 解析是防御式的：扩展个数超过包能装下的上限就当格式错误；未知扩展忽略；`server-sig-algs` 按逗号分隔取出，
   原样（包括大小写与顺序）交出。
 - 服务端对客户端的 `ext-info-c` 只是容忍，不宣告 `ext-info-s`，也不读客户端的 EXT_INFO。
-- 想用新参数的委托两个方法都要实现：两参数的那个通常写成
-  `nextAuthenticationType(availableMethods:serverSignatureAlgorithms: nil, nextChallengePromise:)` 的转调。
+- 想用新参数的委托两参数的那个也要实现（它仍是必须的要求），通常写成转调新方法、传 nil / false。
   只实现两参数版本的老委托不用改。
+
+### partial success（补丁 0014）
+
+```swift
+public protocol NIOSSHClientUserAuthenticationDelegate {
+    // …上面两个之外再加一个。NIOSSH 现在调的是这一个；默认实现丢掉 partialSuccess，转调三参数版本。
+    func nextAuthenticationType(
+        availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+        serverSignatureAlgorithms: [String]?,
+        partialSuccess: Bool,
+        nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>
+    )
+}
+```
+
+- `partialSuccess` 为 true：上一次提交的认证（RFC 4252 §5.1）**已被接受**，但服务端还要求 `availableMethods` 里的一种。
+  第一次调用（SERVICE_ACCEPT 之后）与普通拒绝之后为 false。
+- RSA：`rsa-sha2-512` 换来 partial success 就说明这把钥匙用这个算法通过了——记下算法，别再用别的算法递同一把钥匙，
+  直接给下一种方式（比如密码）。
+- 委托在任何时候以 nil 完成 promise，都以 `noFurtherAuthenticationOffers` 结束（补丁 0011），partial success 之后也一样。
+- 实现三个方法的委托写法同上：两参数、三参数的那两个转调四参数的，补上默认值。
 
 ### RSA 实现怎么用
 
