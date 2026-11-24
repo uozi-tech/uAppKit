@@ -86,6 +86,8 @@ extension SSHClient {
     ) async throws -> SSHRemotePortForward {
         let sshHandler = self.sshHandler
         let lifecycle = self.lifecycle
+        // 先登记再发请求：服务器回应之前就可能有连接进来（port 为 0 时先按「这个地址的任意端口」登记）。
+        remoteForwards.register(host: host, port: port, requestedPort: port, initializer: initializer)
         let response: EventLoopFuture<GlobalRequest.TCPForwardingResponse?> = eventLoop.flatSubmit {
             if let reason = lifecycle.disconnectReason {
                 return self.eventLoop.makeFailedFuture(SSHChannelError.connectionClosed(reason))
@@ -99,14 +101,17 @@ extension SSHClient {
             let result = try await response.get()
             boundPort = (port == 0 ? result?.boundPort : nil) ?? port
         } catch let error as SSHChannelError {
+            remoteForwards.unregister(host: host, port: port)
             throw error
         } catch {
+            remoteForwards.unregister(host: host, port: port)
             if let reason = lifecycle.disconnectReason { throw SSHChannelError.connectionClosed(reason) }
             throw SSHChannelError.globalRequestRejected(.tcpipForward(host: host, port: port))
         }
-        let forward = SSHRemotePortForward(client: self, host: host, requestedPort: port, boundPort: boundPort)
-        remoteForwards.register(host: host, port: boundPort, requestedPort: port, initializer: initializer)
-        return forward
+        if boundPort != port {
+            remoteForwards.rebind(host: host, from: port, to: boundPort)
+        }
+        return SSHRemotePortForward(client: self, host: host, requestedPort: port, boundPort: boundPort)
     }
 
     /// `startRemotePortForward` 的作用域写法：每个入站连接包成 `NIOAsyncChannel`（激活前、在它的 EventLoop 上），
@@ -282,6 +287,15 @@ final class SSHRemoteForwardRegistry: Sendable {
         _ = entries.withLockedValue { $0.removeValue(forKey: Key(host: host, port: port)) }
     }
 
+    /// 服务器回了实际端口：把「任意端口」的登记改到实际端口上。
+    func rebind(host: String, from oldPort: Int, to newPort: Int) {
+        entries.withLockedValue { entries in
+            if let entry = entries.removeValue(forKey: Key(host: host, port: oldPort)) {
+                entries[Key(host: host, port: newPort)] = entry
+            }
+        }
+    }
+
     /// `NIOSSHHandler` 的入站通道回调（在 EventLoop 上）。只接 forwarded-tcpip，其余（服务器发起的
     /// session、direct-tcpip 等）一律拒绝。
     func initializeInbound(_ channel: any Channel, type: SSHChannelType) -> EventLoopFuture<Void> {
@@ -290,8 +304,10 @@ final class SSHRemoteForwardRegistry: Sendable {
         }
         let entry = entries.withLockedValue { entries -> Entry? in
             if let exact = entries[Key(host: info.listeningHost, port: info.listeningPort)] { return exact }
-            // 有的服务器回报的监听地址和请求时写的不完全一样（"" / "0.0.0.0" / "localhost"），按端口兜底。
-            return entries.first { $0.key.port == info.listeningPort }?.value
+            // 有的服务器回报的监听地址和请求时写的不完全一样（"" / "0.0.0.0" / "localhost"），按端口兜底；
+            // 再不行就是 port 为 0、回应还没到的那一条。
+            if let byPort = entries.first(where: { $0.key.port == info.listeningPort })?.value { return byPort }
+            return entries.first { $0.key.port == 0 && $0.key.host == info.listeningHost }?.value
         }
         guard let entry else {
             return channel.eventLoop.makeFailedFuture(SSHChannelError.channelClosed)

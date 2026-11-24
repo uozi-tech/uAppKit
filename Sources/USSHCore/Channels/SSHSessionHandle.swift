@@ -121,6 +121,10 @@ public final class SSHSessionHandle: Sendable {
     }
 
     /// 发 EOF（关掉远端的标准输入）。之后不能再写。
+    ///
+    /// 已知问题：NIOSSH 0.15.2 的 `ChildChannelStateMachine.sendChannelEOF` 把「对端已经发过 EOF 之后
+    /// 本端再发 EOF」判成乱序，当协议错误拆掉通道（还没发出去的数据随之丢弃）。对端先 EOF、本端后 EOF
+    /// 的情形要等 NIOSSH 那条线的补丁。
     public func sendEOF() async throws {
         do {
             try await channel.close(mode: .output)
@@ -142,25 +146,36 @@ public final class SSHSessionHandle: Sendable {
         try await sendRequest(SSHChannelRequestEvent.SignalRequest(signal: name), kind: .signal(name), wantReply: false)
     }
 
-    /// 等通道关闭，返回远端进程的结束方式。
+    /// 等通道关闭，返回远端进程的结束方式。任务被取消时不再等，按当时已知的返回（多半是 `.unknown`）。
     public func exitStatus() async -> SSHExitStatus {
-        await waitForClose()
+        await waitForClose(timeout: nil)
         let requests = self.requests
         return (try? await channel.eventLoop.submit { requests.value.exitStatus ?? .unknown }.get()) ?? .unknown
     }
 
-    /// 关闭通道。幂等；返回时通道已关闭。
-    public func close() async {
+    /// 关闭通道。幂等。正常情况下返回时通道已关闭（对端回了 CHANNEL_CLOSE）；传输半死、对端迟迟不回时
+    /// 最多等 `gracePeriod` 就返回，通道留给连接断开时一起收拾。
+    public func close(gracePeriod: Duration = .seconds(5)) async {
         channel.close(promise: nil)
-        await waitForClose()
+        await waitForClose(timeout: gracePeriod)
     }
 
     /// 通道是否还开着。
     public var isActive: Bool { channel.isActive }
 
-    private func waitForClose() async {
-        // 出错拆除的子通道 closeFuture 是失败的，成败都算关了。
-        _ = try? await channel.closeFuture.get()
+    private func waitForClose(timeout: Duration?) async {
+        // 出错拆除的子通道 closeFuture 是失败的，成败都算关了。`get()` 不响应取消，用可取消的版本。
+        let closed = channel.closeFuture
+        guard let timeout else {
+            _ = try? await closed.getCancellable(lateValue: { _ in })
+            return
+        }
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { _ = try? await closed.getCancellable(lateValue: { _ in }) }
+            group.addTask { try? await Task.sleep(for: timeout) }
+            await group.next()
+            group.cancelAll()
+        }
     }
 
     func sendRequest(_ event: any Sendable, kind: SSHChannelRequestKind, wantReply: Bool) async throws {

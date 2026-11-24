@@ -3,13 +3,39 @@ import NIOSSH
 
 /// 子通道上的 `SSHChannelData` ⇄ `ByteBuffer`：只有通道数据（type 0）往后传，扩展数据（stderr 等）丢掉。
 /// direct-tcpip、forwarded-tcpip、subsystem、跳板机内层连接都用它，之后的 handler 只看到字节流。
+///
+/// 另外绕开 NIOSSH 0.15.2 的一个缺陷：对端已经发过 EOF 之后本端再 `close(mode: .output)`，
+/// `ChildChannelStateMachine.sendChannelEOF` 会误判为乱序、把通道当协议错误拆掉（closeFuture 失败，
+/// 包在 `NIOAsyncChannel` 里时直接 fatalError）。这时两个方向都已结束，按 RFC 4254 §5.3 直接关通道
+/// 就是同样的结果，所以这里等先前的写入都交出去之后改发 CHANNEL_CLOSE。NIOSSH 修好之后可以去掉。
 public final class SSHChannelDataCodec: ChannelDuplexHandler, RemovableChannelHandler {
     public typealias InboundIn = SSHChannelData
     public typealias InboundOut = ByteBuffer
     public typealias OutboundIn = ByteBuffer
     public typealias OutboundOut = SSHChannelData
 
+    private var peerSentEOF = false
+    private var lastWrite: EventLoopFuture<Void>?
+
     public init() {}
+
+    public func userInboundEventTriggered(context: ChannelHandlerContext, event: Any) {
+        if case ChannelEvent.inputClosed = event { peerSentEOF = true }
+        context.fireUserInboundEventTriggered(event)
+    }
+
+    public func close(context: ChannelHandlerContext, mode: CloseMode, promise: EventLoopPromise<Void>?) {
+        guard mode == .output, peerSentEOF else {
+            context.close(mode: mode, promise: promise)
+            return
+        }
+        if let lastWrite {
+            // 已完成的 future 会立刻（同步）回调。
+            lastWrite.assumeIsolated().whenComplete { _ in context.close(mode: .all, promise: promise) }
+        } else {
+            context.close(mode: .all, promise: promise)
+        }
+    }
 
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let message = unwrapInboundIn(data)
@@ -25,7 +51,9 @@ public final class SSHChannelDataCodec: ChannelDuplexHandler, RemovableChannelHa
 
     public func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
         let buffer = unwrapOutboundIn(data)
-        context.write(wrapOutboundOut(SSHChannelData(type: .channel, data: .byteBuffer(buffer))), promise: promise)
+        let written = promise ?? context.eventLoop.makePromise()
+        lastWrite = written.futureResult
+        context.write(wrapOutboundOut(SSHChannelData(type: .channel, data: .byteBuffer(buffer))), promise: written)
     }
 }
 
@@ -231,6 +259,9 @@ final class SSHSessionOutputHandler: ChannelDuplexHandler {
     fileprivate func consumerGone() {
         // 序列正常结束（我们 finish 的）之后也会走到这里，那时通道已经关了。
         guard !finished, let context else { return }
+        // 消费者跑掉（任务取消、提前退出、句柄释放）= 不要这个进程了：先 signal TERM 再关通道，
+        // 理由见 `SSHSessionHandle.terminate`。两步在同一个 tick 里按顺序写出。
+        context.triggerUserOutboundEvent(SSHChannelRequestEvent.SignalRequest(signal: "TERM"), promise: nil)
         context.close(promise: nil)
     }
 }

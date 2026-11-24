@@ -150,7 +150,7 @@ extension SSHClient {
 
     private struct SessionParts: Sendable {
         var requests: NIOLoopBound<SSHChannelRequestHandler>
-        var output: SSHChannelOutput?
+        var output: SSHChannelOutput
     }
 
     func openSession(environment: [String: String], pty: SSHPseudoTerminal?,
@@ -163,13 +163,14 @@ extension SSHClient {
                 let requests = SSHChannelRequestHandler(eventLoop: child.eventLoop)
                 let sync = child.pipeline.syncOperations
                 try sync.addHandler(requests)
-                var output: SSHChannelOutput?
+                // NIOLoopBound 只能在 EventLoop 上建，输出序列因此总在这里建；subsystem 的句柄用不到它
+                // （数据走 pipeline），那个 handler 不进 pipeline，序列始终是空的。
+                let (handler, producer) = SSHSessionOutputHandler.make(eventLoop: child.eventLoop)
+                let output = SSHChannelOutput(producer: producer)
                 if isSubsystem {
                     try sync.addHandler(SSHChannelDataCodec())
                 } else {
-                    let (handler, producer) = SSHSessionOutputHandler.make(eventLoop: child.eventLoop)
                     try sync.addHandler(handler)
-                    output = SSHChannelOutput(producer: producer)
                 }
                 let bound = NIOLoopBound(requests, eventLoop: child.eventLoop)
                 parts.withLockedValue { $0 = SessionParts(requests: bound, output: output) }
@@ -233,16 +234,7 @@ extension SSHClient {
             try Task.checkCancellation()
             throw mapChannelError(error)
         }
-        let output = session.output ?? SSHChannelOutput.empty(on: channel.eventLoop)
-        return SSHSessionHandle(channel: channel, output: output, requests: requests, lifecycle: lifecycle)
-    }
-}
-
-extension SSHChannelOutput {
-    /// 没有输出的序列（subsystem 通道的句柄用不到输出，数据走 pipeline）。
-    static func empty(on eventLoop: any EventLoop) -> SSHChannelOutput {
-        let (_, producer) = SSHSessionOutputHandler.make(eventLoop: eventLoop)
-        return SSHChannelOutput(producer: producer)
+        return SSHSessionHandle(channel: channel, output: session.output, requests: requests, lifecycle: lifecycle)
     }
 }
 

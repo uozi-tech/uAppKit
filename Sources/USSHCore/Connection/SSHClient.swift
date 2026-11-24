@@ -140,20 +140,18 @@ public final class SSHClient: Sendable {
         lifecycle.markLocalClose()
         transport.close(promise: nil)
         let lifecycle = self.lifecycle
-        let finished = await withTaskGroup(of: Bool.self) { group in
+        await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 _ = await lifecycle.waitForDisconnect()
-                return true
             }
             group.addTask {
+                // 等待断开不响应取消，所以到点（或本任务被取消）时由这里收尾，等待那一头随之返回。
                 try? await Task.sleep(for: gracePeriod)
-                return false
+                lifecycle.finish(.localClose)
             }
-            let first = await group.next() ?? false
+            await group.next()
             group.cancelAll()
-            return first
         }
-        if !finished { lifecycle.finish(.localClose) }
     }
 
     /// 确认对端还活着：开一个 session 通道再立刻关掉。对端的任何回应（包括拒绝开通道）都算活着。
