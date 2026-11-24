@@ -33,7 +33,7 @@ nonisolated enum OpenSSHRSADecoder {
                 throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: ModuleBundle.bundle))
             }
             if p.isEmpty || q.isEmpty {
-                guard let recovered = RSAKeyMaterial.recoverPrimes(
+                guard let recovered = try RSAKeyMaterial.recoverPrimes(
                     modulus: n, publicExponent: e, privateExponent: d) else {
                     throw PrivateKeyImportError.malformedKey(reason: String(localized: "OpenSSH RSA：分量为空", bundle: ModuleBundle.bundle))
                 }

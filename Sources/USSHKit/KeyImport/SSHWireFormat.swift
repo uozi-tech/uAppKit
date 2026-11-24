@@ -1,3 +1,5 @@
+import USSHCore
+
 /// SSH 线格式写入器。
 nonisolated struct SSHWireWriter {
     private(set) var bytes: [UInt8] = []
@@ -47,9 +49,17 @@ nonisolated struct SSHWireReader {
              | (UInt32(bytes[offset + 2]) << 8) | UInt32(bytes[offset + 3])
     }
 
+    /// 一个 `string` 最长这么多字节。私钥文件里最大的字段是 OpenSSH 容器的私钥段：8192 位 RSA 的
+    /// n / e / d / iqmp / p / q 加注释与填充约 4.3 KiB，留足注释的余地取 64 KiB。超过的一律当结构损坏。
+    static let maximumStringLength = 64 * 1024
+
+    /// 一个 `mpint` 的幅值最长这么多字节：8192 位（`SSHRSAPublicKey.maximumModulusBits`）的模数。
+    /// 私钥文件里的任何整数（n、d、素因子、ECDSA 标量）都不会更长；更长的在做大数运算之前就拒绝。
+    static let maximumMPIntLength = SSHRSAPublicKey.maximumModulusBits / 8
+
     mutating func readString() throws -> [UInt8] {
         let length = Int(try readUInt32())
-        guard offset + length <= bytes.count else {
+        guard length <= Self.maximumStringLength, offset + length <= bytes.count else {
             throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：读 string 越界", bundle: ModuleBundle.bundle))
         }
         defer { offset += length }
@@ -60,6 +70,9 @@ nonisolated struct SSHWireReader {
     mutating func readMPInt() throws -> [UInt8] {
         var m = try readString()
         while m.count > 1, m.first == 0x00 { m.removeFirst() }
+        guard m.count <= Self.maximumMPIntLength else {
+            throw PrivateKeyImportError.malformedKey(reason: String(localized: "SSH 线格式：整数过长", bundle: ModuleBundle.bundle))
+        }
         return m
     }
 }

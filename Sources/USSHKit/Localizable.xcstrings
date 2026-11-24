@@ -1190,6 +1190,34 @@
         }
       }
     },
+    "RSA 私钥分量超出范围或互相不一致" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA private key components are out of range or inconsistent"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 秘密鍵の要素が範囲外か、互いに矛盾しています"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 개인 키 구성 요소가 범위를 벗어나거나 서로 일치하지 않음"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RSA 私密金鑰分量超出範圍或互相不一致"
+          }
+        }
+      }
+    },
     "RSA 私钥构造失败：%@" : {
       "localizations" : {
         "en" : {
@@ -1578,6 +1606,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SSH 本機轉送連接埠綁定失敗：%@"
+          }
+        }
+      }
+    },
+    "SSH 线格式：整数过长" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH wire format: integer too long"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH ワイヤ形式：整数が長すぎます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 와이어 형식: 정수가 너무 김"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SSH 線路格式：整數過長"
           }
         }
       }
