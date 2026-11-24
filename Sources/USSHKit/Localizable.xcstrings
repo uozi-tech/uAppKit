@@ -798,6 +798,34 @@
         }
       }
     },
+    "OpenSSH：公钥段与私钥段不是同一把钥匙" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: the public section and the private section are not the same key"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：公開鍵セクションと秘密鍵セクションが同じ鍵ではありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH: 공개 키 섹션과 개인 키 섹션이 같은 키가 아님"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenSSH：公開金鑰區段與私密金鑰區段不是同一把金鑰"
+          }
+        }
+      }
+    },
     "OpenSSH：密钥数量非 1" : {
       "localizations" : {
         "en" : {
