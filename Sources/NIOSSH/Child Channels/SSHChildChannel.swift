@@ -105,6 +105,10 @@ final class SSHChildChannel {
 
     private var didClose = false
 
+    /// The error that tore this channel down, if any. Kept so that an initializer completing after the teardown
+    /// can fail its promise with the real reason: `closeFuture` never fails, so it cannot carry it.
+    private var closeError: Error?
+
     private var type: SSHChannelType?
 
     /// A promise from the user that will be fired when the channel goes active.
@@ -512,8 +516,9 @@ extension SSHChildChannel: Channel, ChannelCore {
             self.processOutboundMessage(.channelOpen(message), promise: nil)
             self.writePendingToMultiplexer()
         } else {
-            // Already closed, just fail this promise.
-            self.closeFuture.cascadeFailure(to: userPromise)
+            // Already closed, just fail this promise. Do not cascade from `closeFuture`: it never fails, so the
+            // promise would stay pending forever.
+            userPromise?.fail(self.closeError ?? ChannelError.ioOnClosedChannel)
         }
     }
 
@@ -592,6 +597,7 @@ extension SSHChildChannel: Channel, ChannelCore {
             return
         }
         self.didClose = true
+        self.closeError = error
 
         self.deliverPendingReads()
         self.failPendingWrites(error: error)
@@ -616,7 +622,10 @@ extension SSHChildChannel: Channel, ChannelCore {
 
         self.eventLoop.execute {
             self.removeHandlers(pipeline: self.pipeline)
-            self.closePromise.fail(error)
+            // `Channel.closeFuture` must never fail (NIOCore contract; `NIOAsyncChannel.executeThenClose` asserts
+            // on it). The error has already been reported through `fireErrorCaught`, the failed pending writes and
+            // the pending close / activation promises above.
+            self.closePromise.succeed(())
             self.multiplexer.childChannelErrored(
                 channelID: self.state.localChannelIdentifier,
                 expectClose: !self.state.isClosed

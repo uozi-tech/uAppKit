@@ -603,14 +603,15 @@ final class ChildChannelMultiplexerTests: XCTestCase {
             XCTFail("Did not create child channel")
             return
         }
-        let childCloseError = NIOLoopBoundBox<Error?>(nil, eventLoop: channel.eventLoop)
+        // closeFuture never fails: it only reports that the channel closed.
+        let childClosed = NIOLoopBoundBox(false, eventLoop: channel.eventLoop)
 
-        channel.closeFuture.whenFailure { error in childCloseError.value = error }
+        channel.closeFuture.whenSuccess { childClosed.value = true }
 
         // Channel doesn't go active yet.
         XCTAssertFalse(channel.isActive)
         XCTAssertTrue(channel.isWritable)
-        XCTAssertNil(childCloseError.value)
+        XCTAssertFalse(childClosed.value)
         XCTAssertEqual(harness.flushedMessages.count, 0)
 
         promise.fail(MultiplexerTestError.rejected)
@@ -619,7 +620,7 @@ final class ChildChannelMultiplexerTests: XCTestCase {
         harness.eventLoop.run()
         XCTAssertFalse(channel.isActive)
         XCTAssertTrue(channel.isWritable)
-        XCTAssertEqual(childCloseError.value as? MultiplexerTestError, .rejected)
+        XCTAssertTrue(childClosed.value)
         XCTAssertEqual(harness.flushedMessages.count, 0)
     }
 
@@ -1816,8 +1817,51 @@ final class ChildChannelMultiplexerTests: XCTestCase {
         XCTAssertEqual((childPromiseError.value as? NIOSSHError?)??.type, .tcpShutdown)
 
         harness.eventLoop.run()
-        XCTAssertThrowsError(try channel.closeFuture.wait()) { error in
-            XCTAssertEqual((error as? NIOSSHError)?.type, .tcpShutdown)
+        // closeFuture never fails (the NIOCore contract): the error went to the promise above.
+        XCTAssertNoThrow(try channel.closeFuture.wait())
+    }
+
+    func testCloseFutureSucceedsWhenActiveChannelIsTornDownByTCPClose() throws {
+        let errorLogger = ErrorLoggingHandler()
+        let harness = self.harnessForbiddingInboundChannels()
+        defer {
+            harness.finish()
+        }
+
+        var childChannel: Channel?
+        harness.multiplexer.createChildChannel(channelType: .session) { channel, _ in
+            childChannel = channel
+            return channel.eventLoop.makeCompletedFuture {
+                try channel.pipeline.syncOperations.addHandler(errorLogger)
+            }
+        }
+        guard let channel = childChannel else {
+            XCTFail("Did not create child channel")
+            return
+        }
+        let channelID = self.assertChannelOpen(harness.flushedMessages.first)
+        XCTAssertNoThrow(
+            try harness.multiplexer.receiveMessage(self.openConfirmation(originalChannelID: channelID!, peerChannelID: 1))
+        )
+        XCTAssertTrue(channel.isActive)
+
+        let closeResult = NIOLoopBoundBox<Result<Void, Error>?>(nil, eventLoop: harness.eventLoop)
+        channel.closeFuture.whenComplete { closeResult.value = $0 }
+
+        // The SSH transport goes away underneath an open channel (network drop, peer reset).
+        harness.multiplexer.parentChannelInactive()
+        harness.eventLoop.run()
+
+        XCTAssertFalse(channel.isActive)
+        XCTAssertEqual(errorLogger.errors.count, 1)
+        XCTAssertEqual((errorLogger.errors.first as? NIOSSHError)?.type, .tcpShutdown)
+        switch closeResult.value {
+        case .some(.success):
+            ()
+        case .some(.failure(let error)):
+            XCTFail("closeFuture must never fail, failed with \(error)")
+        case .none:
+            XCTFail("closeFuture did not complete")
         }
     }
 
@@ -1845,7 +1889,8 @@ final class ChildChannelMultiplexerTests: XCTestCase {
         harness.eventLoop.run()
         XCTAssertNil(childPromiseError.value)
 
-        // Now complete the delay promise.
+        // Now complete the delay promise. The channel is already closed, so the promise fails at once with the
+        // error that closed it (it used to be cascaded from closeFuture, which never fails, and would then hang).
         delayPromise.succeed(())
         XCTAssertEqual((childPromiseError.value as? NIOSSHError?)??.type, .tcpShutdown)
     }
