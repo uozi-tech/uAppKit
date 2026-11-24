@@ -311,7 +311,9 @@ public actor SSHFileTransferSession {
         let cleanUp = { await Self.bestEffort(within: Self.cleanupDeadline) { try? await sftp.remove(tempPath) } }
         // 目标已经在的话，新文件要继承它的权限（以及尽量继承属主 / 属组）：改名是换一个新文件上去，
         // 不继承的话 0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不在就照服务端默认。
-        let destination = try? await sftp.stat(remotePath)
+        // 用 lstat：替换的是路径上的东西本身，目标是符号链接时换掉的是链接，不能把它指向的文件的权限 / 属主
+        // 搬到新文件上（下面判断「目标在不在」也用 lstat）。符号链接不是普通文件，于是不继承任何属性。
+        let destination = try? await sftp.lstat(remotePath)
         do {
             try await uploadStreaming(localURL, to: tempPath, matching: destination?.isRegularFile == true ? destination : nil)
         } catch {
@@ -374,23 +376,37 @@ public actor SSHFileTransferSession {
         }
     }
 
-    /// 让临时文件的权限位（含 setuid / setgid / sticky）与属主 / 属组跟目标一样。尽力而为：服务端拒绝
-    /// （`PERMISSION_DENIED`、不支持 setstat……）就算了，上传照样成功——数据比权限要紧。只改和临时文件现状
-    /// 不同的那几项（不是 root 的用户改不了属主，白发一次请求还会多一条拒绝）。
+    /// 让临时文件的属主 / 属组与权限位跟目标一样。尽力而为：服务端拒绝（`PERMISSION_DENIED`、不支持 setstat……）
+    /// 就算了，上传照样成功——数据比权限要紧。只改和临时文件现状不同的那几项（不是 root 的用户改不了属主，白发
+    /// 一次请求还会多一条拒绝）。
+    ///
+    /// 顺序与特殊位：
+    /// 1. 先换属主 / 属组（换不了属主时只换属组）。`chown` 会清掉 setuid / setgid，所以权限放在后面设；
+    /// 2. 再读一次临时文件的实际属主 / 属组；
+    /// 3. 设权限位：setuid 与 sticky 只在属主确实与目标相同时才带过去，setgid 只在属组确实相同时才带过去。
+    ///    否则（换属主被拒、服务端没报属主）一律去掉——不能让上传者造出一个属于自己的 setuid / setgid 文件，
+    ///    在原文件主人或同组的人手里以上传者的身份运行。
     static func adoptAttributes(of destination: SFTPFileAttributes, on file: SFTPFile) async {
-        let current = try? await file.stat()
-        if let bits = destination.permissionBits, current?.permissionBits != bits {
-            try? await file.setAttributes(SFTPFileAttributes(permissions: bits))
-        }
-        guard let owner = destination.owner, let currentOwner = current?.owner, currentOwner != owner else { return }
-        do {
-            try await file.setAttributes(SFTPFileAttributes(owner: owner))
-        } catch {
-            // 换不了属主（不是 root）时属组往往还能换（登录用户在那个组里）。
-            if currentOwner.groupID != owner.groupID {
-                try? await file.setAttributes(SFTPFileAttributes(
-                    owner: SFTPFileOwner(userID: currentOwner.userID, groupID: owner.groupID)))
+        let before = try? await file.stat()
+        if let owner = destination.owner, let currentOwner = before?.owner, currentOwner != owner {
+            do {
+                try await file.setAttributes(SFTPFileAttributes(owner: owner))
+            } catch {
+                // 换不了属主（不是 root）时属组往往还能换（登录用户在那个组里）。
+                if currentOwner.groupID != owner.groupID {
+                    try? await file.setAttributes(SFTPFileAttributes(
+                        owner: SFTPFileOwner(userID: currentOwner.userID, groupID: owner.groupID)))
+                }
             }
+        }
+        guard var bits = destination.permissionBits else { return }
+        let after = try? await file.stat()
+        let ownerMatches = destination.owner != nil && after?.owner?.userID == destination.owner?.userID
+        let groupMatches = destination.owner != nil && after?.owner?.groupID == destination.owner?.groupID
+        if !ownerMatches { bits &= ~UInt32(0o5000) }   // setuid、sticky
+        if !groupMatches { bits &= ~UInt32(0o2000) }   // setgid
+        if after?.permissionBits != bits {
+            try? await file.setAttributes(SFTPFileAttributes(permissions: bits))
         }
     }
 
