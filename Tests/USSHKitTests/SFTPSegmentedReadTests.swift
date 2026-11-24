@@ -45,6 +45,22 @@ final class SFTPSegmentedReadTests: XCTestCase {
         return out
     }
 
+    /// stat 之后接着读的那一段回了空的数据（不是 nil）：协议错误，不能当成 EOF 把截断的文件交出去。
+    func testEmptyTrailingReadIsAnErrorNotEOF() async throws {
+        var written = 0
+        do {
+            _ = try await SSHFileTransferSession.segmentedRead(
+                expectedSize: 0, segmentBytes: 4096, maximumBytes: nil,
+                readExactly: { _, _ in XCTFail("nothing was stat'ed"); return ByteBuffer() },
+                readNext: { offset in offset == 0 ? ByteBuffer(bytes: [1, 2, 3]) : ByteBuffer() },
+                write: { written += $0.readableBytes })
+            XCTFail("an empty read was taken as EOF")
+        } catch SFTPError.invalidResponse(let detail) {
+            XCTAssertTrue(detail.contains("zero-length"), detail)
+        }
+        XCTAssertEqual(written, 3)
+    }
+
     func testReadsTheStatedSizeInSegmentsThenConfirmsEOF() async throws {
         let remote = FakeRemote(size: 10 * 1024 + 17)
         let out = try await download(remote, expectedSize: 10 * 1024 + 17)

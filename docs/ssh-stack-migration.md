@@ -150,13 +150,19 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
 - **保活**：`keepAliveInterval: .seconds(n)` 之后，认证成功每隔 n 秒发一个 `keepalive@openssh.com`；连续 3 个
   （`Configuration.keepAliveMaximumUnanswered`）没回应就关连接，断开原因 `SSHDisconnectReason.keepAliveTimeout(unansweredProbes:)`，
   判死约需 `n × 4` 秒。默认 `nil`（不发，今天的行为）。跳板机两跳各自保活。uTerm 自己的看门狗可以改用它，或继续用 `ping()`。
+  `ping()` 与 `startRemotePortForward` 只在连接确实已断或正在断时抛 `SSHChannelError.connectionClosed`；连接还在时的别的失败原样
+  抛出（以前一律说成断开，看门狗会据此去重连一条好好的连接）。
 - **隧道与 SFTP 会话**（`SSHLocalForwardingTunnel` / `SSHFileTransferSession`）：
   - `keepAliveInterval:` 给了就每一跳都保活（同上），判死约需 `n × 4` 秒；默认 nil，不发。没开保活时链路卡死（NAT 掐了、
     防火墙丢包、对端失联但 TCP 不复位）**什么都察觉不到**：在途的请求、隧道里的查询一直挂着。长期挂着的隧道建议开（uTable 用 30 秒）。
   - SSH 连接（任一跳）不是本端关的而断了（服务器关闭、传输出错、保活判死）：隧道收掉本地监听（之后连本地端口立刻被拒，
     不会再在死连接上开通道），正在转发的连接随各自的 SSH 通道结束，关掉连接，然后调一次 `onDisconnect(reason)`（收完才调）。
     `isConnected` 从此为 false、`disconnectReason` 是那个原因；隧道不会自己重连，app 要换一条新的。本端 `close()` 不回调。
-  - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。
+  - `SSHFileTransferSession.isConnected` / `disconnectReason` 同理：断了之后请求都会失败，换一个新会话。它们也看 SFTP 通道：
+    服务端的 `sftp-server` 退出（崩溃、被杀、闲置超时）而 sshd 还留着 SSH 连接时，`isConnected` 同样变成 false（通道关掉后约
+    200 ms：整条连接在断时子通道先关、原因差一拍才定，先等一下，免得把连接的断开说成只是通道关了），`disconnectReason`
+    是 `.transportError(SFTPError.connectionClosed)`（`userDescription`：「连接中断：SFTP 通道已断开」）。以前只看 SSH 连接，
+    这种会话一直显示活着、请求却都失败。
 - **算法预设**（`SSHAlgorithms`）：
   - `.standard`（**USSHKit 默认**）：NIOSSH 自带的算法排在最前（AES-GCM、curve25519 / ECDH、ed25519 / ECDSA 主机密钥），后面只补 SHA-2
     时代的：RSA 主机密钥（`rsa-sha2-512/256`）、DH group16-sha512 / group14-sha256、AES-CTR + hmac-sha2（ETM 在前）。所以以前连得上的
@@ -189,9 +195,25 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
     `legacyAlgorithmStatusKnown == false` 表示 USSHCore 没读懂服务器的 KEXINIT（嗅探器的解析与 NIOSSH 一样宽松、也跳过它之前的
     IGNORE / DEBUG，剩下的只有超过 256 KiB 之类 NIOSSH 多半也连不上的情形）：这时空的 `legacyAlgorithmsInUse` 只说明 RSA 用户认证
     没用 `ssh-rsa`，传输层**不知道**；日志里另有一条「无法确定」的警告，进程内的记录不动。
-  - **为什么不削弱能连现代服务器的安全性**：协商取的是客户端最偏好、服务器也支持的那个，补上的旧算法一律排在全部现代算法之后；
-    双方报的算法列表算进交换哈希、由主机密钥签名，中间人删掉服务器报的现代算法签名就对不上，所以对主机密钥已被信任的服务器，攻击者
-    没法把连接逼到旧算法上。于是退级只会发生在真的什么更好的都不支持的服务器上。SHA-1 原理上仍然更弱，所以结果要报出来、记日志。
+  - **安全上的保证（准确地说）**：
+    - 中间人**能**触发那一次再试：第一次连接的 KEXINIT 是明文，把服务器的报价换成只剩 SHA-1 的算法，客户端就会补上旧算法再连
+      一次（多一次连接）。
+    - 中间人**不能**因此让一台还支持任何现代算法的服务器用上旧算法：补上的旧算法排在全部现代算法之后，第二次照样协商到现代算法；
+      再去改第二次的 KEXINIT，两端的交换哈希就不同，主机签名验不过，**连接失败**而不是悄悄降级。进程内的「需要旧算法」记录只在
+      认证成功、协商结果里真有旧算法之后才写，被篡改的握手什么也不留下。
+    - 这依赖 SHA-1 的抗碰撞性：服务器自己也还支持 `ssh-rsa` 时，中间人得在握手超时之内现场造出 SHA-1 碰撞（选择前缀碰撞约 2^63 次
+      运算，密钥交换是 SHA-256 时约 2^80 次）才能让 SHA-1 签名验得过。服务器不支持 `ssh-rsa`（OpenSSH 8.8 起的默认）时没有这个前提。
+    - 主机密钥区分不了共用同一把钥匙的几台机器：中间人本来就能把连接转去另一台；那台只支持 SHA-1 时自动退级让这次转向也连得上。
+    - SHA-1 原理上仍然更弱，所以结果要报出来、记日志。以上每一条都有用例（`LegacyFallbackTamperingTests`：伪造的 KEXINIT 经本机
+      中间人打到主机密钥已被信任的服务器）。
+  - **RSA 用户签名的 SHA-1 回退第一次连接就开着**（`legacyFallback: true` 时）：为的是主机密钥与密钥交换都现代、却只认 `ssh-rsa`
+    用户签名又不发 `server-sig-algs` 的服务器（OpenSSH 6.5–7.1），它们第一次就连得上，没有再试可等。能拿到 SHA-1 用户签名的只有
+    主机密钥已经按 app 的策略验过的那个对端，而且要它没宣告 `server-sig-algs`（或只列了 `ssh-rsa`）、又先后拒绝了两种 SHA-2 签名；
+    `server-sig-algs` 是加密送来的，线路上的中间人删不掉；签名以这条会话的会话标识开头，换到别的会话用不了。
+  - **一台主机密钥已被信任、从没需要过旧算法的服务器突然要旧算法**：USSHKit 不会拦（它只在内存里记、不知道「以前」）。app 想拦的话，
+    要做的是：在自己的主机记录里持久化「这台需要旧算法」（连上后看 `legacyAlgorithmsInUse` 非空就记、为空就清）；对已信任、没这个记号
+    的主机先以 `legacyFallback: false` 连，得到「没有共同算法」（`.handshakeFailed`）时问用户（「这台服务器现在只支持 SHA-1 旧算法，
+    可能是服务器降级了，也可能有人在中间篡改」），同意了再以 `legacyFallback: true` 连并记上。这需要 app 的界面与存储，USSHKit 不替它做。
   - `legacyFallback: false`：只用 `algorithms`，没有共同算法就报 `.handshakeFailed`（文案说明是哪一类、服务器报了什么）。
 - **协商到的算法**：USSHCore 的 `SSHClient.negotiatedAlgorithms`（`SSHNegotiatedAlgorithms`：密钥交换、主机密钥、加密、商定的 MAC 名、
   `encryptionIsAEAD` / `macInUse`、压缩）与 `rsaUserAuthenticationAlgorithm`（RSA 用户私钥成功时用的签名算法）。NIOSSH 不公开它自己的
@@ -217,13 +239,18 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   所以按它们从本地文件读、往内存里拼都有上限。app 自己按它们 `read(upToCount:)` 的代码不用再额外封顶，但别绕过它们直接用
   `client.limits` 里的原始宣告值。
 - **完整性**：知道大小时用 `file.readAll(from:expectedLength:maximumBytes:window:)`：读不满就抛 `SFTPError.shortRead(expected:actual:)`，
-  不会把被截短的数据当成功；0 字节的 DATA、EOF 后面又冒出数据都是 `invalidResponse`。区间越过 `UInt64` 抛 `offsetOutOfRange`。
+  不会把被截短的数据当成功；0 字节的 DATA、EOF 后面又冒出数据都是 `invalidResponse`。单个 `file.read(from:length:)`
+  也一样：`length > 0` 时服务端回 0 字节的 DATA 抛 `invalidResponse`（以前交出一个空切片，调用方当成 EOF 就截断、
+  照原 offset 再读就打转）；EOF 只有 `nil` 一种。`length <= 0` 照旧不发请求、回空。区间越过 `UInt64` 抛 `offsetOutOfRange`。
   `SSHFileTransferSession.download` 现在按 stat 的大小分段（每段 8 MiB）`readAll(expectedLength:)`：**下载过程中文件变短 →
   报 `shortRead`**（以前按成功返回、只拿到前一部分）；变长照旧读到 EOF。
 - **`SSHFileTransferSession` 失败时不丢数据**：
-  - 目标已经存在（普通文件）时，上传前先 stat 它，写完临时文件、改名之前把它的权限位（含 setuid / setgid / sticky）
-    用 FSETSTAT 设到临时文件上，属主 / 属组不同时也试一次（换不了属主就只换属组）。全部尽力而为：服务端拒绝就算了，上传照样成功。
-    以前改名换上去的是一个新文件，0660 的库会变成服务端默认的 0644、属主变成登录用户。目标不存在时不设，照服务端默认。
+  - 目标已经存在、而且是普通文件时（`lstat`：目标是符号链接时替换的是链接本身，不把它指向的文件的属性搬过来），
+    写完临时文件、改名之前先把属主 / 属组换成目标的（换不了属主就只换属组），**再**用 FSETSTAT 设权限位——`chown`
+    会清掉 setuid / setgid，顺序反过来就丢了。setuid 与 sticky 只在临时文件的属主确实与目标相同时才带过去，setgid 只在属组
+    确实相同时才带过去：换属主被拒时（普通用户覆盖别人的 04755 文件）结果是不带 setuid 的 0755，绝不会是一个属于上传者的
+    setuid 文件。全部尽力而为：服务端拒绝就算了，上传照样成功。以前改名换上去的是一个新文件，0660 的库会变成服务端默认的
+    0644、属主变成登录用户。目标不存在（或是符号链接）时不设，照服务端默认。
   - 上传的临时文件名带随机后缀（`<目标>.utable-upload-<16 位十六进制>.tmp`，以前固定是 `<目标>.utable-upload.tmp`；原名太长时
     截短，保证不超过 255 字节）、独占创建（`SSH_FXF_EXCL`，不写穿别人预先放的文件或符号链接）；上传失败、被取消、改名失败而
     目标还完好时删掉它。
@@ -323,6 +350,11 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   还原（8192 位 0.07 秒，以前的概率算法在 Debug 下要两三分钟；构造出来的最坏输入 Debug 下 1.4 秒，修之前 25 秒）。还原不了的只有
   gcd(p − 1, q − 1) > 4096 的钥匙（按 λ 算 d 的钥匙里大约万分之二到万分之五），而且只涉及缺素因子的容器——OpenSSH 与
   PuTTYgen 写的都带素因子。
+- **EC 私钥（SEC1 `EC PRIVATE KEY` / PKCS#8）的曲线**：命名曲线照旧；显式曲线参数（`openssl ecparam -param_enc explicit`）只在
+  p、a、b、基点、阶逐项等于 P-256 / P-384 / P-521 之一时认成那条曲线，别的（secp256k1、brainpool……）报
+  `.unsupportedFormat`——以前按标量长度猜成 NIST 曲线，把别的曲线上的标量当成 P-256 的钥匙用，指纹与 `ssh-keygen` 对不上。
+  文件里带了公钥（SEC1 的 `[1] publicKey`）就必须与私钥推出来的一致，否则 `.malformedKey`（与 OpenSSH 容器同一条规矩）；
+  完全没有曲线信息的只在带着一致的公钥时才接受。
 - **服务器给的文字先消毒再进文案**：SFTP 状态消息、开通道失败的说明、服务器报的算法列表、NIOSSH 错误里夹带的对端文本、
   退出信号名、`SSHForwardingChannelFailure.detail`、私钥文件里的类型名，拼进 `errorDescription` / 日志之前都过
   `SSHPeerText.sanitize`：去掉 C0 / C1 控制字符（含 ESC，所以终端转义序列失效）、双向覆盖 / 隔离符与其他不可见格式字符，

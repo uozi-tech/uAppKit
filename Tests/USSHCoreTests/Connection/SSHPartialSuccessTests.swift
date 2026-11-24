@@ -154,6 +154,93 @@ final class SSHPartialSuccessTests: XCTestCase {
         XCTAssertEqual(delegate.flags, [false, true])
         XCTAssertEqual(kinds(server), ["password", "publickey"])
     }
+
+    /// 口令写在 `.delegate` 前面，服务器要「钥匙,口令」：口令先被拒；delegate 给的钥匙部分成功，它再被问时说没有了——
+    /// 这时要从头挑，口令再交一次、通过（以前游标停在 delegate 后面，口令再也轮不到，认证失败）。
+    func testPasswordBeforeADelegateIsRetriedAfterTheDelegatesKeyPartiallySucceeds() async throws {
+        let keyPassed = NIOLockedValueBox(false)
+        let server = try await server(keys: [Self.ed25519Key.publicKey]) { attempt in
+            switch attempt.method {
+            case .publicKey:
+                keyPassed.withLockedValue { $0 = true }
+                return .partialSuccess(remaining: .password)
+            case .password: return keyPassed.withLockedValue { $0 } ? .accept : .reject
+            default: return .reject
+            }
+        }
+        defer { Task { await server.stop() } }
+        let delegate = KeyOnceDelegate(key: Self.ed25519Key)
+        let client = try await Harness.connect(server, configuration([.password(Harness.password), .delegate(delegate)]))
+        defer { Task { await client.close() } }
+        XCTAssertEqual(kinds(server), ["password", "publickey", "password"])
+        XCTAssertEqual(delegate.flags, [false, true])
+    }
+
+    /// 反过来的顺序：delegate 的钥匙部分成功、它说没有了，接着交后面的口令。
+    func testDelegateBeforePasswordContinuesWithThePassword() async throws {
+        let server = try await server(keys: [Self.ed25519Key.publicKey]) { attempt in
+            switch attempt.method {
+            case .publicKey: return .partialSuccess(remaining: .password)
+            case .password: return .accept
+            default: return .reject
+            }
+        }
+        defer { Task { await server.stop() } }
+        let delegate = KeyOnceDelegate(key: Self.ed25519Key)
+        let client = try await Harness.connect(server, configuration([.delegate(delegate), .password(Harness.password)]))
+        defer { Task { await client.close() } }
+        XCTAssertEqual(kinds(server), ["publickey", "password"])
+        XCTAssertEqual(delegate.flags, [false, true])
+    }
+
+    /// 三步（delegate 的钥匙、另一把钥匙、口令）：后面那把钥匙部分成功、从头挑时，已经部分通过过的 delegate 不再被问
+    /// （以前它的下标没记进「部分通过过」，会被当成新的一阶段从头再问一遍）。
+    func testDelegateThatPartiallySucceededIsNotAskedAgainInALaterStage() async throws {
+        let second = NIOSSHPrivateKey(ed25519Key: .init())
+        let server = try await server(keys: [Self.ed25519Key.publicKey, second.publicKey]) { attempt in
+            switch attempt.method {
+            case .publicKey(let key):
+                return key == Self.ed25519Key.publicKey
+                    ? .partialSuccess(remaining: [.publicKey, .password]) : .partialSuccess(remaining: .password)
+            case .password: return .accept
+            default: return .reject
+            }
+        }
+        defer { Task { await server.stop() } }
+        let delegate = KeyOnceDelegate(key: Self.ed25519Key)
+        let client = try await Harness.connect(
+            server, configuration([.delegate(delegate), .privateKey(second), .password(Harness.password)]))
+        defer { Task { await client.close() } }
+        XCTAssertEqual(kinds(server), ["publickey", "publickey", "password"])
+        XCTAssertEqual(delegate.flags, [false, true], "只在它自己的那一阶段被问")
+    }
+}
+
+/// 第一次给钥匙，之后一律说没有了；记下每次收到的 partialSuccess。
+private final class KeyOnceDelegate: NIOSSHClientUserAuthenticationDelegate, Sendable {
+    let key: NIOSSHPrivateKey
+    private let recorded = NIOLockedValueBox<[Bool]>([])
+    var flags: [Bool] { recorded.withLockedValue { $0 } }
+
+    init(key: NIOSSHPrivateKey) { self.key = key }
+
+    func nextAuthenticationType(availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+                                nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>) {
+        XCTFail("应当调四参数的版本")
+        nextChallengePromise.succeed(nil)
+    }
+
+    func nextAuthenticationType(availableMethods: NIOSSHAvailableUserAuthenticationMethods,
+                                serverSignatureAlgorithms: [String]?, partialSuccess: Bool,
+                                nextChallengePromise: EventLoopPromise<NIOSSHUserAuthenticationOffer?>) {
+        let count = recorded.withLockedValue { $0.append(partialSuccess); return $0.count }
+        if count == 1 {
+            nextChallengePromise.succeed(.init(username: Harness.username, serviceName: "",
+                                               offer: .privateKey(.init(privateKey: key))))
+        } else {
+            nextChallengePromise.succeed(nil)
+        }
+    }
 }
 
 /// 第一次给口令，之后（部分成功时）给钥匙；记下每次收到的 partialSuccess。

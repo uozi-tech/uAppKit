@@ -13,6 +13,9 @@ final class SSHConnectionLifecycle: Sendable {
         var nextObserverID: UInt64 = 0
         var observers: [UInt64: Observer] = [:]
         var waiters: [CheckedContinuation<SSHDisconnectReason, Never>] = []
+        var nextWaiterID: UInt64 = 0
+        /// 限时等待的人（`waitForDisconnect(within:)`）：断开、到时、取消，谁先到谁把它取走。
+        var boundedWaiters: [UInt64: CheckedContinuation<SSHDisconnectReason?, Never>] = [:]
     }
 
     private let state = NIOLockedValueBox(State())
@@ -41,19 +44,23 @@ final class SSHConnectionLifecycle: Sendable {
 
     /// 连接断了。只有第一次有效；观察者在锁外、在调用线程（EventLoop）上同步回调。
     func finish(_ reason: SSHDisconnectReason) {
-        let (observers, waiters): ([Observer], [CheckedContinuation<SSHDisconnectReason, Never>]) =
+        let (observers, waiters, bounded): ([Observer], [CheckedContinuation<SSHDisconnectReason, Never>],
+                                            [CheckedContinuation<SSHDisconnectReason?, Never>]) =
             state.withLockedValue { state in
-                guard state.reason == nil else { return ([], []) }
+                guard state.reason == nil else { return ([], [], []) }
                 state.reason = reason
                 state.isConnected = false
                 let observers = state.observers.sorted { $0.key < $1.key }.map(\.value)
                 state.observers.removeAll()
                 let waiters = state.waiters
                 state.waiters.removeAll()
-                return (observers, waiters)
+                let bounded = Array(state.boundedWaiters.values)
+                state.boundedWaiters.removeAll()
+                return (observers, waiters, bounded)
             }
         for observer in observers { observer(reason) }
         for waiter in waiters { waiter.resume(returning: reason) }
+        for waiter in bounded { waiter.resume(returning: reason) }
     }
 
     /// 挂一个观察者。已经断开了就立刻（在调用线程上）回调一次，返回的 token 照常可以移除（无效果）。
@@ -71,6 +78,38 @@ final class SSHConnectionLifecycle: Sendable {
 
     func removeObserver(_ id: UInt64) {
         _ = state.withLockedValue { $0.observers.removeValue(forKey: id) }
+    }
+
+    /// 最多等 `limit` 等到断开：断开了回原因；到时或所在任务被取消时回 nil（不吞取消：取消后立刻返回）。
+    func waitForDisconnect(within limit: Duration) async -> SSHDisconnectReason? {
+        if let reason = disconnectReason { return reason }
+        let id = state.withLockedValue { state -> UInt64 in
+            defer { state.nextWaiterID += 1 }
+            return state.nextWaiterID
+        }
+        let take: @Sendable () -> CheckedContinuation<SSHDisconnectReason?, Never>? = { [state] in
+            state.withLockedValue { $0.boundedWaiters.removeValue(forKey: id) }
+        }
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<SSHDisconnectReason?, Never>) in
+                let immediate: SSHDisconnectReason?? = state.withLockedValue { state in
+                    if let reason = state.reason { return .some(reason) }
+                    if Task.isCancelled { return .some(nil) }
+                    state.boundedWaiters[id] = continuation
+                    return nil
+                }
+                if let immediate {
+                    continuation.resume(returning: immediate)
+                    return
+                }
+                Task {
+                    try? await Task.sleep(for: limit)
+                    take()?.resume(returning: nil)
+                }
+            }
+        } onCancel: {
+            take()?.resume(returning: nil)
+        }
     }
 
     /// 等到断开。

@@ -59,7 +59,8 @@ public struct SFTPFile: Sendable {
 
     // MARK: - 单个请求
 
-    /// 一次 SSH_FXP_READ。返回 nil = EOF；返回的字节可以少于 `length`（短读，调用方自己补发）。
+    /// 一次 SSH_FXP_READ。返回 nil = EOF；返回的字节可以少于 `length`（短读，调用方自己补发），但 `length > 0` 时
+    /// 不会是空的：服务端回 0 字节的 DATA 抛 `invalidResponse`。
     ///
     /// `length` 超过 `client.maximumReadLength` 时按上限要（协议本来就允许服务端少给）；
     /// `length <= 0` 时不发请求，直接回空。窗口化的调用方按 `client.maximumReadLength` 切段
