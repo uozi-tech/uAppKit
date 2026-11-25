@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
@@ -221,3 +222,4 @@ final class SSHTestRemoteForwarding: GlobalRequestDelegate {
         listeners.removeAll()
     }
 }
+#endif

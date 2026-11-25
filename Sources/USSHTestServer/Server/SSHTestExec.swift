@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOSSH
@@ -182,3 +183,4 @@ public struct SSHTestExecHandler: Sendable {
         }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOCore
 import USSHCore
 
@@ -97,3 +98,4 @@ public protocol SFTPServerDirectory: Sendable {
 extension SFTPServerDirectory {
     public func close() async throws {}
 }
+#endif

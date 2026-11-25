@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOConcurrencyHelpers
 import NIOCore
 import USSHCore
@@ -583,3 +584,4 @@ extension SFTPRequest {
         }
     }
 }
+#endif

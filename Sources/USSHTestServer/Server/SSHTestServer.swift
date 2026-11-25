@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
@@ -437,3 +438,4 @@ final class SSHTestAuthDelegate: NIOSSHServerUserAuthenticationDelegate {
         }
     }
 }
+#endif

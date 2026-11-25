@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOConcurrencyHelpers
 import USSHCore
 
@@ -148,3 +149,4 @@ public final class SFTPFaultInjector: Sendable {
         return hit
     }
 }
+#endif

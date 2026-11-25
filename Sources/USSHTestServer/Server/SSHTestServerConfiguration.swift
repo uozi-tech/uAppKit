@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import Crypto
 import NIOCore
 import NIOSSH
@@ -208,3 +209,4 @@ public struct SSHTestFaults: Sendable {
         self.unusualNameLists = unusualNameLists
     }
 }
+#endif

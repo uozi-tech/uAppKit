@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOSSH
@@ -175,3 +176,4 @@ final class SSHTestSessionHandler: ChannelInboundHandler, RemovableChannelHandle
         try? channel.pipeline.syncOperations.context(handler: self)
     }
 }
+#endif

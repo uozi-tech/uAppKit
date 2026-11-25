@@ -460,6 +460,10 @@ let client = try await USSHKitIntegration.connect(
     connectTimeout: .seconds(10), approver: { _ in true })
 ```
 
+- **只在 debug 配置下有内容**：`USSHTestServer` 的源码整个包在 `#if USSH_TEST_SERVER` 里，这个条件只在 debug 下定义
+  （`.when(configuration: .debug)`，Xcode 的 Debug 配置对应它），release 下是空模块、什么符号都没有。uTerm 把它和 USSHKit
+  一起链进 `USSHStack.framework`，发布的 App 因此不再带着测试服务端（Release 下 framework 小约 360 KB）。测试照常用 Debug 跑；
+  用 Release 配置跑测试会编不过（找不到 `SSHTestServer` 等类型），`swift test -c release` 同理。
 - 监听 `127.0.0.1` 的随机端口（`server.port`），主机公钥 `server.hostPublicKey`。
 - **RSA**：`authorizedKeys` 里放 `NIOSSHPublicKey(rsaPublicKey:)` 或解析 `ssh-rsa …` 行（先 `SSHAlgorithms.registerStandardAlgorithms()`）；
   `authentication.acceptedRSASignatureAlgorithms` 限定服务端收哪些签名算法，`configuration.serverSignatureAlgorithms` 控制

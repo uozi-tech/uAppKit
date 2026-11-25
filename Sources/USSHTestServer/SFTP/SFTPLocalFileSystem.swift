@@ -1,3 +1,4 @@
+#if USSH_TEST_SERVER
 // 只给 Apple 平台的测试用（系统调用写的是 Darwin 的形状）。
 #if canImport(Darwin)
 import Darwin
@@ -481,4 +482,5 @@ private extension String {
         count >= width ? self : self + String(repeating: " ", count: width - count)
     }
 }
+#endif
 #endif

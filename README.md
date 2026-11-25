@@ -9,7 +9,7 @@ uTable、uTerm 与 uGit 共用的包，一个 SwiftPM 包多个产品。
 | `AgentKit` | AI 助手的会话与工具协议 | macOS 14+ / iOS 18+ |
 | `USSHKit` | SSH 产品层：主机密钥库与策略、凭据与私钥导入、`-L` 隧道、SFTP 文件传输、面向用户的错误文案；`@_exported` 了 `USSHCore`，`import USSHKit` 即可 | macOS 14+ / iOS 18+ |
 | `USSHCore` | SSH 客户端层，架在打过补丁的 swift-nio-ssh（`NIOSSH`）上：连接、认证、跳板机、exec / PTY、TCP 转发、SFTP v3、NIOSSH 没带的算法；只有类型与错误，不带文字 | macOS 14+ / iOS 18+ |
-| `USSHTestServer` | 进程内的 SSH / SFTP 服务端，只给测试用（本包与 app 的测试宿主都用，沙盒里起不了 sshd） | macOS 14+ / iOS 18+ |
+| `USSHTestServer` | 进程内的 SSH / SFTP 服务端，只给测试用（本包与 app 的测试宿主都用，沙盒里起不了 sshd）；只在 debug 配置下编译，release 下是空模块 | macOS 14+ / iOS 18+ |
 | `UPaneTree` | 分屏二叉树（`LayoutNode` 与摊平几何） | macOS 14+ / iOS 18+ |
 | `UPaneGroups` | 「分屏里装标签」的 VSCode 编辑组（模型 + 区域视图） | 模型 macOS/iOS；视图 macOS 14+ |
 | `UControlKit` | 本机 IPC 外部 agent 通道核心（Unix socket 服务端、请求分发与门禁、开关设置）；AI 技能安装（`SkillCatalog` / `SkillInstaller` / `ClientLinkInstaller` / `SkillManagerModel` / `SkillReconciler`）；后台模式（`BackgroundServiceSettings` / `BackgroundLaunchMode` / `BackgroundWindowController` / `BackgroundLifecycleCommands`） | macOS 14+ |

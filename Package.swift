@@ -136,6 +136,10 @@ let package = Package(
         ),
         // 进程内的 SSH 服务端，只给测试用（本包的测试和 app 的测试宿主都用它）：
         // 架在 NIOSSH 的服务端角色上，带脚本化的 exec、回显 PTY、SFTP、TCP 转发。
+        // 代码只在 debug 配置下编译（每个源文件整个包在 `#if USSH_TEST_SERVER` 里），release 下是空模块：
+        // uTerm 把它和 USSHKit 一起链进 `USSHStack.framework`（测试宿主只能从那里拿到同一份 NIOSSH），
+        // 不这样它就随 App 发布。SwiftPM 的依赖不能按配置区分，编译条件可以（Xcode 的 Debug 配置对应 `.debug`）。
+        // 所以 `swift test -c release` 编不过测试（测试本来就要 debug）。
         .target(
             name: "USSHTestServer",
             dependencies: [
@@ -145,7 +149,8 @@ let package = Package(
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
                 .product(name: "Crypto", package: "swift-crypto"),
-            ]
+            ],
+            swiftSettings: [.define("USSH_TEST_SERVER", .when(configuration: .debug))]
         ),
         // OpenBSD 的 bcrypt_pbkdf（BSD 许可，各文件头部保留原声明）。解密带口令的 OpenSSH 私钥容器要用。
         // 来源：Citadel 0.12.1（`ae8562f8`）里随包带的那份，改名并作为我们自己的 target 维护，见 THIRD_PARTY_NOTICES.md。
