@@ -25,7 +25,9 @@ public struct ConnectedClient: Sendable {
     public let bastion: SSHClient?
     public init(target: SSHClient, bastion: SSHClient?)
     public var isConnected: Bool            // 两跳都还连着
-    public var legacyAlgorithmsInUse: [SSHLegacyAlgorithm]         // 目标那一跳用上的 SHA-1 旧算法（第 5 节）
+    public var legacyAlgorithmsInUse: [SSHLegacyAlgorithm]         // 目标那一跳用上的 SHA-1 旧算法（第 5 节，给人看）
+    public var targetNeededLegacyTransport: Bool?        // 目标那一跳的传输层这次需不需要旧算法（三态，App 记录按它写，第 5 节）
+    public var bastionNeededLegacyTransport: Bool?       // 跳板机那一跳的（没有跳板机时 nil）
     public var bastionLegacyAlgorithmsInUse: [SSHLegacyAlgorithm]  // 跳板机那一跳的
     public var legacyAlgorithmStatusKnown: Bool          // 目标那一跳的协商结果读得出来（false = 不知道，不是「没用」）
     public var bastionLegacyAlgorithmStatusKnown: Bool   // 跳板机那一跳的（没有跳板机时 true）
@@ -102,7 +104,7 @@ public struct SSHLegacyFallbackRequest: Sendable, Hashable {
 | `makeHostKeyValidator(host:port:store:policy:approvalTimeout:approver:) -> Citadel.SSHHostKeyValidator` | `makeHostKeyValidation(host:port:store:policy:approver:)`；等用户的时限配在 `Configuration.hostKeyValidationTimeout`，或直接用 `makeConfiguration` |
 | — | `makeConfiguration(…)`：`connect` 内部用的同一份配置，自己调 `SSHClient.connect(host:port:configuration:)` / `client.jump(to:port:configuration:)` 时用 |
 | — | `connect` / `makeConfiguration` 的 `algorithms:`（默认 `.standard`）、`keepAliveInterval:`（默认 `nil`，不发）、`legacyFallback:`（默认开，自动退到旧算法）；`connect` 另有 `legacyFallbackApproval:`（默认 `nil`，不问，见第 5 节）与 `logger:` |
-| `struct ConnectedClient: @unchecked Sendable`（Citadel 的 `SSHClient`） | `struct ConnectedClient: Sendable`（USSHCore 的 `SSHClient`），新增 `init(target:bastion:)`、`isConnected`、`legacyAlgorithmsInUse`、`bastionLegacyAlgorithmsInUse` |
+| `struct ConnectedClient: @unchecked Sendable`（Citadel 的 `SSHClient`） | `struct ConnectedClient: Sendable`（USSHCore 的 `SSHClient`），新增 `init(target:bastion:)`、`isConnected`、`legacyAlgorithmsInUse`、`bastionLegacyAlgorithmsInUse`、`targetNeededLegacyTransport`、`bastionNeededLegacyTransport` |
 | `exec` 失败抛 `SSHClient.CommandFailed` / `CitadelError.commandOutputTooLarge` | 抛 `SSHCommandError.nonZeroExit(status, output:)` / `.outputTooLarge(limit:)` |
 | `openDirectTCPIP(host:port:)`：出站半关闭没开 | 同签名；出站半关闭打开，`outbound.finish()` 向服务器发 EOF |
 | `SSHForwardingChannelFailure.Kind`：`.timeout` `.administrativelyProhibited` `.connectFailed` `.other` | **新增 `.resourceShortage`**（app 里对 `Kind` 的 `switch` 要补）；原因码来自 USSHCore 的 `SSHChannelOpenFailure.reason`，不再解析文本 |
@@ -112,9 +114,9 @@ public struct SSHLegacyFallbackRequest: Sendable, Hashable {
 | 之前 | 之后 |
 |---|---|
 | `struct SSHPrivateKey: @unchecked Sendable` | `struct SSHPrivateKey: Sendable` |
-| `SSHConnectionError` | **新增 `.legacyFallbackDeclined(SSHLegacyFallbackRequest)`**（`legacyFallbackApproval` 没同意用旧算法，第 5 节；不重试；不给那个闭包时永远不会抛；app 对 `SSHConnectionError` 的 `switch` 与断线分类要补，见 7.1）；**新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
+| `SSHConnectionError` | **新增 `.legacyFallbackDeclined(SSHLegacyFallbackRequest)`**（`legacyFallbackApproval` 没同意用旧算法，第 5 节；不重试；不给那个闭包时永远不会抛；app 对 `SSHConnectionError` 的 `switch` 与断线分类要补，见 7.1）；**新增 `public var isRetryable: Bool`**（要不要自动重试只看它，见 7.1）；**新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
 | `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变（`SSHFileTransferSession.open` 末尾多一个可选的 `logger:`）；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
-| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口没有 `algorithms:` / `legacyFallback:`：一律 `.standard`、自动退级；都有可选的 `legacyFallbackApproval:`（默认 `nil` 不问，第 5 节） |
+| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口没有 `algorithms:` / `legacyFallback:`：一律 `.standard`、自动退级；都有可选的 `legacyFallbackApproval:`（默认 `nil` 不问，第 5 节），连上之后都报 `targetNeededLegacyTransport` / `bastionNeededLegacyTransport`（隧道上要 `await`，`open()` 之前为 nil） |
 | 隧道 / SFTP 会话闲置时链路死了没人发现；SSH 断了隧道照样监听着本地端口 | 新增保活与存活（第 5 节「隧道与 SFTP 会话」）：`SSHLocalForwardingTunnel(…, keepAliveInterval: Duration? = nil, onDisconnect: @escaping @Sendable (SSHDisconnectReason) -> Void = { _ in })`，`public var isConnected: Bool`、`public var disconnectReason: SSHDisconnectReason?`；`SSHFileTransferSession.open(…, keepAliveInterval: Duration? = nil)`，`public nonisolated var isConnected: Bool`、`public nonisolated var disconnectReason: SSHDisconnectReason?`；`SSHDisconnectReason.userDescription`（给人看的原因） |
 | `HostKeyStore.verify` / `remember` 抛的错被包成 `SSHConnectionError.hostKeyRejected(String)`，类型丢了 | 抛的错遵守新的 `public protocol HostKeyStoreRejection: Error` 时原样交给 `connect` / `open` 的调用方（直连与经跳板机两跳都是），不包；没遵守的照旧包（第 7.1 节） |
 | USSHCore 的错误类型没有文案 | USSHKit 给 `SSHClientError`、`SSHChannelError`、`SFTPError`、`SSHCommandError`、`SSHRSAError` 补上 `LocalizedError`（四种语言），`error.localizedDescription` 直接可用。判断一律看类型与 case，不看文案 |
@@ -200,6 +202,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   - **`legacyFallback: true` 的含义**：遇到类型化的 `SSHClientError.noCommonAlgorithm` 时，同一跳用「配置的算法 + `.standard` 的
     现代算法 + 旧算法」**再连一次**。知道卡在哪一类、服务器报了什么时，只在服务器这一类的报价与扩展出来的名字有交集时才试
     （服务器只有 CBC、`hmac-md5` 之类我们根本不支持的就不试）；不知道卡在哪时盲试一次。第二次的错误原样报出。
+    配置的算法比 `.standard` 窄（如 `.builtInOnly`）、而服务器这一类的报价里有 `.standard` 补上的**现代**算法时，先只补现代算法
+    再连一次（不开旧算法、不问 `legacyFallbackApproval`）；这一次还要旧算法才对得上，才问、再补上旧算法连第三次。所以
+    `.standard` 至多再试一次，更窄的集合至多两次。
     所以 `.builtInOnly` 开着退级时，遇到只有 `rsa-sha2-*` 主机密钥或只有 AES-CTR 的服务器也会再试并连上；**把自己的 `SSHAlgorithms`
     当严格策略的调用方传 `legacyFallback: false`**。
   - 再试用的算法：配置里的现代算法（原顺序）→ `.standard` 里有、配置里没有的现代算法 → 旧算法（配置里本来就列着的旧算法也挪到
@@ -257,18 +262,32 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
       回答之后，闭包所在的任务都会被取消（闭包里的界面可以据此收起）。等的时候没有连接开着，`connectTimeout` 不计。
     - **不同意**（返回 `false`）：不再连，抛 `SSHConnectionError.legacyFallbackDeclined(request)`，`request` 就是被拒的那一问；
       经跳板机时（哪一跳都一样）包在 `.jumpHostFailed(String, cause: .legacyFallbackDeclined(request))` 里，`String` 直接是那一问的文案
-      （「没有连接跳板机 host:22：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。」）。进程内的记录不动，
+      （见下面「文案」）。进程内的记录不动，
       经 `logger` 记一条 `.info`（metadata：host、port、hop、trigger）。**这是不可重试的错误**：和认证失败、主机密钥被拒、没有共同
       算法同一类，重连逻辑不能在它上面打转（不然会一遍遍问用户）。
     - **同意**（返回 `true`）：与不给闭包时完全一样。
-    - app 要做的：在自己的主机记录里持久化「这台需要旧算法」（连上后看 `legacyAlgorithmsInUse` / `bastionLegacyAlgorithmsInUse`
-      非空就记、为空就清；状态不知道时 `legacyAlgorithmStatusKnown == false`，别动）；闭包里对记着「需要旧算法」的直接同意，对已信任、
-      没这个记号的问用户（「这台主机以前用的是更安全的加密方式，这次只提供了旧的 SHA-1 方式。可能是服务器改了配置，也可能有人在中间
-      篡改。」），同意了就连并记上。主机密钥第一次见（还没信任）的主机不在此列：反正要先问信任。
+    - **文案**（`errorDescription`，四种语言）。头一句给普通用户，不出现算法名；知道卡在哪一类、服务器报了名字时后面附一句给管理员。
+      地址里 IPv6 字面量加方括号（`[::1]:22`），整段按对端文字隔离：
+      - 目标：「没有连接 old.example:22：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。」
+      - 跳板机：「没有连接跳板机 jump.example:22：这台跳板机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。」
+      - 经跳板机时目标那一跳：「经跳板机 jump.example:22 没有连接 old.example:22：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。」
+      - 附句：「服务器的主机密钥签名只提供：ssh-rsa。」/「服务器的密钥交换只提供：…。」/「服务器的消息校验只提供：…。」/
+        「服务器在这一类只提供：…。」
+      经跳板机时 `.jumpHostFailed(message, cause: .legacyFallbackDeclined)` 的 `errorDescription` 就是 `message` 本身，不再套「SSH 跳板机连接失败：」。
+    - **app 要做的：记「这台需要旧算法」按三态写**。连上之后（`connect` 返回的 `ConnectedClient`、`open()` 成功的隧道、`open` 返回的
+      SFTP 会话）读每一跳的 `targetNeededLegacyTransport` / `bastionNeededLegacyTransport`：`true` 记、`false` 清、`nil`（没读懂服务器的
+      KEXINIT）不动。闭包里对记着「需要旧算法」的直接同意，对已信任、没这个记号的问用户（「这台主机以前用的是更安全的连接方式，现在
+      要改用较旧、安全性较低的 SHA-1 方式才能连上。可能是服务器改了配置，也可能有人在中间篡改。」）。主机密钥第一次见（还没信任）的
+      主机反正要先问信任，可以直接同意。
+      - **不要在闭包里提前落盘**：同意之后那次连接可能失败（主机签名验不过、用户拒了主机密钥），也可能协商到现代算法——中间人只篡改
+        第一次的明文 KEXINIT 就能触发这一问，真正的服务器第二次照样协商到现代算法，三态是 `false`，App 据此清掉，不会被植入一条同意。
+      - **不要用 `legacyAlgorithmsInUse` 判断**：它是给人看的，含 RSA 用户签名的 `ssh-rsa`（与主机那一端的安全性无关，会把现代主机误记
+        成需要旧算法），MAC 只看实际在用的（加密是 AES-GCM、但服务器只报 `hmac-sha1` 的那种，退级才连得上，它却是空的，会刚同意就清掉）。
     - **带这个钩子的入口**（USSHKit 里会建 SSH 连接的公开入口就这三个，参数名、类型、默认值、规则都一样）：
       - `USSHKitIntegration.connect(…, legacyFallbackApproval:)`（SPI，uTerm 用）；
       - `SSHLocalForwardingTunnel(…, legacyFallbackApproval:)`（init 的最后一个参数），在 `open()` 里建连时问，被拒时 `open()` 抛错、
-        没有开始监听（uTable 的数据库隧道）；
+        没有开始监听（uTable 的数据库隧道）。等询问（或主机密钥确认）时调 `close()`：`open()` 回来后自己关掉已连上的连接、不绑端口，
+        抛 `.closed`；这时再调一次 `open()` 抛 `.alreadyOpen`，不建第二份；
       - `SSHFileTransferSession.open(…, legacyFallbackApproval:)`（最后一个参数，uTable 的远程 SQLite）。
       后两个用进程级的共享记录（`connect` 也是），所以 uTable 里某台记成「需要旧算法」之后，下次是 `.remembered` 那一问。
     - **不带钩子的**：`USSHKitIntegration.makeConfiguration` 是同步的，问不了，而且**会绕过 `legacyFallbackApproval`**：进程内记着
@@ -382,6 +401,11 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   线上按 rawValue 传，加值要两端一起）；`SSHClientFactory` 里把 USSHKit 错误映射成 app 错误的 `switch` 现在对它走 `default` 归成
   `.connectFailed`（同样会被重连），要单独映射。这几处都用 `default`，编译器不会提醒。uTable 同理：数据库隧道
   （`SSHLocalForwardingTunnel.open()`）与远程 SQLite（`SSHFileTransferSession.open`）的重连 / 连接池逻辑要把它算成不可重试。
+- **判断要不要自动重试，用 `SSHConnectionError.isRetryable`**，别自己写带 `default` 的 `switch`：只有 `.connectFailed` 为 `true`；
+  `.jumpHostFailed` 看 `cause`（递归；`cause` 为 nil 时 `false`，USSHKit 自己不会这样抛）；其余（认证失败、主机密钥被拒、握手失败、
+  `.legacyFallbackDeclined`、`.bindFailed`、`.alreadyOpen`、`.closed`、`.unsupportedAgentAuthentication`）都是 `false`。它的
+  `switch` 不带 `default`，以后加 case 编译器会提醒 USSHKit 自己。uTerm 的 `SSHTransportFailure.isPermanentConnectFailure` 对
+  `SSHConnectionError` 可以直接返回 `!error.isRetryable`。
 
 ### 7.2 开通道被拒（`SSHChannelOpenFailure.reason`）
 

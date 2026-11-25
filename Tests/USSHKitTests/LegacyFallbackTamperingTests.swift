@@ -73,6 +73,8 @@ final class LegacyFallbackTamperingTests: XCTestCase {
                 let client = try await connect(attempt)
                 XCTAssertEqual(attempt.proxy.connections, 2, "\(label): the forged offer did trigger the retry")
                 XCTAssertEqual(client.legacyAlgorithmsInUse, [], label)
+                XCTAssertEqual(client.targetNeededLegacyTransport, false,
+                               "\(label): 给 App 记录用的三态说「这次不需要」，App 据此清掉被诱导的同意")
                 XCTAssertNotEqual(client.target.negotiatedAlgorithms?.hostKey, Self.sha1HostKey, label)
                 XCTAssertNotEqual(client.target.negotiatedAlgorithms?.keyExchange, Self.sha1KeyExchange, label)
                 XCTAssertFalse(attempt.memory.needsLegacy(host: "127.0.0.1", port: attempt.proxy.port), label)

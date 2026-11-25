@@ -26,11 +26,13 @@ public enum USSHKitIntegration {
     ///   - keepAliveInterval: 认证成功后每隔这么久发一个 `keepalive@openssh.com`；连续 3 个没回应就断开，
     ///     断开原因是 `SSHDisconnectReason.keepAliveTimeout`。`nil`（默认）不发，和今天一样。跳板机两跳都设。
     ///   - legacyFallback: 自动退级（默认开，跳板机与目标各自判断，规则与安全上的理由见 `SSHLegacyFallback`）：
-    ///     遇到类型化的「没有共同算法」时，用 `algorithms` 加上 `.standard` 的现代算法、再加上旧算法同一跳再连一次——
+    ///     遇到类型化的「没有共同算法」时，`algorithms` 比 `.standard` 窄、补上 `.standard` 的现代算法就对得上的先只补现代算法
+    ///     再连一次（不问）；要补上旧算法才对得上的，用 `algorithms` 加上 `.standard` 的现代算法、再加上旧算法同一跳再连一次——
     ///     服务器这一类的报价与扩展出来的名字有交集时才试，不知道卡在哪时盲试一次；
     ///     RSA 用户私钥在服务器没宣告 `server-sig-algs`、SHA-2 签名都被拒时，同一条连接里最后试 `ssh-rsa`；
     ///     进程内记住需要旧算法的主机，重连时省掉注定失败的那一次。用上了哪些看
-    ///     `ConnectedClient.legacyAlgorithmsInUse` / `bastionLegacyAlgorithmsInUse`，并经 `logger` 记一条警告。
+    ///     `ConnectedClient.legacyAlgorithmsInUse` / `bastionLegacyAlgorithmsInUse`（给人看）；App 记「这台需要旧算法」看
+    ///     `targetNeededLegacyTransport` / `bastionNeededLegacyTransport`（三态）。并经 `logger` 记一条警告。
     ///     关掉时只用 `algorithms`（把它当严格策略的调用方这样传），没有共同算法就报 `SSHConnectionError.handshakeFailed`。
     ///   - legacyFallbackApproval: 即将用 SHA-1 时代的旧算法连某一跳之前问一声（`legacyFallback` 开着才有用）。`nil`（默认）
     ///     不问，和今天完全一样。给了的话两处会调它，各跳各问（跳板机那一跳 `request.hop == .jumpHost`）：

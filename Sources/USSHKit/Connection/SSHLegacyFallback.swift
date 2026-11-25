@@ -93,7 +93,8 @@ public nonisolated struct SSHLegacyFallbackRequest: Sendable, Hashable {
 ///   转去另一台；那台只支持 SHA-1 时，自动退级让这次转向也能连上（并记下「需要旧算法」，下次第一次就补上——补上的仍排在
 ///   现代算法之后，对真的服务器没有影响）。这不是对真正那台服务器的降级，是共用主机密钥的固有问题。
 ///
-/// SHA-1 原理上仍然更弱，所以结果不是悄悄发生的：`ConnectedClient.legacyAlgorithmsInUse` 报出用上了哪些，
+/// SHA-1 原理上仍然更弱，所以结果不是悄悄发生的：`ConnectedClient.legacyAlgorithmsInUse` 报出用上了哪些（给人看），
+/// `targetNeededLegacyTransport` / `bastionNeededLegacyTransport` 报传输层这次是不是需要旧算法（三态，给 App 记录用），
 /// 日志里记一条警告。一台主机密钥已被信任、以前从没需要过旧算法的服务器突然需要了，USSHKit 自己判断不了（进程内的
 /// 记录不落盘，它不知道「以前」），交给 app：用旧算法连之前调 `legacyFallbackApproval`（两处都问：没有共同算法要再试、
 /// 进程内记着需要旧算法要第一次就带上），app 对照自己记的「这台以前用不用旧算法」决定；不同意就抛
@@ -108,9 +109,12 @@ public nonisolated struct SSHLegacyFallbackRequest: Sendable, Hashable {
 /// 不了（除非两份签名内容 SHA-1 碰撞，同样得现场算）。对端已经是认证对象本身，它从 SHA-1 签名里得不到 SHA-2 签名给不了
 /// 的东西，所以没再收紧：收紧（例如只在再试的那次打开）会让上面那类服务器连不上。
 ///
-/// 规则（`legacyFallback: true` 的含义）：遇到类型化的「没有共同算法」（`SSHClientError.noCommonAlgorithm`）时，
-/// 用「配置的算法 + `.standard` 的现代算法 + 旧算法」（`retryAlgorithms`）再试一次。知道卡在哪一类、服务器报了什么时，
-/// 只在服务器这一类的报价与扩展出来的那些名字有交集时才试；不知道时盲试一次。超时、没有协商结论的断开、主机密钥被拒、
+/// 规则（`legacyFallback: true` 的含义）：遇到类型化的「没有共同算法」（`SSHClientError.noCommonAlgorithm`）时：
+/// 1. 配置的算法比 `.standard` 窄、服务器这一类的报价里有 `.standard` 补上的现代算法：只补现代算法再试一次，不问 app；
+/// 2. 仍然（或一开始就）要补上旧算法才对得上：问 app（`legacyFallbackApproval`，给了的话），用「配置的算法 + `.standard`
+///    的现代算法 + 旧算法」（`retryAlgorithms`）再试一次。
+/// 知道卡在哪一类、服务器报了什么时，只在服务器这一类的报价与扩展出来的那些名字有交集时才试；不知道时盲试一次（算第 2 步）。
+/// 所以 `.standard` 至多再试一次，更窄的集合至多两次。超时、没有协商结论的断开、主机密钥被拒、
 /// 认证失败、取消都不再试。把自己的 `SSHAlgorithms` 当严格策略的调用方（例如明确只要 `.builtInOnly`）传 `legacyFallback: false`。
 /// 第一次在密钥交换里就失败了，还没到主机密钥那一步，所以不会问两次信任（另有守卫：第一次问过就不再试）。
 /// 跳板机与目标各自判断。
@@ -123,12 +127,16 @@ nonisolated enum SSHLegacyFallback {
     ///    排在现代算法前面），再补上没列的。
     ///
     /// 已经允许旧算法时返回 nil：没有可退的。对 `.standard` 与 `.legacyCompatible` 一致。
-    static func retryAlgorithms(for configured: SSHAlgorithms) -> SSHAlgorithms? {
+    ///
+    /// `includingLegacy: false`：只做第 1、2 步（只补 `.standard` 的现代算法，不开旧算法）。调用方的算法集比 `.standard`
+    /// 窄时先用它再试一次、不问 app；补不出任何新名字时（对 `.standard` 自己）返回 nil。
+    static func retryAlgorithms(for configured: SSHAlgorithms, includingLegacy: Bool = true) -> SSHAlgorithms? {
         guard !configured.allowsLegacyAlgorithms else { return nil }
         let standard = SSHAlgorithms.standard
         func ordered(_ configured: [String], standard: [String], legacy: [String], isLegacy: (String) -> Bool) -> [String] {
             let modern = configured.filter { !isLegacy($0) }
             let additions = standard.filter { !isLegacy($0) && !modern.contains($0) }
+            guard includingLegacy else { return modern + additions }
             let configuredLegacy = configured.filter(isLegacy)
             let legacyAdditions = legacy.filter { !configuredLegacy.contains($0) }
             return modern + additions + configuredLegacy + legacyAdditions
@@ -149,6 +157,15 @@ nonisolated enum SSHLegacyFallback {
         }
         let modern = configured.transportProtectionSchemes.filter { !isLegacy($0) }
         let additions = standard.transportProtectionSchemes.filter { !isLegacy($0) && !contains(modern, $0) }
+        guard includingLegacy else {
+            result.transportProtectionSchemes = modern + additions
+            let addedSomething = result.keyExchangeAlgorithms != configured.keyExchangeAlgorithms.filter {
+                SSHDiffieHellmanAlgorithm(name: $0)?.isLegacy != true
+            } || result.hostKeyAlgorithms != configured.hostKeyAlgorithms.filter {
+                SSHRSASignatureAlgorithm(name: $0)?.isLegacy != true
+            } || !additions.isEmpty
+            return addedSomething ? result : nil
+        }
         let configuredLegacy = configured.transportProtectionSchemes.filter(isLegacy)
         let legacyAdditions = SSHAlgorithmsLegacySchemes.ordered.filter { !contains(configuredLegacy, $0) }
         result.transportProtectionSchemes = modern + additions + configuredLegacy + legacyAdditions

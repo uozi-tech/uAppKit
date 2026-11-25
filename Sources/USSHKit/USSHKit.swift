@@ -240,6 +240,9 @@ public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
             return String(localized: "SSH 认证失败：\(message)", bundle: ModuleBundle.bundle)
         case .connectFailed(let message), .handshakeFailed(let message):
             return String(localized: "SSH 连接失败：\(message)", bundle: ModuleBundle.bundle)
+        case .jumpHostFailed(let message, .legacyFallbackDeclined?):
+            // 整句自己说了是哪一跳（跳板机自己、或经跳板机的目标），不再套「跳板机连接失败」。
+            return message
         case .jumpHostFailed(let message, _):
             return String(localized: "SSH 跳板机连接失败：\(message)", bundle: ModuleBundle.bundle)
         case .hostKeyRejected(let message):
@@ -247,13 +250,23 @@ public indirect enum SSHConnectionError: Error, LocalizedError, Sendable {
         case .bindFailed(let message):
             return String(localized: "SSH 本地转发端口绑定失败：\(message)", bundle: ModuleBundle.bundle)
         case .legacyFallbackDeclined(let request):
-            let address = "\(request.host):\(String(request.port))"
-            switch request.hop {
-            case .target:
-                return String(localized: "没有连接 \(address)：这台主机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。", bundle: ModuleBundle.bundle)
-            case .jumpHost:
-                return String(localized: "没有连接跳板机 \(address)：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。", bundle: ModuleBundle.bundle)
-            }
+            return SSHErrorText.describeLegacyDecline(request)
+        }
+    }
+
+    /// 值不值得自动重试（重连逻辑看这个，别自己 `switch` 带 `default`）：只有网络问题（`.connectFailed`）值得；
+    /// 认证失败、主机密钥被拒、握手 / 算法协商不成、没同意改用旧算法（`.legacyFallbackDeclined`）、本地端口绑不上、
+    /// 隧道状态不对都是配置或调用方的问题，重试只会再失败（或再问一遍用户）。经跳板机时看那一跳的 `cause`；
+    /// `cause` 为 nil（USSHKit 自己不会这样抛）时按不可重试处理。新 case 加进来时这里不带 `default`，编译器会提醒。
+    public var isRetryable: Bool {
+        switch self {
+        case .connectFailed:
+            return true
+        case .jumpHostFailed(_, let cause):
+            return cause?.isRetryable ?? false
+        case .alreadyOpen, .closed, .unsupportedAgentAuthentication, .authenticationFailed, .handshakeFailed,
+             .hostKeyRejected, .bindFailed, .legacyFallbackDeclined:
+            return false
         }
     }
 }

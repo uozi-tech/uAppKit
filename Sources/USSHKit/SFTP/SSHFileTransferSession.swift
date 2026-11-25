@@ -172,6 +172,18 @@ public actor SSHFileTransferSession {
     /// recognised `channelLossSettle` (200 ms) after the channel closes: when the
     /// whole connection is going down the channel closes a moment before the
     /// connection's reason is known, and that reason wins.
+    /// The target hop's transport needed the SHA-1-era algorithms this time
+    /// (`true`), did not (`false`), or it is unknown because the server's
+    /// KEXINIT could not be read (`nil`); see
+    /// `ConnectedClient.targetNeededLegacyTransport`. The session exists only
+    /// after the connection (and authentication) succeeded. Record "this host
+    /// needs the old algorithms" from it: `true` set, `false` clear, `nil`
+    /// leave as is — not from inside `legacyFallbackApproval`.
+    public nonisolated var targetNeededLegacyTransport: Bool? { connected.targetNeededLegacyTransport }
+
+    /// The same for the jump host (`nil` without one).
+    public nonisolated var bastionNeededLegacyTransport: Bool? { connected.bastionNeededLegacyTransport }
+
     public nonisolated var disconnectReason: SSHDisconnectReason? {
         if closedLocally.isSet { return nil }
         let reason = connected.target.disconnectReason ?? connected.bastion?.disconnectReason

@@ -3326,6 +3326,35 @@
         }
       }
     },
+    "服务器在这一类只提供：%@。" : {
+      "comment" : "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " In this category the server offers only: %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバはこの種類では次のみ提供しています：%@。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " 서버는 이 종류에서 다음만 제공합니다: %@."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器在這一類只提供：%@。"
+          }
+        }
+      }
+    },
     "服务器已接受%@，但还要求另一种认证（服务器支持：%@），没有配置可用的方式" : {
       "localizations" : {
         "en" : {
@@ -3630,6 +3659,93 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "伺服器操作失敗：%@"
+          }
+        }
+      }
+    },
+    "服务器的主机密钥签名只提供：%@。" : {
+      "comment" : "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " The server offers only these host key signature algorithms: %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバのホスト鍵の署名は次のみ提供されています：%@。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " 서버의 호스트 키 서명은 다음만 제공합니다: %@."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器的主機金鑰簽章只提供：%@。"
+          }
+        }
+      }
+    },
+    "服务器的密钥交换只提供：%@。" : {
+      "comment" : "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " The server offers only these key exchange algorithms: %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバの鍵交換は次のみ提供されています：%@。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " 서버의 키 교환은 다음만 제공합니다: %@."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器的金鑰交換只提供：%@。"
+          }
+        }
+      }
+    },
+    "服务器的消息校验只提供：%@。" : {
+      "comment" : "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " The server offers only these message integrity (MAC) algorithms: %@."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバのメッセージ認証（MAC）は次のみ提供されています：%@。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : " 서버의 메시지 무결성 검사(MAC)는 다음만 제공합니다: %@."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "伺服器的訊息驗證只提供：%@。"
           }
         }
       }
@@ -4027,58 +4143,58 @@
         }
       }
     },
-    "没有连接 %@：这台主机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。" : {
+    "没有连接 %@：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Didn't connect to %@: this time the host offered only an older, less secure encryption method (SHA-1), so the connection was stopped."
+            "value" : "Didn't connect to %@: this host can only be reached by switching to an older, less secure connection method (SHA-1), and that wasn't approved."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ に接続しませんでした：このホストが今回は古く安全性の低い暗号化方式（SHA-1）しか提供しなかったため、接続を中止しました。"
+            "value" : "%@ に接続しませんでした：このホストに接続するには、古く安全性の低い接続方式（SHA-1）に切り替える必要がありますが、許可されませんでした。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@에 연결하지 않았습니다: 이 호스트가 이번에는 오래되고 보안성이 낮은 암호화 방식(SHA-1)만 제공해 연결을 중단했습니다."
+            "value" : "%@에 연결하지 않았습니다: 이 호스트에 연결하려면 오래되고 보안성이 낮은 연결 방식(SHA-1)으로 바꿔야 하는데, 허용되지 않았습니다."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未連線至 %@：這台主機這次只提供較舊、安全性較低的加密方式（SHA-1），因此沒有繼續連線。"
+            "value" : "未連線至 %@：這台主機要改用較舊、安全性較低的連線方式（SHA-1）才能連上，未獲得同意。"
           }
         }
       }
     },
-    "没有连接跳板机 %@：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。" : {
+    "没有连接跳板机 %@：这台跳板机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Didn't connect to the jump host %@: this time it offered only an older, less secure encryption method (SHA-1), so the connection was stopped."
+            "value" : "Didn't connect to the jump host %@: it can only be reached by switching to an older, less secure connection method (SHA-1), and that wasn't approved."
           }
         },
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "踏み台サーバ %@ に接続しませんでした：この踏み台サーバが今回は古く安全性の低い暗号化方式（SHA-1）しか提供しなかったため、接続を中止しました。"
+            "value" : "踏み台サーバ %@ に接続しませんでした：この踏み台サーバに接続するには、古く安全性の低い接続方式（SHA-1）に切り替える必要がありますが、許可されませんでした。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "점프 호스트 %@에 연결하지 않았습니다: 이 점프 호스트가 이번에는 오래되고 보안성이 낮은 암호화 방식(SHA-1)만 제공해 연결을 중단했습니다."
+            "value" : "점프 호스트 %@에 연결하지 않았습니다: 이 점프 호스트에 연결하려면 오래되고 보안성이 낮은 연결 방식(SHA-1)으로 바꿔야 하는데, 허용되지 않았습니다."
           }
         },
         "zh-Hant" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未連線至跳板機 %@：這台跳板機這次只提供較舊、安全性較低的加密方式（SHA-1），因此沒有繼續連線。"
+            "value" : "未連線至跳板機 %@：這台跳板機要改用較舊、安全性較低的連線方式（SHA-1）才能連上，未獲得同意。"
           }
         }
       }
@@ -4614,6 +4730,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "演算法 OID %@"
+          }
+        }
+      }
+    },
+    "经跳板机 %@ 没有连接 %@：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Didn't connect to %2$@ through the jump host %1$@: this host can only be reached by switching to an older, less secure connection method (SHA-1), and that wasn't approved."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "踏み台サーバ %1$@ 経由で %2$@ に接続しませんでした：このホストに接続するには、古く安全性の低い接続方式（SHA-1）に切り替える必要がありますが、許可されませんでした。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "점프 호스트 %1$@을(를) 거쳐 %2$@에 연결하지 않았습니다: 이 호스트에 연결하려면 오래되고 보안성이 낮은 연결 방식(SHA-1)으로 바꿔야 하는데, 허용되지 않았습니다."
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "經跳板機 %1$@ 未連線至 %2$@：這台主機要改用較舊、安全性較低的連線方式（SHA-1）才能連上，未獲得同意。"
           }
         }
       }

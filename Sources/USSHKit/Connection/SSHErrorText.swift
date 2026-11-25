@@ -114,6 +114,43 @@ nonisolated enum SSHErrorText {
         return String(localized: "本应用不支持服务器提供的任何\(name)算法（服务器提供：\(offer)）", bundle: ModuleBundle.bundle)
     }
 
+    /// `host:port` 给人看：IPv6 字面量加方括号（`[::1]:22`），整段按对端文字隔离（主机名可能来自导入的配置）。
+    static func address(host: String, port: Int) -> String {
+        let bracketed = host.contains(":") && !host.hasPrefix("[") ? "[\(host)]" : host
+        return SSHPeerText.isolated("\(bracketed):\(String(port))")
+    }
+
+    /// `legacyFallbackApproval` 没同意时的整句。头一句给普通用户：哪一台、要改用较旧的连接方式才能连上、没有得到同意；
+    /// 知道卡在哪一类时后面附一句给管理员（服务器在这一类只提供什么）。`bastion` 给了表示这是经它连目标时目标那一跳。
+    static func describeLegacyDecline(_ request: SSHLegacyFallbackRequest, via bastion: String? = nil) -> String {
+        let endpoint = address(host: request.host, port: request.port)
+        let head: String
+        switch (request.hop, bastion) {
+        case (.jumpHost, _):
+            head = String(localized: "没有连接跳板机 \(endpoint)：这台跳板机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。", bundle: ModuleBundle.bundle)
+        case (.target, let bastion?):
+            head = String(localized: "经跳板机 \(bastion) 没有连接 \(endpoint)：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。", bundle: ModuleBundle.bundle)
+        case (.target, nil):
+            head = String(localized: "没有连接 \(endpoint)：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。", bundle: ModuleBundle.bundle)
+        }
+        guard let failure = request.failure, let category = failure.category, !failure.serverOffer.isEmpty else {
+            return head
+        }
+        let offer = SSHPeerText.isolated(failure.serverOffer.joined(separator: ", "))
+        let detail: String
+        switch category {
+        case .keyExchange:
+            detail = String(localized: "服务器的密钥交换只提供：\(offer)。", bundle: ModuleBundle.bundle, comment: "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格")
+        case .hostKey:
+            detail = String(localized: "服务器的主机密钥签名只提供：\(offer)。", bundle: ModuleBundle.bundle, comment: "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格")
+        case .mac:
+            detail = String(localized: "服务器的消息校验只提供：\(offer)。", bundle: ModuleBundle.bundle, comment: "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格")
+        case .encryption, .compression:
+            detail = String(localized: "服务器在这一类只提供：\(offer)。", bundle: ModuleBundle.bundle, comment: "接在「没有连接…没有得到同意。」后面的第二句；英文、韩文译文开头留一个空格")
+        }
+        return head + detail
+    }
+
     static func describe(_ category: SSHAlgorithmNegotiationFailure.Category) -> String {
         switch category {
         case .keyExchange: return String(localized: "密钥交换", bundle: ModuleBundle.bundle, comment: "算法类别，嵌在「…的任何%@算法」里")

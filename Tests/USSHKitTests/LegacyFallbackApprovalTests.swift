@@ -182,7 +182,8 @@ final class LegacyFallbackApprovalTests: XCTestCase {
             _ = try await TestSSH.connect(server, legacyFallbackApproval: probe.approval, legacyMemory: memory)
         }
         XCTAssertEqual(request?.trigger, .remembered)
-        XCTAssertNil(request?.failure, "记录是直接写的，没有当初的失败")
+        XCTAssertEqual(request?.category, .hostKey, "记录是直接写的、没有当初的失败；抛出的是这次实测的那一份")
+        XCTAssertEqual(request?.serverOffer, ["ssh-rsa"])
         XCTAssertEqual(probe.requests.count, 1, "同一跳只问一次")
         XCTAssertEqual(attempts(server), 1)
         XCTAssertTrue(memory.needsLegacy(host: server.host, port: server.port))
@@ -503,27 +504,295 @@ final class LegacyFallbackApprovalTests: XCTestCase {
         XCTAssertEqual(attempts(server), 1)
     }
 
-    /// 文案说清楚是哪台、为什么，四种语言都有。
+    /// 文案：头一句说哪台、要改用较旧的连接方式、没有得到同意；知道类别时附一句服务器只提供什么；四种语言都有。
     func testDeclinedErrorDescriptionIsLocalized() throws {
         let request = SSHLegacyFallbackRequest(hop: .target, host: "old.example", port: 2222, trigger: .noCommonAlgorithm,
                                                failure: .init(category: .hostKey, clientOffer: [], serverOffer: ["ssh-rsa"]))
         let target = try XCTUnwrap(SSHConnectionError.legacyFallbackDeclined(request).errorDescription)
-        XCTAssertTrue(target.contains("old.example:2222"), target)
+        XCTAssertTrue(target.contains(SSHPeerText.isolated("old.example:2222")), target)
         XCTAssertTrue(target.contains("SHA-1"), target)
+        XCTAssertTrue(target.contains("主机密钥签名"), target)
+        XCTAssertTrue(target.contains(SSHPeerText.isolated("ssh-rsa")), target)
+        XCTAssertFalse(target.contains("这次"), target)
+        XCTAssertFalse(target.contains("加密方式"), target)
         var jump = request
         jump.hop = .jumpHost
-        XCTAssertNotEqual(SSHConnectionError.legacyFallbackDeclined(jump).errorDescription, target)
+        XCTAssertTrue(try XCTUnwrap(SSHConnectionError.legacyFallbackDeclined(jump).errorDescription).hasPrefix("没有连接跳板机"))
+        var unknown = request
+        unknown.failure = nil
+        XCTAssertFalse(try XCTUnwrap(SSHConnectionError.legacyFallbackDeclined(unknown).errorDescription).contains("服务器的"),
+                       "说不出卡在哪一类时只有头一句")
+        // IPv6 字面量加方括号。
+        XCTAssertEqual(SSHErrorText.address(host: "::1", port: 22), SSHPeerText.isolated("[::1]:22"))
+        XCTAssertEqual(SSHErrorText.address(host: "fe80::1%en0", port: 2222), SSHPeerText.isolated("[fe80::1%en0]:2222"))
+        XCTAssertEqual(SSHErrorText.address(host: "host.example", port: 22), SSHPeerText.isolated("host.example:22"))
 
+        let keys = [
+            "没有连接 %@：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。",
+            "没有连接跳板机 %@：这台跳板机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。",
+            "经跳板机 %@ 没有连接 %@：这台主机要改用较旧、安全性较低的连接方式（SHA-1）才能连上，没有得到同意。",
+            "服务器的密钥交换只提供：%@。",
+            "服务器的主机密钥签名只提供：%@。",
+            "服务器的消息校验只提供：%@。",
+            "服务器在这一类只提供：%@。",
+        ]
         for language in ["en", "zh-Hant", "ja", "ko"] {
             let bundle = try XCTUnwrap(
                 ModuleBundle.bundle.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)))
-            for key in ["没有连接 %@：这台主机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。",
-                        "没有连接跳板机 %@：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。"] {
+            for key in keys {
                 let translated = bundle.localizedString(forKey: key, value: "MISSING", table: nil)
                 XCTAssertNotEqual(translated, "MISSING", "\(language)：\(key)")
                 XCTAssertNotEqual(translated, key, "\(language)：\(key)")
-                XCTAssertTrue(translated.contains("%@"), "\(language)：\(translated)")
+                XCTAssertTrue(translated.contains("%@") || translated.contains("%1$@"), "\(language)：\(translated)")
             }
         }
     }
+
+    // MARK: - 算法集比 .standard 窄：先只补现代算法，不问
+
+    /// `.builtInOnly` 对只有 SHA-2 的 RSA 主机密钥（`rsa-sha2-512` / `rsa-sha2-256`）的服务器、以及同时还报 `ssh-rsa` 的服务器：
+    /// 先只补 `.standard` 的现代算法再试，不问、不开旧算法，协商到 SHA-2。
+    func testNarrowAlgorithmsRetryWithModernAdditionsWithoutAsking() async throws {
+        for alsoSHA1 in [false, true] {
+            let server = try await TestSSH.startServer {
+                $0.useRSAHostKey(Self.rsaHostKey, algorithms: SSHRSASignatureAlgorithm.modern + (alsoSHA1 ? [.sshRSA] : []))
+            }
+            let probe = ApprovalProbe(false)
+            let client = try await TestSSH.connect(server, algorithms: .builtInOnly, legacyFallbackApproval: probe.approval)
+            XCTAssertEqual(client.target.negotiatedAlgorithms?.hostKey, "rsa-sha2-512")
+            XCTAssertEqual(client.targetNeededLegacyTransport, false)
+            XCTAssertEqual(client.legacyAlgorithmsInUse, [])
+            await client.close()
+            XCTAssertTrue(probe.requests.isEmpty, "alsoSHA1: \(alsoSHA1)")
+            XCTAssertEqual(attempts(server), 2)
+            await server.stop()
+        }
+    }
+
+    /// 补了现代算法仍要旧算法：现代那一次不问，旧算法那一次才问（问的是第二次的失败：卡在 MAC，服务器只报 hmac-sha1）；
+    /// 不同意时共连两次。
+    func testNarrowAlgorithmsAskOnlyWhenLegacyIsStillNeeded() async throws {
+        let server = try await TestSSH.startServer {
+            $0.transportProtectionSchemes = [SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self]
+        }
+        defer { Task { await server.stop() } }
+        var gcmOnly = SSHAlgorithms.standard
+        gcmOnly.transportProtectionSchemes = Constants.bundledTransportProtectionSchemes
+        let probe = ApprovalProbe(false)
+        let request = await declinedRequest {
+            _ = try await TestSSH.connect(server, algorithms: gcmOnly, legacyFallbackApproval: probe.approval)
+        }
+        XCTAssertEqual(request?.category, .mac)
+        XCTAssertEqual(request?.serverOffer, ["hmac-sha1"])
+        XCTAssertEqual(probe.requests.count, 1)
+        XCTAssertEqual(attempts(server), 2)
+    }
+
+    // MARK: - 给 App 记录用的三态
+
+    /// 只有 SHA-1 主机签名：需要（true）；现代服务器：不需要（false）；没有跳板机：跳板机那一跳为 nil。
+    func testNeededLegacyTransportTriState() async throws {
+        let old = try await sha1HostKeyServer()
+        let modern = try await TestSSH.startServer()
+        defer { Task { await old.stop(); await modern.stop() } }
+        let legacy = try await TestSSH.connect(old)
+        XCTAssertEqual(legacy.targetNeededLegacyTransport, true)
+        XCTAssertNil(legacy.bastionNeededLegacyTransport)
+        await legacy.close()
+        let current = try await TestSSH.connect(modern)
+        XCTAssertEqual(current.targetNeededLegacyTransport, false)
+        await current.close()
+
+        // 经跳板机：两跳各自报。
+        let viaJump = try await TestSSH.connect(modern, jumpHost: jumpHost(old))
+        XCTAssertEqual(viaJump.bastionNeededLegacyTransport, true)
+        XCTAssertEqual(viaJump.targetNeededLegacyTransport, false)
+        await viaJump.close()
+    }
+
+    /// RSA 用户私钥退到 `ssh-rsa` 签名：给人看的 `legacyAlgorithmsInUse` 里有它，三态（传输层）是「不需要」。
+    func testRSAUserSignatureDoesNotCountAsLegacyTransport() async throws {
+        var authentication = SSHTestAuthentication(
+            authorizedKeys: [TestSSH.username: [try TestSSH.publicKey(ofPrivateKey: KeyImportFixtures.rsaPKCS1)]])
+        authentication.acceptedRSASignatureAlgorithms = [.sshRSA]
+        let server = try await TestSSH.startServer(authentication: authentication) {
+            $0.serverSignatureAlgorithms = nil
+            $0.acceptsLegacyAlgorithms = true
+        }
+        defer { Task { await server.stop() } }
+        let client = try await TestSSH.connect(
+            server, credential: .privateKey(pem: KeyImportFixtures.rsaPKCS1, passphrase: nil))
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [SSHLegacyAlgorithm(role: .userAuthentication, name: "ssh-rsa")])
+        XCTAssertEqual(client.targetNeededLegacyTransport, false)
+        await client.close()
+    }
+
+    /// 隧道与 SFTP 会话也报这个三态（隧道 `open()` 之前为 nil）。
+    func testTunnelAndFileTransferSessionReportTheTriState() async throws {
+        let fileSystem = try SFTPLocalFileSystem.makeTemporary(prefix: "usshkit-legacy-tristate")
+        defer { try? fileSystem.removeRoot() }
+        let server = try await TestSSH.startServer {
+            $0.useRSAHostKey(Self.rsaHostKey, algorithms: [.sshRSA])
+            $0.serveSFTP(fileSystem: fileSystem)
+        }
+        defer { Task { await server.stop() } }
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll)
+        let before = await tunnel.targetNeededLegacyTransport
+        XCTAssertNil(before)
+        _ = try await tunnel.open()
+        let afterOpen = await tunnel.targetNeededLegacyTransport
+        let bastionNeeded = await tunnel.bastionNeededLegacyTransport
+        XCTAssertEqual(afterOpen, true)
+        XCTAssertNil(bastionNeeded)
+        await tunnel.close()
+
+        let session = try await SSHFileTransferSession.open(
+            endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll, approver: { _ in true })
+        XCTAssertEqual(session.targetNeededLegacyTransport, true)
+        XCTAssertNil(session.bastionNeededLegacyTransport)
+        await session.close()
+    }
+
+    /// 调用方自己给了带旧算法的集合（`.legacyCompatible`）：用上旧算法也不写进程内记录（不是退级）。
+    func testExplicitLegacyAlgorithmsDoNotWriteTheMemory() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let memory = SSHLegacyEndpointMemory()
+        let client = try await TestSSH.connect(server, algorithms: .legacyCompatible, legacyMemory: memory)
+        XCTAssertEqual(client.targetNeededLegacyTransport, true)
+        await client.close()
+        XCTAssertFalse(memory.needsLegacy(host: server.host, port: server.port))
+    }
+
+    // MARK: - 隧道：等询问时的重入
+
+    /// 一个等着放行的询问：`ask` 被调用后挂起，直到 `answer(_:)`。
+    final class GatedApproval: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: CheckedContinuation<Bool, Never>?
+        private var askedFlag = false
+        var asked: Bool { lock.withLock { askedFlag } }
+
+        var approval: @Sendable (SSHLegacyFallbackRequest) async -> Bool {
+            { [self] _ in
+                await withCheckedContinuation { continuation in
+                    lock.withLock {
+                        askedFlag = true
+                        waiting = continuation
+                    }
+                }
+            }
+        }
+
+        func answer(_ approved: Bool) {
+            let continuation = lock.withLock { () -> CheckedContinuation<Bool, Never>? in
+                defer { waiting = nil }
+                return waiting
+            }
+            continuation?.resume(returning: approved)
+        }
+
+        func waitUntilAsked() async throws {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while !asked, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertTrue(asked)
+        }
+    }
+
+    /// 等询问时 `close()`、之后才同意：`open()` 自己收尾（关掉连上的连接、不绑端口），抛 `.closed`；
+    /// 等询问时再 `open()` 一次：拒绝（`.alreadyOpen`），不建第二份。
+    func testTunnelCloseWhileWaitingForTheAnswerLeavesNothingBehind() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let gate = GatedApproval()
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll,
+            legacyFallbackApproval: gate.approval)
+        let opening = Task { try await tunnel.open() }
+        try await gate.waitUntilAsked()
+
+        do {
+            _ = try await tunnel.open()
+            XCTFail("第二次 open 应当被拒绝")
+        } catch SSHConnectionError.alreadyOpen {}
+
+        await tunnel.close()
+        gate.answer(true)
+        do {
+            _ = try await opening.value
+            XCTFail("关掉之后 open 不应成功")
+        } catch SSHConnectionError.closed {}
+        let connected = await tunnel.isConnected
+        XCTAssertFalse(connected)
+        XCTAssertEqual(attempts(server), 2, "同意之后照常连上了第二次")
+        try await server.waitForEvents { $0.closedConnections == $0.acceptedConnections }
+    }
+
+    // MARK: - 取消
+
+    /// 建连任务已经取消了：不弹询问，直接抛 `CancellationError`。
+    func testCancelledTaskIsNotAsked() async throws {
+        let probe = ApprovalProbe(true)
+        let request = SSHLegacyFallbackRequest(hop: .target, host: "h", port: 22, trigger: .noCommonAlgorithm, failure: nil)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await SSHLegacyApprovalWait.run(probe.approval, request: request, timeout: .seconds(5))
+        }
+        do {
+            _ = try await task.value
+            XCTFail("应当被取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(probe.requests.isEmpty)
+    }
+
+    /// 经跳板机、目标那一跳等询问时取消：立刻结束，已经连上的跳板机随之关掉。
+    func testCancellationWhileTheTargetHopWaitsClosesTheBastion() async throws {
+        let target = try await group14SHA1Server()
+        let bastion = try await TestSSH.startServer()
+        defer { Task { await target.stop(); await bastion.stop() } }
+        let never = NeverAnswer()
+        defer { never.release() }
+        let task = Task {
+            try await TestSSH.connect(target, jumpHost: jumpHost(bastion), legacyFallbackApproval: never.approval)
+        }
+        let deadline = ContinuousClock.now + .seconds(10)
+        while never.asked == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(never.asked, 1)
+        let cancelledAt = ContinuousClock.now
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("应当被取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertLessThan(ContinuousClock.now - cancelledAt, .seconds(3))
+        try await bastion.waitForEvents { $0.closedConnections == 1 }
+    }
+
+    // MARK: - 可不可以重试
+
+    func testIsRetryable() {
+        typealias E = SSHConnectionError
+        let request = SSHLegacyFallbackRequest(hop: .target, host: "h", port: 22, trigger: .noCommonAlgorithm, failure: nil)
+        XCTAssertTrue(E.connectFailed("x").isRetryable)
+        XCTAssertTrue(E.jumpHostFailed("x", cause: .connectFailed("y")).isRetryable)
+        for permanent: E in [.legacyFallbackDeclined(request), .jumpHostFailed("x", cause: .legacyFallbackDeclined(request)),
+                             .authenticationFailed("x"), .hostKeyRejected("x"), .handshakeFailed("x"),
+                             .unsupportedAgentAuthentication, .bindFailed("x"), .alreadyOpen, .closed,
+                             .jumpHostFailed("x", cause: nil),
+                             .jumpHostFailed("x", cause: .jumpHostFailed("y", cause: .authenticationFailed("z")))] {
+            XCTAssertFalse(permanent.isRetryable, "\(permanent)")
+        }
+    }
+
 }

@@ -408,8 +408,8 @@ final class LegacyFallbackTests: XCTestCase {
         XCTAssertTrue(try retries(.builtInOnly, failure(.hostKey, ["rsa-sha2-512", "rsa-sha2-256"])))
     }
 
-    /// 缺 AES-CTR 的集合对只有 AES-CTR + hmac-sha1 的服务器：第一次卡在加密（报价 aes128-ctr），扩展之后加密对上、
-    /// MAC 退到 hmac-sha1，连上（这一条以前退回过，现在照规则再试）。
+    /// 缺 AES-CTR 的集合对只有 AES-CTR + hmac-sha1 的服务器：第一次卡在加密（报价 aes128-ctr），先只补 `.standard` 的
+    /// 现代算法再试（加密对上了，卡在 MAC，不问），再补上旧算法试第三次，MAC 退到 hmac-sha1，连上。
     func testEncryptionMismatchRetriesAndLandsOnLegacyMAC() async throws {
         let server = try await TestSSH.startServer {
             $0.transportProtectionSchemes = [SSHAESCTRTransportProtection<SSHAES128CTR, SSHHMACSHA1>.self]
@@ -420,7 +420,7 @@ final class LegacyFallbackTests: XCTestCase {
         let client = try await TestSSH.connect(server, algorithms: gcmOnly)
         XCTAssertEqual(client.legacyAlgorithmsInUse, [SSHLegacyAlgorithm(role: .mac, name: "hmac-sha1")])
         await client.close()
-        XCTAssertEqual(server.events.acceptedConnections, 2)
+        XCTAssertEqual(server.events.acceptedConnections, 3, "现代算法那一次、旧算法那一次")
     }
 
     /// 恰好两次，报的是第二次的错（进程内，不依赖本机 sshd）：第一次没有共同的主机密钥算法，再试时协商成了，

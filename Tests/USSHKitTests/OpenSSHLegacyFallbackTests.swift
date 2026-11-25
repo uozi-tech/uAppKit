@@ -76,6 +76,20 @@ final class OpenSSHLegacyFallbackTests: XCTestCase {
         XCTAssertTrue(refused.challenges.isEmpty, file: file, line: line)
     }
 
+    /// AES-GCM 加密（MAC 不用），但 sshd 只报了 `hmac-sha1`：要补上旧算法名字才协商得出来。给人看的
+    /// `legacyAlgorithmsInUse` 为空（MAC 不在用），给 App 记录用的三态仍是「需要」（否则 App 会刚同意就把记录清掉）。
+    func testAEADWithOnlySHA1MACNameCountsAsNeeded() async throws {
+        let sshd = try await start(["Ciphers aes256-gcm@openssh.com", "MACs hmac-sha1"])
+        let probe = ApproverProbe(.approve)
+        let client = try await connect(sshd, probe: probe)
+        XCTAssertEqual(client.target.negotiatedAlgorithms?.encryptionIsAEAD, true)
+        XCTAssertEqual(client.legacyAlgorithmsInUse, [])
+        XCTAssertEqual(client.targetNeededLegacyTransport, true)
+        await client.close()
+        await sshd.waitForConnections(2)
+        XCTAssertEqual(sshd.connections, 2, sshd.log)
+    }
+
     func testSHA1HostKeyOnly() async throws {
         let sshd = try await start(["HostKeyAlgorithms ssh-rsa"], rsaHostKey: true)
         try await assertFallback(sshd, expected: [SSHLegacyAlgorithm(role: .hostKey, name: "ssh-rsa")],

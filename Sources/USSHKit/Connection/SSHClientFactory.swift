@@ -42,6 +42,23 @@ public nonisolated struct ConnectedClient: Sendable {
     /// 跳板机那一跳的同上（没有跳板机时为 true）。
     public var bastionLegacyAlgorithmStatusKnown: Bool { bastion.map { $0.negotiatedAlgorithms != nil } ?? true }
 
+    /// 目标那一跳的**传输层**这次是不是靠 SHA-1 时代的旧算法才协商成的：`true` 需要（密钥交换 / 主机密钥 / MAC 有一项是
+    /// 旧算法，含「加密是 AES-GCM、MAC 不用，但服务器只报了 `hmac-sha1`、没有它协商不出来」），`false` 不需要，`nil` 不知道
+    /// （没读懂服务器的 KEXINIT）。`ConnectedClient` 只在连接（含认证）成功之后才有，所以这是已经连上的那一次的结论。
+    ///
+    /// App 记「这台需要旧算法」（`legacyFallbackApproval` 据此决定问不问）按它写：`true` 记、`false` 清、`nil` 不动。
+    /// 别用 `legacyAlgorithmsInUse`：那是给人看的，含 RSA 用户签名的 `ssh-rsa`（与主机那一端的安全性无关），MAC 只看实际
+    /// 在用的（AES-GCM 时为空），两个方向都会记错。也别在 `legacyFallbackApproval` 里提前落盘：同意之后那次连接可能失败，
+    /// 也可能协商到现代算法（中间人只篡改了第一次的 KEXINIT）。
+    public var targetNeededLegacyTransport: Bool? {
+        SSHLegacyFallback.negotiationNeededLegacy(target.negotiatedAlgorithms)
+    }
+
+    /// 跳板机那一跳的同上。没有跳板机时为 nil（没有要记的）。
+    public var bastionNeededLegacyTransport: Bool? {
+        bastion.flatMap { SSHLegacyFallback.negotiationNeededLegacy($0.negotiatedAlgorithms) }
+    }
+
     /// 两条连接（有跳板机时）都还连着。
     public var isConnected: Bool {
         target.isConnected && (bastion?.isConnected ?? true)
@@ -196,13 +213,19 @@ nonisolated enum SSHClientFactory {
         return fallback
     }
 
-    /// 连一跳，按 `SSHLegacyFallback` 的规则至多再试一次。抛的是 USSHCore 的原始错误，由调用方归类；
+    /// 连一跳，按 `SSHLegacyFallback` 的规则再试。抛的是 USSHCore 的原始错误，由调用方归类；
     /// `options.legacyFallbackApproval` 不同意用旧算法时抛 `SSHConnectionError.legacyFallbackDeclined`。
     /// `open` 用给定的配置建这一跳（直连或经跳板机），`role` 是问 app 时报的是哪一跳。
     ///
-    /// 用旧算法连之前问 app 的两处：第一次就要带上旧算法（进程内记着这台需要）、第一次没有共同算法要再试。
-    /// 前一处被拒时不带旧算法照常连一次：主机可能已经升级了；仍然没有共同算法、而补上旧算法就对得上时不再问，
-    /// 直接抛被拒的那一问。被拒时不会再连第二次，进程内的记录也不动（那一次没用上旧算法才会忘掉）。
+    /// 没有共同算法时：
+    /// 1. 调用方的算法集比 `.standard` 窄（如 `.builtInOnly`），而服务器这一类的报价里有 `.standard` 补上的**现代**算法：
+    ///    先只补现代算法再试一次，**不问**（这不是退到旧算法）；
+    /// 2. 仍然（或一开始就）要补上 SHA-1 的旧算法才对得上、或说不出卡在哪一类：问 app，同意了再补上旧算法试一次。
+    /// 所以默认的 `.standard` 至多再试一次，更窄的集合至多两次。
+    ///
+    /// 用旧算法连之前问 app 的两处：第一次就要带上旧算法（进程内记着这台需要）、上面的第 2 步。
+    /// 前一处被拒时不带旧算法照常连：主机可能已经升级了；仍然要补上旧算法才对得上时不再问，抛被拒的那一问
+    /// （`failure` 换成这次实际的协商失败）。被拒时不再连，进程内的记录也不动（那一次没用上旧算法才会忘掉）。
     private static func connectHop(
         _ hop: Hop,
         role: SSHLegacyFallbackRequest.Hop,
@@ -211,10 +234,10 @@ nonisolated enum SSHClientFactory {
     ) async throws -> SSHClient {
         // 凭据只解析一次（带口令的私钥要跑 bcrypt，1024 轮在 Mac 上就要二十秒），在后台队列上做，不占协作线程池。
         let authentication = try await options.credentials.authentication(username: hop.username, credential: hop.credential)
-        var first = firstAttemptAlgorithms(hop, options: options)
+        var attempt = firstAttemptAlgorithms(hop, options: options)
         /// app 不同意用旧算法的那一问（之后不再用旧算法、也不再问）。
         var declined: SSHLegacyFallbackRequest?
-        if first.allowsLegacyAlgorithms, !options.algorithms.allowsLegacyAlgorithms {
+        if attempt.allowsLegacyAlgorithms, !options.algorithms.allowsLegacyAlgorithms {
             // 是进程内的记录让第一次就带上了旧算法。
             let request = SSHLegacyFallbackRequest(
                 hop: role, host: hop.host, port: hop.port, trigger: .remembered,
@@ -222,38 +245,54 @@ nonisolated enum SSHClientFactory {
             let approved = try await approveLegacy(request, options: options)
             if !approved {
                 declined = request
-                first = options.algorithms
+                attempt = options.algorithms
             }
         }
-        let fallback = options.legacyFallback && !first.allowsLegacyAlgorithms
-            ? SSHLegacyFallback.retryAlgorithms(for: first) : nil
-        let watch = SSHApproverWatch()
-        var firstOptions = options
-        firstOptions.approver = watch.wrap(options.approver)
-        let client: SSHClient
-        var retriedAfter: SSHAlgorithmNegotiationFailure?
-        do {
-            client = try await open(makeConfiguration(hop, options: firstOptions, algorithms: first,
-                                                      authentication: authentication))
-        } catch SSHClientError.noCommonAlgorithm(let failure) {
-            guard let fallback, SSHLegacyFallback.shouldRetry(after: failure, first: first, retry: fallback),
-                  !watch.wasCalled else {
-                throw SSHClientError.noCommonAlgorithm(failure)
+        /// 补现代算法那一步做过没有（至多一次）。
+        var triedModernRetry = false
+        /// 让这次补上了旧算法的那次协商失败（连上之后记进进程内记录）。
+        var legacyRetryAfter: SSHAlgorithmNegotiationFailure?
+        while true {
+            let watch = SSHApproverWatch()
+            var attemptOptions = options
+            attemptOptions.approver = watch.wrap(options.approver)
+            do {
+                let client = try await open(makeConfiguration(hop, options: attemptOptions, algorithms: attempt,
+                                                              authentication: authentication))
+                note(client, hop: hop, options: options, failure: legacyRetryAfter)
+                return client
+            } catch SSHClientError.noCommonAlgorithm(let failure) {
+                // 问过主机密钥信任的不再试（不问两次）；已经带着旧算法的、关掉退级的也不再试。
+                guard options.legacyFallback, !attempt.allowsLegacyAlgorithms, !watch.wasCalled else {
+                    throw SSHClientError.noCommonAlgorithm(failure)
+                }
+                if !triedModernRetry, failure.category != nil,
+                   let modern = SSHLegacyFallback.retryAlgorithms(for: attempt, includingLegacy: false),
+                   SSHLegacyFallback.shouldRetry(after: failure, first: attempt, retry: modern) {
+                    triedModernRetry = true
+                    try Task.checkCancellation()
+                    attempt = modern
+                    continue
+                }
+                guard let fallback = SSHLegacyFallback.retryAlgorithms(for: attempt),
+                      SSHLegacyFallback.shouldRetry(after: failure, first: attempt, retry: fallback) else {
+                    throw SSHClientError.noCommonAlgorithm(failure)
+                }
+                if var declined {
+                    declined.failure = failure
+                    throw SSHConnectionError.legacyFallbackDeclined(declined)
+                }
+                let request = SSHLegacyFallbackRequest(hop: role, host: hop.host, port: hop.port,
+                                                       trigger: .noCommonAlgorithm, failure: failure)
+                guard try await approveLegacy(request, options: options) else {
+                    throw SSHConnectionError.legacyFallbackDeclined(request)
+                }
+                // 这一次的错误（含又一次没有共同算法）原样交出去：带着旧算法，循环开头的守卫不再试。
+                try Task.checkCancellation()
+                attempt = fallback
+                legacyRetryAfter = failure
             }
-            if let declined { throw SSHConnectionError.legacyFallbackDeclined(declined) }
-            let request = SSHLegacyFallbackRequest(hop: role, host: hop.host, port: hop.port,
-                                                   trigger: .noCommonAlgorithm, failure: failure)
-            guard try await approveLegacy(request, options: options) else {
-                throw SSHConnectionError.legacyFallbackDeclined(request)
-            }
-            // 第二次的错误（含又一次没有共同算法）原样交出去。
-            try Task.checkCancellation()
-            client = try await open(makeConfiguration(hop, options: options, algorithms: fallback,
-                                                      authentication: authentication))
-            retriedAfter = failure
         }
-        note(client, hop: hop, options: options, failure: retriedAfter)
-        return client
     }
 
     /// 用旧算法连之前问 app；没给 `legacyFallbackApproval` 时同意（今天的行为）。不同意时记一条日志。
@@ -263,6 +302,8 @@ nonisolated enum SSHClientFactory {
     /// `CancellationError`，不等闭包返回。不论哪种结局，闭包所在的任务都会被取消。
     private static func approveLegacy(_ request: SSHLegacyFallbackRequest, options: Options) async throws -> Bool {
         guard options.legacyFallback, let approval = options.legacyFallbackApproval else { return true }
+        // 建连任务已经取消了就不弹询问（例如第一次连接正好以「没有共同算法」结束的同一刻被取消）。
+        try Task.checkCancellation()
         let outcome = try await SSHLegacyApprovalWait.run(approval, request: request, timeout: options.approvalTimeout)
         guard outcome != .approved else { return true }
         options.logger.log(SSHLogEvent(
@@ -283,10 +324,13 @@ nonisolated enum SSHClientFactory {
     /// 连上之后：记下这一跳要不要旧算法、记警告（见 `SSHLegacyFallback.outcome`）。
     private static func note(_ client: SSHClient, hop: Hop, options: Options,
                              failure: SSHAlgorithmNegotiationFailure?) {
+        // 进程内记录只在自动退级的模式下写：调用方自己给了带旧算法的集合（`.legacyCompatible`）时，这次用上旧算法
+        // 不说明「需要」，也没有退级那一次的失败可记。
         let events = SSHLegacyFallback.outcome(
             negotiated: client.negotiatedAlgorithms, rsaUserAuthentication: client.rsaUserAuthenticationAlgorithm,
-            host: hop.host, port: hop.port, legacyFallback: options.legacyFallback, memory: options.legacyMemory,
-            failure: failure)
+            host: hop.host, port: hop.port,
+            legacyFallback: options.legacyFallback && !options.algorithms.allowsLegacyAlgorithms,
+            memory: options.legacyMemory, failure: failure)
         for event in events { options.logger.log(event) }
     }
 
@@ -312,8 +356,8 @@ nonisolated enum SSHClientFactory {
             throw rejection
         } catch SSHConnectionError.legacyFallbackDeclined(let request) {
             // 文案自己就说了是哪台跳板机，不再套「无法连接……」。
-            let declined = SSHConnectionError.legacyFallbackDeclined(request)
-            throw SSHConnectionError.jumpHostFailed(SSHErrorText.describe(declined), cause: declined)
+            throw SSHConnectionError.jumpHostFailed(SSHErrorText.describeLegacyDecline(request),
+                                                    cause: .legacyFallbackDeclined(request))
         } catch {
             // `connectDirect` 抛的已经是归好类的 `SSHConnectionError`。
             throw SSHConnectionError.jumpHostFailed(
@@ -327,6 +371,13 @@ nonisolated enum SSHClientFactory {
                 try await bastion.jump(to: target.host, port: target.port, configuration: configuration)
             }
             return ConnectedClient(target: client, bastion: bastion)
+        } catch SSHConnectionError.legacyFallbackDeclined(let request) {
+            // 目标那一跳没同意用旧算法：说清楚是经哪台跳板机、没连哪台目标（跳板机本身是好的）。
+            await bastion.close()
+            throw SSHConnectionError.jumpHostFailed(
+                SSHErrorText.describeLegacyDecline(
+                    request, via: SSHErrorText.address(host: bastionHop.host, port: bastionHop.port)),
+                cause: .legacyFallbackDeclined(request))
         } catch let error as SSHConnectionError {
             // 组配置时的失败（私钥导入等）。
             await bastion.close()
@@ -442,10 +493,10 @@ nonisolated final class SSHCredentialResolver: @unchecked Sendable {
                                              attributes: .concurrent)
 
     func authentication(username: String, credential: SSHCredential) async throws -> SSHAuthentication {
+        try Task.checkCancellation()
         if let cached = lock.withLock({ methods[credential] }) {
             return SSHAuthentication(username: username, methods: cached)
         }
-        try Task.checkCancellation()
         let resolved: [SSHAuthenticationMethod] = try await withCheckedThrowingContinuation { continuation in
             Self.queue.async {
                 continuation.resume(with: Result {
@@ -481,6 +532,7 @@ nonisolated enum SSHLegacyApprovalWait {
         request: SSHLegacyFallbackRequest,
         timeout: Duration
     ) async throws -> Outcome {
+        try Task.checkCancellation()
         let slot = SSHOneShotSlot<Outcome>()
         let asking = Task {
             let approved = await approval(request)
