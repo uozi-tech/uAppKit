@@ -355,6 +355,10 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
         func tearDown() {
             if let m = localMonitor { NSEvent.removeMonitor(m); localMonitor = nil }
             if let panel {
+                // 面板里的输入框（搜索框）还在编辑时，收起会让字段编辑器 resign，AppKit 当场把攒着的拼写 /
+                // 自动更正检查同步跑完，在主线程等 Default QoS 的 DataDetectors 扫描器（Xcode 报优先级反转）。
+                // 面板马上销毁，这次检查没有意义：先清掉检查类型。字段编辑器属于本面板，随它一起丢掉。
+                (panel.firstResponder as? NSTextView)?.enabledTextCheckingTypes = 0
                 panel.parent?.removeChildWindow(panel)
                 panel.orderOut(nil)
                 panel.close()
