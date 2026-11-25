@@ -114,6 +114,13 @@ public actor SSHFileTransferSession {
     /// `.keepAliveTimeout`) and every request in flight fails instead of hanging.
     /// `nil` (the default) sends none.
     ///
+    /// `legacyFallbackApproval` is asked before any hop is connected with the
+    /// SHA-1-era algorithms (same rules as
+    /// `USSHKitIntegration.connect(legacyFallbackApproval:)`); declining throws
+    /// `SSHConnectionError.legacyFallbackDeclined` (wrapped in
+    /// `.jumpHostFailed`'s `cause` through a jump host), which is not
+    /// retryable. `nil` (the default) never asks and falls back as before.
+    ///
     /// On any failure after the SSH transport is established the transport is
     /// closed before the error propagates, so a caller that only receives the
     /// thrown error never leaks a live connection.
@@ -127,7 +134,8 @@ public actor SSHFileTransferSession {
         channelWindowBytes: Int = SSHFileTransferSession.defaultChannelWindowBytes,
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in false },
         logger: any SSHLogger = NoOpSSHLogger(),
-        keepAliveInterval: Duration? = nil
+        keepAliveInterval: Duration? = nil,
+        legacyFallbackApproval: (@Sendable (SSHLegacyFallbackRequest) async -> Bool)? = nil
     ) async throws -> SSHFileTransferSession {
         let connected = try await SSHClientFactory.connect(
             endpoint: endpoint,
@@ -139,6 +147,7 @@ public actor SSHFileTransferSession {
             approver: approver,
             maximumPacketSize: maximumPacketSize(forWindow: channelWindowBytes),
             keepAliveInterval: keepAliveInterval,
+            legacyFallbackApproval: legacyFallbackApproval,
             logger: logger
         )
         do {

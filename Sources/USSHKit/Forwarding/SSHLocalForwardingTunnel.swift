@@ -16,6 +16,8 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
     private let keepAliveInterval: Duration?
     /// 隧道底下的 SSH 连接（任一跳）不是本端关的而断了时回调一次。
     private let onDisconnect: @Sendable (SSHDisconnectReason) -> Void
+    /// 用旧算法连某一跳之前问 app（同 `USSHKitIntegration.connect(legacyFallbackApproval:)`）；nil 不问，照旧自动退级。
+    private let legacyFallbackApproval: (@Sendable (SSHLegacyFallbackRequest) async -> Bool)?
 
     private var connected: ConnectedClient?
     private var listener: LocalForwardListener?
@@ -35,7 +37,8 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
         approver: @escaping @Sendable (SSHHostKeyChallenge) async -> Bool = { _ in false },
         onChannelFailure: @escaping @Sendable (SSHForwardingChannelFailure) -> Void = { _ in },
         keepAliveInterval: Duration? = nil,
-        onDisconnect: @escaping @Sendable (SSHDisconnectReason) -> Void = { _ in }
+        onDisconnect: @escaping @Sendable (SSHDisconnectReason) -> Void = { _ in },
+        legacyFallbackApproval: (@Sendable (SSHLegacyFallbackRequest) async -> Bool)? = nil
     ) {
         self.request = request
         self.hostKeyStore = hostKeyStore
@@ -48,6 +51,7 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
         self.onChannelFailure = onChannelFailure
         self.keepAliveInterval = keepAliveInterval
         self.onDisconnect = onDisconnect
+        self.legacyFallbackApproval = legacyFallbackApproval
     }
 
     /// 隧道能用：已经 `open()`、没有 `close()`、本地监听开着、每一跳的 SSH 连接都还连着。
@@ -60,6 +64,8 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
     /// SSH 连接断开的原因（本端 `close()` 不算）。连着、没开、或是本端关的时为 nil。
     public var disconnectReason: SSHDisconnectReason? { lostReason }
 
+    /// 建连（含跳板机）并开始本地监听。`legacyFallbackApproval` 没同意用旧算法时抛
+    /// `SSHConnectionError.legacyFallbackDeclined`（经跳板机时在 `.jumpHostFailed` 的 `cause` 里），不可重试。
     public func open() async throws -> SSHForwardingEndpoint {
         guard connected == nil, listener == nil else {
             throw SSHConnectionError.alreadyOpen
@@ -77,6 +83,7 @@ public actor SSHLocalForwardingTunnel: SSHForwardingTunnel {
             approvalTimeout: approvalTimeout,
             approver: approver,
             keepAliveInterval: keepAliveInterval,
+            legacyFallbackApproval: legacyFallbackApproval,
             // 建连这一段的日志（用上了 SHA-1 旧算法的那条警告）也交给 app 的 logger。
             logger: logger
         )

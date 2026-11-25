@@ -114,7 +114,7 @@ public struct SSHLegacyFallbackRequest: Sendable, Hashable {
 | `struct SSHPrivateKey: @unchecked Sendable` | `struct SSHPrivateKey: Sendable` |
 | `SSHConnectionError` | **新增 `.legacyFallbackDeclined(SSHLegacyFallbackRequest)`**（`legacyFallbackApproval` 没同意用旧算法，第 5 节；不重试；不给那个闭包时永远不会抛；app 对 `SSHConnectionError` 的 `switch` 与断线分类要补，见 7.1）；**新增 `.handshakeFailed(String)`**（握手 / 算法协商不成，文案与 `.connectFailed` 相同；app 对它的 `switch` 要补，重连逻辑别在它上面打转）；**抛哪个变了**：服务器拒绝凭据 → `.authenticationFailed("服务器拒绝了密码 / 私钥…")`（以前是 `.connectFailed("…allAuthenticationOptionsFailed…")`）；等确认主机密钥超时 → `.hostKeyRejected("等待确认主机密钥超时（N 秒）")`；取消建连抛 `CancellationError`（不包） |
 | `SSHFileTransferSession`、`SSHLocalForwardingTunnel`、`SSHPrivateKeyParser`、`KeyImportInspector`、`SSHKeyGenerator`、`PrivateKeyImportError`、`KeyImportErrorMessage` | 签名不变（`SSHFileTransferSession.open` 末尾多一个可选的 `logger:`）；`SSHFileTransferSession.download` 遇到变短的文件改为报错（第 6 节） |
-| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口没有 `algorithms:` / `legacyFallback:`：一律 `.standard`、自动退级 |
+| `SSHLocalForwardingTunnel(logger:)` 只收到监听器 / 开通道的日志 | 建连那一段（自动退到旧算法时的 `.warning`）也交给这个 `logger`；`SSHFileTransferSession.open(logger:)` 同样。这两个入口没有 `algorithms:` / `legacyFallback:`：一律 `.standard`、自动退级；都有可选的 `legacyFallbackApproval:`（默认 `nil` 不问，第 5 节） |
 | 隧道 / SFTP 会话闲置时链路死了没人发现；SSH 断了隧道照样监听着本地端口 | 新增保活与存活（第 5 节「隧道与 SFTP 会话」）：`SSHLocalForwardingTunnel(…, keepAliveInterval: Duration? = nil, onDisconnect: @escaping @Sendable (SSHDisconnectReason) -> Void = { _ in })`，`public var isConnected: Bool`、`public var disconnectReason: SSHDisconnectReason?`；`SSHFileTransferSession.open(…, keepAliveInterval: Duration? = nil)`，`public nonisolated var isConnected: Bool`、`public nonisolated var disconnectReason: SSHDisconnectReason?`；`SSHDisconnectReason.userDescription`（给人看的原因） |
 | `HostKeyStore.verify` / `remember` 抛的错被包成 `SSHConnectionError.hostKeyRejected(String)`，类型丢了 | 抛的错遵守新的 `public protocol HostKeyStoreRejection: Error` 时原样交给 `connect` / `open` 的调用方（直连与经跳板机两跳都是），不包；没遵守的照旧包（第 7.1 节） |
 | USSHCore 的错误类型没有文案 | USSHKit 给 `SSHClientError`、`SSHChannelError`、`SFTPError`、`SSHCommandError`、`SSHRSAError` 补上 `LocalizedError`（四种语言），`error.localizedDescription` 直接可用。判断一律看类型与 case，不看文案 |
@@ -262,8 +262,15 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
       非空就记、为空就清；状态不知道时 `legacyAlgorithmStatusKnown == false`，别动）；闭包里对记着「需要旧算法」的直接同意，对已信任、
       没这个记号的问用户（「这台主机以前用的是更安全的加密方式，这次只提供了旧的 SHA-1 方式。可能是服务器改了配置，也可能有人在中间
       篡改。」），同意了就连并记上。主机密钥第一次见（还没信任）的主机不在此列：反正要先问信任。
-    - `makeConfiguration` 是同步的，问不了这个闭包（它照旧按进程内的记录直接给旧算法的那一套）：要先问用户的调用方用 `connect`，或者传
-      `legacyFallback: false`。`SSHLocalForwardingTunnel` 与 `SSHFileTransferSession.open` 没有这个参数（不问，照旧自动退级）。
+    - **带这个钩子的入口**（USSHKit 里会建 SSH 连接的公开入口就这三个，参数名、类型、默认值、规则都一样）：
+      - `USSHKitIntegration.connect(…, legacyFallbackApproval:)`（SPI，uTerm 用）；
+      - `SSHLocalForwardingTunnel(…, legacyFallbackApproval:)`（init 的最后一个参数），在 `open()` 里建连时问，被拒时 `open()` 抛错、
+        没有开始监听（uTable 的数据库隧道）；
+      - `SSHFileTransferSession.open(…, legacyFallbackApproval:)`（最后一个参数，uTable 的远程 SQLite）。
+      后两个用进程级的共享记录（`connect` 也是），所以 uTable 里某台记成「需要旧算法」之后，下次是 `.remembered` 那一问。
+    - **不带钩子的**：`USSHKitIntegration.makeConfiguration` 是同步的，问不了（它照旧按进程内的记录直接给旧算法的那一套）：要先问用户的
+      调用方用上面三个入口，或者传 `legacyFallback: false`。USSHCore 的 `SSHClient.connect` / `jump` 本身不退级（只用传进去的配置），
+      无所谓问不问。
   - `legacyFallback: false`：只用 `algorithms`，没有共同算法就报 `.handshakeFailed`（文案说明是哪一类、服务器报了什么）。
 - **协商到的算法**：USSHCore 的 `SSHClient.negotiatedAlgorithms`（`SSHNegotiatedAlgorithms`：密钥交换、主机密钥、加密、商定的 MAC 名、
   `encryptionIsAEAD` / `macInUse`、压缩）与 `rsaUserAuthenticationAlgorithm`（RSA 用户私钥成功时用的签名算法）。NIOSSH 不公开它自己的
@@ -369,7 +376,8 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
   再问一遍。uTerm 里要改的：`SSHTransportFailure.isPermanentConnectFailure` 把它算进 `true`；`JumpHostFailureCause.init` 现在对它走
   `default` 会归成 `.unreachable`（**会被当成网络问题自动重连**），要给它一个不可重试的归类（例如归进 `.handshake`，或新增一个值——
   线上按 rawValue 传，加值要两端一起）；`SSHClientFactory` 里把 USSHKit 错误映射成 app 错误的 `switch` 现在对它走 `default` 归成
-  `.connectFailed`（同样会被重连），要单独映射。这几处都用 `default`，编译器不会提醒。
+  `.connectFailed`（同样会被重连），要单独映射。这几处都用 `default`，编译器不会提醒。uTable 同理：数据库隧道
+  （`SSHLocalForwardingTunnel.open()`）与远程 SQLite（`SSHFileTransferSession.open`）的重连 / 连接池逻辑要把它算成不可重试。
 
 ### 7.2 开通道被拒（`SSHChannelOpenFailure.reason`）
 

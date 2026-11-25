@@ -268,6 +268,115 @@ final class LegacyFallbackApprovalTests: XCTestCase {
         XCTAssertEqual(bastion.events.directTCPIPTargets.count, 1)
     }
 
+    // MARK: - 其它入口：本地转发隧道、SFTP 会话
+
+    /// `SSHLocalForwardingTunnel`：不同意 → 只连一次、抛 `legacyFallbackDeclined`，没有开始监听。
+    func testForwardingTunnelDeclineConnectsOnce() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let probe = ApprovalProbe(false)
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll,
+            legacyFallbackApproval: probe.approval)
+        let request = await declinedRequest { _ = try await tunnel.open() }
+        XCTAssertEqual(request?.hop, .target)
+        XCTAssertEqual(request?.trigger, .noCommonAlgorithm)
+        XCTAssertEqual(request?.serverOffer, ["ssh-rsa"])
+        XCTAssertEqual(probe.requests.count, 1)
+        XCTAssertEqual(attempts(server), 1)
+        let connected = await tunnel.isConnected
+        XCTAssertFalse(connected)
+        await tunnel.close()
+    }
+
+    /// `SSHLocalForwardingTunnel`：同意 → 与不问一样（两次连接，隧道通了）。
+    func testForwardingTunnelApproveBehavesAsBefore() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let probe = ApprovalProbe(true)
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll,
+            legacyFallbackApproval: probe.approval)
+        _ = try await tunnel.open()
+        let connected = await tunnel.isConnected
+        XCTAssertTrue(connected)
+        await tunnel.close()
+        XCTAssertEqual(probe.requests.map(\.trigger), [.noCommonAlgorithm])
+        XCTAssertEqual(attempts(server), 2)
+    }
+
+    /// `SSHLocalForwardingTunnel` 经跳板机：跳板机那一跳被拒，包在 `jumpHostFailed` 的 `cause` 里，跳板机只连一次。
+    func testForwardingTunnelJumpHostDeclineIsWrapped() async throws {
+        let target = try await TestSSH.startServer()
+        let bastion = try await sha1HostKeyServer()
+        defer { Task { await target.stop(); await bastion.stop() } }
+        let probe = ApprovalProbe(false)
+        let tunnel = SSHLocalForwardingTunnel(
+            request: SSHForwardingRequest(endpoint: TestSSH.endpoint(target, jumpHost: jumpHost(bastion)),
+                                          credential: .password(TestSSH.password),
+                                          targetHost: "127.0.0.1", targetPort: 9),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll,
+            legacyFallbackApproval: probe.approval)
+        do {
+            _ = try await tunnel.open()
+            XCTFail("应当失败")
+        } catch SSHConnectionError.jumpHostFailed(_, let cause) {
+            guard case .legacyFallbackDeclined(let request)? = cause else {
+                return XCTFail("cause 应是 legacyFallbackDeclined，实际 \(String(describing: cause))")
+            }
+            XCTAssertEqual(request.hop, .jumpHost)
+        }
+        XCTAssertEqual(attempts(bastion), 1)
+        XCTAssertEqual(attempts(target), 0)
+        await tunnel.close()
+    }
+
+    /// `SSHFileTransferSession.open`：不同意 → 只连一次、抛 `legacyFallbackDeclined`。
+    func testFileTransferSessionDeclineConnectsOnce() async throws {
+        let fileSystem = try SFTPLocalFileSystem.makeTemporary(prefix: "usshkit-legacy-approval")
+        defer { try? fileSystem.removeRoot() }
+        let server = try await TestSSH.startServer {
+            $0.useRSAHostKey(Self.rsaHostKey, algorithms: [.sshRSA])
+            $0.serveSFTP(fileSystem: fileSystem)
+        }
+        defer { Task { await server.stop() } }
+        let probe = ApprovalProbe(false)
+        let request = await declinedRequest {
+            _ = try await SSHFileTransferSession.open(
+                endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+                hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll, approver: { _ in true },
+                legacyFallbackApproval: probe.approval)
+        }
+        XCTAssertEqual(request?.hop, .target)
+        XCTAssertEqual(request?.category, .hostKey)
+        XCTAssertEqual(probe.requests.count, 1)
+        XCTAssertEqual(attempts(server), 1)
+    }
+
+    /// `SSHFileTransferSession.open`：同意 → 与不问一样，会话开得起来。
+    func testFileTransferSessionApproveBehavesAsBefore() async throws {
+        let fileSystem = try SFTPLocalFileSystem.makeTemporary(prefix: "usshkit-legacy-approval")
+        defer { try? fileSystem.removeRoot() }
+        let server = try await TestSSH.startServer {
+            $0.useRSAHostKey(Self.rsaHostKey, algorithms: [.sshRSA])
+            $0.serveSFTP(fileSystem: fileSystem)
+        }
+        defer { Task { await server.stop() } }
+        let probe = ApprovalProbe(true)
+        let session = try await SSHFileTransferSession.open(
+            endpoint: TestSSH.endpoint(server), credential: .password(TestSSH.password),
+            hostKeyStore: MemoryHostKeyStore(), hostKeyPolicy: .insecureAcceptAll, approver: { _ in true },
+            legacyFallbackApproval: probe.approval)
+        XCTAssertTrue(session.isConnected)
+        await session.close()
+        XCTAssertEqual(probe.requests.count, 1)
+        XCTAssertEqual(attempts(server), 2)
+    }
+
     // MARK: - 别的
 
     /// 等回答的时候建连任务被取消：闭包返回之后抛 `CancellationError`，不再连。
