@@ -16,6 +16,7 @@ final class LegacyFallbackTests: XCTestCase {
         private let lock = NSLock()
         private var recorded: [SSHLogEvent] = []
         var warnings: [SSHLogEvent] { lock.withLock { recorded.filter { $0.level == .warning } } }
+        var events: [SSHLogEvent] { lock.withLock { recorded } }
         func log(_ event: SSHLogEvent) { lock.withLock { recorded.append(event) } }
     }
 

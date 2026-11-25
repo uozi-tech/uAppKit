@@ -249,9 +249,12 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
       调用方自己传了带旧算法的 `algorithms`（如 `.legacyCompatible`）时不算退级，不问。RSA **用户**私钥在同一条连接里退到 `ssh-rsa`
       签名不经过它（那不是降低服务器那一端的安全性，理由见下一条与 `SSHLegacyFallback` 的头注释）。
     - **跳板机**：两跳各问各的，`request.hop` 是 `.target` 或 `.jumpHost`，`host` / `port` 是那一跳的。
-    - **线程**：在建连的任务里调，不在主线程上（USSHKit 的建连函数是 `nonisolated` 的）。要弹界面就在闭包里切到主线程，或者直接传
-      `@MainActor` 的闭包。等回答时没有连接开着、不计时（不受 `connectTimeout` / `approvalTimeout` 限制，要上限 app 自己加）；
-      `connect` 所在的任务被取消时，闭包返回之后抛 `CancellationError`——闭包自己要响应取消，否则会一直等到它返回。
+    - **线程**：在建连的任务里另起一个任务调，不在主线程上（USSHKit 的建连函数是 `nonisolated` 的）。要弹界面就在闭包里切到主线程，
+      或者直接传 `@MainActor` 的闭包。
+    - **时限与取消**：限时 `approvalTimeout`（与等主机密钥确认同一个参数，默认 180 秒；隧道与 SFTP 会话用它们自己的 `approvalTimeout`）。
+      到点还没回答**按不同意处理**：抛 `legacyFallbackDeclined(request)`，`.info` 日志的 metadata 里 `timedOut` 为 `"true"`——app 把询问
+      交给一个没人接的通道时，连接不会永远停在「连接中」。建连的任务被取消时**立刻**抛 `CancellationError`，不等闭包返回。超时、取消、
+      回答之后，闭包所在的任务都会被取消（闭包里的界面可以据此收起）。等的时候没有连接开着，`connectTimeout` 不计。
     - **不同意**（返回 `false`）：不再连，抛 `SSHConnectionError.legacyFallbackDeclined(request)`，`request` 就是被拒的那一问；
       经跳板机时（哪一跳都一样）包在 `.jumpHostFailed(String, cause: .legacyFallbackDeclined(request))` 里，`String` 直接是那一问的文案
       （「没有连接跳板机 host:22：这台跳板机这次只提供较旧、安全性较低的加密方式（SHA-1），所以没有继续连接。」）。进程内的记录不动，
@@ -268,8 +271,9 @@ uTerm 的 `SSHClientFactory.windowOptions(bytes:)` / `clampedMaximumPacketSize` 
         没有开始监听（uTable 的数据库隧道）；
       - `SSHFileTransferSession.open(…, legacyFallbackApproval:)`（最后一个参数，uTable 的远程 SQLite）。
       后两个用进程级的共享记录（`connect` 也是），所以 uTable 里某台记成「需要旧算法」之后，下次是 `.remembered` 那一问。
-    - **不带钩子的**：`USSHKitIntegration.makeConfiguration` 是同步的，问不了（它照旧按进程内的记录直接给旧算法的那一套）：要先问用户的
-      调用方用上面三个入口，或者传 `legacyFallback: false`。USSHCore 的 `SSHClient.connect` / `jump` 本身不退级（只用传进去的配置），
+    - **不带钩子的**：`USSHKitIntegration.makeConfiguration` 是同步的，问不了，而且**会绕过 `legacyFallbackApproval`**：进程内记着
+      需要旧算法时它不经询问就带上旧算法（另一个入口问过、记下的也算）。给了询问闭包的调用方不要用它——用上面三个入口，或者传
+      `legacyFallback: false`。（没改成「记着也不带」：那样只支持 SHA-1 的主机经它就再也连不上，它又没法再试一次。两个 App 都没调用它。）USSHCore 的 `SSHClient.connect` / `jump` 本身不退级（只用传进去的配置），
       无所谓问不问。
   - `legacyFallback: false`：只用 `algorithms`，没有共同算法就报 `.handshakeFailed`（文案说明是哪一类、服务器报了什么）。
 - **协商到的算法**：USSHCore 的 `SSHClient.negotiatedAlgorithms`（`SSHNegotiatedAlgorithms`：密钥交换、主机密钥、加密、商定的 MAC 名、

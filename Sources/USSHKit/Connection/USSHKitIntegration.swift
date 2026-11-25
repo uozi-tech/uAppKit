@@ -40,8 +40,9 @@ public enum USSHKitIntegration {
     ///       不同意时这一次不带旧算法照常连（主机可能已经升级）；仍然要旧算法才连得上时不再问，直接按不同意处理。
     ///     返回 `true` 照常用旧算法连；返回 `false` 不再连，抛 `SSHConnectionError.legacyFallbackDeclined(request)`
     ///     （经跳板机时包在 `.jumpHostFailed(_, cause:)` 里），进程内的记录也不动。一次 `connect` 里每一跳至多问一次。
-    ///     在建连的任务里调（不在主线程上；要弹界面就在闭包里切到主线程，或者传一个 `@MainActor` 的闭包）。等它的时候
-    ///     没有连接开着、不计时；`connect` 所在的任务被取消时，闭包返回之后抛 `CancellationError`（闭包自己要响应取消）。
+    ///     在建连的任务里起一个单独的任务调它（不在主线程上；要弹界面就在闭包里切到主线程，或者传一个 `@MainActor` 的闭包）。
+    ///     限时 `approvalTimeout`（与等主机密钥确认同一个）：到点没回答按不同意处理（抛 `legacyFallbackDeclined`，日志写明超时）；
+    ///     `connect` 所在的任务被取消时立刻抛 `CancellationError`，不等闭包返回。这两种情况下闭包所在的任务都会被取消。
     ///     RSA **用户**私钥在同一条连接里退到 `ssh-rsa` 签名不经过它（那不是降低服务器那一端的安全性，见 `SSHLegacyFallback`）。
     ///   - logger: 记自动退级之类的事件。
     /// - Throws: `SSHConnectionError`；任务被取消时抛 `CancellationError`（连接已关闭）。
@@ -105,8 +106,11 @@ public enum USSHKitIntegration {
     /// 自己调 `SSHClient.connect(host:port:configuration:)` 或 `client.jump(to:port:configuration:)` 时用。
     /// 参数与默认值同 `connect`（算法默认 `.standard`，见那里的说明）。只建一条连接用不了「再连一次」：
     /// `legacyFallback` 开着时，这一跳在进程内记着需要旧算法就直接给补上旧算法的那一套，并打开同一条连接里
-    /// RSA 用户私钥的 `ssh-rsa` 回退。它是同步的，问不了 `connect` 的 `legacyFallbackApproval`：要先问用户的调用方
-    /// 用 `connect`，或者传 `legacyFallback: false`。
+    /// RSA 用户私钥的 `ssh-rsa` 回退。
+    ///
+    /// **它会绕过 `legacyFallbackApproval`**：它是同步的，问不了；进程内记着需要旧算法时它不经询问就带上旧算法。
+    /// 给了询问闭包的调用方（要拦「已信任主机突然要旧算法」的）不要用它——用 `connect`（或 `SSHLocalForwardingTunnel`、
+    /// `SSHFileTransferSession.open`），或者在这里传 `legacyFallback: false`。
     public static func makeConfiguration(
         host: String,
         port: Int,

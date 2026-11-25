@@ -401,6 +401,88 @@ final class LegacyFallbackApprovalTests: XCTestCase {
         XCTAssertEqual(attempts(server), 1)
     }
 
+    /// 一个永远不回答、也不响应取消的询问（例如交给了没人接的通道）。用例结束时 `release()` 放掉。
+    final class NeverAnswer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: [CheckedContinuation<Bool, Never>] = []
+        private var cancelledFlag = false
+        private var askedCount = 0
+        var asked: Int { lock.withLock { askedCount } }
+        var cancelled: Bool { lock.withLock { cancelledFlag } }
+
+        var approval: @Sendable (SSHLegacyFallbackRequest) async -> Bool {
+            { [self] _ in
+                await withTaskCancellationHandler {
+                    await withCheckedContinuation { continuation in
+                        lock.withLock {
+                            askedCount += 1
+                            waiting.append(continuation)
+                        }
+                    }
+                } onCancel: {
+                    lock.withLock { cancelledFlag = true }
+                }
+            }
+        }
+
+        func release() {
+            let all = lock.withLock { () -> [CheckedContinuation<Bool, Never>] in
+                defer { waiting = [] }
+                return waiting
+            }
+            for continuation in all { continuation.resume(returning: false) }
+        }
+    }
+
+    /// 永远不回答：到 `approvalTimeout` 按不同意处理（抛 `legacyFallbackDeclined`、只连一次、日志写明超时），
+    /// 不会一直停在「连接中」；闭包所在的任务被取消。
+    func testUnansweredApprovalTimesOutAsDeclined() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let never = NeverAnswer()
+        defer { never.release() }
+        let log = LegacyFallbackTests.LogProbe()
+        let memory = SSHLegacyEndpointMemory()
+        let started = ContinuousClock.now
+        let request = await declinedRequest {
+            _ = try await TestSSH.connect(server, approvalTimeout: .milliseconds(300),
+                                          legacyFallbackApproval: never.approval, legacyMemory: memory, logger: log)
+        }
+        let elapsed = ContinuousClock.now - started
+        XCTAssertEqual(request?.trigger, .noCommonAlgorithm)
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(300))
+        XCTAssertLessThan(elapsed, .seconds(5))
+        XCTAssertEqual(attempts(server), 1)
+        XCTAssertFalse(memory.needsLegacy(host: server.host, port: server.port))
+        XCTAssertEqual(log.events.last?.metadata["timedOut"], "true")
+        XCTAssertTrue(never.cancelled, "到点之后取消闭包所在的任务")
+    }
+
+    /// 等回答时取消建连任务：立刻抛 `CancellationError`，不等闭包（它不响应取消）返回，也不等 `approvalTimeout`。
+    func testCancellationDoesNotWaitForAnUnresponsiveApproval() async throws {
+        let server = try await sha1HostKeyServer()
+        defer { Task { await server.stop() } }
+        let never = NeverAnswer()
+        defer { never.release() }
+        let task = Task {
+            try await TestSSH.connect(server, approvalTimeout: .seconds(180), legacyFallbackApproval: never.approval)
+        }
+        let deadline = ContinuousClock.now + .seconds(10)
+        while never.asked == 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(never.asked, 1)
+        let cancelledAt = ContinuousClock.now
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("应当被取消")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertLessThan(ContinuousClock.now - cancelledAt, .seconds(2))
+        XCTAssertEqual(attempts(server), 1)
+        XCTAssertTrue(never.cancelled)
+    }
+
     /// RSA 用户私钥在同一条连接里退到 `ssh-rsa` 签名不经过它（那不是降低服务器那一端的安全性）。
     func testRSAUserSignatureFallbackIsNotAsked() async throws {
         var authentication = SSHTestAuthentication(

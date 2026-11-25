@@ -257,23 +257,27 @@ nonisolated enum SSHClientFactory {
     }
 
     /// 用旧算法连之前问 app；没给 `legacyFallbackApproval` 时同意（今天的行为）。不同意时记一条日志。
-    /// 等回答之后看一次取消：等的时候没有连接开着，不计时，取消建连的任务就停。
+    ///
+    /// 限时 `options.approvalTimeout`（与等主机密钥确认同一个时限）：到点还没回答按不同意处理，日志写明是超时——app 把询问交给
+    /// 没人接的通道时，连接不会永远停在「连接中」。等的时候没有连接开着，`connectTimeout` 不计。建连任务被取消时立刻抛
+    /// `CancellationError`，不等闭包返回。不论哪种结局，闭包所在的任务都会被取消。
     private static func approveLegacy(_ request: SSHLegacyFallbackRequest, options: Options) async throws -> Bool {
         guard options.legacyFallback, let approval = options.legacyFallbackApproval else { return true }
-        let approved = await approval(request)
-        try Task.checkCancellation()
-        if !approved {
-            options.logger.log(SSHLogEvent(
-                level: .info,
-                message: "没有同意改用 SHA-1 时代的旧算法连接，不再试",
-                metadata: [
-                    "host": request.host,
-                    "port": String(request.port),
-                    "hop": request.hop == .target ? "target" : "jumpHost",
-                    "trigger": request.trigger == .noCommonAlgorithm ? "noCommonAlgorithm" : "remembered",
-                ]))
-        }
-        return approved
+        let outcome = try await SSHLegacyApprovalWait.run(approval, request: request, timeout: options.approvalTimeout)
+        guard outcome != .approved else { return true }
+        options.logger.log(SSHLogEvent(
+            level: .info,
+            message: outcome == .timedOut
+                ? "等待是否改用 SHA-1 时代旧算法的回答超时，按不同意处理，不再试"
+                : "没有同意改用 SHA-1 时代的旧算法连接，不再试",
+            metadata: [
+                "host": request.host,
+                "port": String(request.port),
+                "hop": request.hop == .target ? "target" : "jumpHost",
+                "trigger": request.trigger == .noCommonAlgorithm ? "noCommonAlgorithm" : "remembered",
+                "timedOut": outcome == .timedOut ? "true" : "false",
+            ]))
+        return false
     }
 
     /// 连上之后：记下这一跳要不要旧算法、记警告（见 `SSHLegacyFallback.outcome`）。
@@ -461,4 +465,67 @@ nonisolated final class SSHCounter: @unchecked Sendable {
     private var count = 0
     var value: Int { lock.withLock { count } }
     func increment() { lock.withLock { count += 1 } }
+}
+
+/// 等 `legacyFallbackApproval` 的回答：闭包的结果、超时、建连任务被取消，先到的算数，不等闭包自己返回
+/// （它可能卡在一个没人接的界面上、也不响应取消）。闭包在一个单独的任务里跑，结局一定下就取消它。
+nonisolated enum SSHLegacyApprovalWait {
+    enum Outcome: Sendable, Equatable {
+        case approved
+        case declined
+        case timedOut
+    }
+
+    static func run(
+        _ approval: @escaping @Sendable (SSHLegacyFallbackRequest) async -> Bool,
+        request: SSHLegacyFallbackRequest,
+        timeout: Duration
+    ) async throws -> Outcome {
+        let slot = SSHOneShotSlot<Outcome>()
+        let asking = Task {
+            let approved = await approval(request)
+            slot.resume(.success(approved ? .approved : .declined))
+        }
+        let timer = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            slot.resume(.success(.timedOut))
+        }
+        defer {
+            asking.cancel()
+            timer.cancel()
+        }
+        return try await withTaskCancellationHandler {
+            try await slot.value()
+        } onCancel: {
+            slot.resume(.failure(CancellationError()))
+        }
+    }
+}
+
+/// 只认第一次 `resume` 的一次性结果；`value()` 之前就有了结果时直接交出。
+nonisolated final class SSHOneShotSlot<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var result: Result<Value, any Error>?
+    private var continuation: CheckedContinuation<Value, any Error>?
+
+    func resume(_ result: Result<Value, any Error>) {
+        let waiting: CheckedContinuation<Value, any Error>? = lock.withLock {
+            guard self.result == nil else { return nil }
+            self.result = result
+            defer { continuation = nil }
+            return continuation
+        }
+        waiting?.resume(with: result)
+    }
+
+    func value() async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            let ready: Result<Value, any Error>? = lock.withLock {
+                if let result { return result }
+                self.continuation = continuation
+                return nil
+            }
+            if let ready { continuation.resume(with: ready) }
+        }
+    }
 }
