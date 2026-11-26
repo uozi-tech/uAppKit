@@ -163,6 +163,8 @@ public enum UD {
         let tint: Color, tintHover: Color, tintPressed: Color, tintDisabled: Color
         /// 导航类选中行底（见下方「行态」段的 `rowSelected`）。
         let rowSelected: Color
+        /// 可拖分隔线的悬停 / 拖动态（见 `UD.accentDivider`）。
+        let divider: Color
 
         init(_ a: AccentColor) {
             accent  = UD.dyn(a.accentSpec(dark: true),  a.accentSpec(dark: false))
@@ -182,6 +184,7 @@ public enum UD {
             // 选中行底：深 20% / 日 12%（2026-11-17 深色由 14% 提到 20%：14% 在深底上与面几乎分不出）。
             rowSelected = UD.dyn(a.accentSpec(dark: true).withAlpha(0.20),
                                  a.accentSpec(dark: false).withAlpha(0.12))
+            divider = tinted(a.accentSpec, 0.5)
         }
     }
 
@@ -213,6 +216,10 @@ public enum UD {
     @MainActor public static var accentTintHover: Color { accentPalette.tintHover }
     @MainActor public static var accentTintPressed: Color { accentPalette.tintPressed }
     @MainActor public static var accentTintDisabled: Color { accentPalette.tintDisabled }
+
+    /// 可拖分隔线悬停 / 拖动时那条 3pt 线：accent 的 50%（2026-11-26 实机反馈：实色 accent
+    /// 竖贯整窗太抢眼）。UPaneGroups 的分隔线和各 App 的列宽分隔线都用它，改颜色只改这里。
+    @MainActor public static var accentDivider: Color { accentPalette.divider }
 
     /// Nonisolated default accent (fixed blue, still dark/light dynamic) for use
     /// as a **default parameter / stored-property value** in nonisolated inits.
