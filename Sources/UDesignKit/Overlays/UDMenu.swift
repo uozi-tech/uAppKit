@@ -24,12 +24,12 @@ public struct UDMenu: View {
 
     /// 所在 `.anchoredPanel` 给出的可用高度（锚点到屏幕可见区边缘）。
     @Environment(\.udPanelAvailableHeight) private var panelAvailableHeight
-    /// 选项区内容的实测高度。nil = 尚未量到（首帧走 `maxHeight` 路径）。
+    /// 选项区内容 / 视口的实测高度：只用来决定滚动条显隐与「滚到选中项」，不参与定高
+    /// （高度由 `UDPanelListStack` 在同一次布局里算好）。
     @State private var itemsHeight: CGFloat?
-    /// 已做过「滚到选中项」（只在首次实测落地后做一次）。
+    @State private var viewportHeight: CGFloat?
+    /// 已做过「滚到选中项」（只在首次判出溢出后做一次）。
     @State private var didInitialScroll = false
-    /// 选项区以外（标题行 + 外框 padding）的实测高，从面板可用高度里扣掉。
-    @State private var chromeHeight: CGFloat = 0
 
     public init(width: CGFloat = 200, head: String? = nil, maxHeight: CGFloat? = UDMenu.defaultMaxHeight, items: [UDMenuItem]) {
         self.width = width
@@ -54,44 +54,33 @@ public struct UDMenu: View {
         }
     }
 
-    /// 选项区高度上限：显式 `maxHeight` 与面板可用高度（扣掉标题与外框 padding）取小。
-    private var itemsCap: CGFloat {
-        UDPanelListCap.cap(maxHeight ?? .greatestFiniteMagnitude,
-                           available: panelAvailableHeight, chrome: chromeHeight)
+    /// 内容比视口高（两者都量到之后才判）。
+    private var overflows: Bool {
+        guard let itemsHeight, let viewportHeight else { return false }
+        return itemsHeight > viewportHeight + 0.5
     }
 
-    /// 选项区当前渲染高（未量到为 nil）。
-    private var renderedItemsHeight: CGFloat? {
-        itemsHeight.map { min($0, itemsCap) }
-    }
-
-    /// 选项区：恒套 ScrollView，高度钉成 `min(实测内容高, 上限)`。
-    ///
-    /// 不直接 `.frame(maxHeight:)`：它在实提案下会伸展到 `min(提案, 上限)` 而非贴内容，
-    /// 短菜单会被撑高、内容在 ScrollView 里垂直居中。首帧未量到时才走 `maxHeight` 路径
-    /// （面板初次 fittingSize 是 nil 提案，此时按内容 ideal 收缩，不会撑高）。
+    /// 选项区：恒套 ScrollView，高度由外层 `UDPanelListStack` 定成
+    /// `min(内容高, maxHeight, 面板可用高 − 标题 − 外框)`——同一次布局里算出，面板一呈现就是最终高度。
     private var scrollingItems: some View {
-        let cap = itemsCap
-        let overflows = (itemsHeight ?? 0) > cap
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 itemsStack
                     .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { measured in
-                        // 写回落到下一拍：同步写会让被约束的 ScrollView 实测依赖自身（AttributeGraph 环）。
+                        // 只喂滚动条显隐 / 首滚，不参与定高；仍落到下一拍，避免在布局中途写状态。
                         guard itemsHeight.map({ abs($0 - measured) > 0.5 }) ?? true else { return }
-                        DispatchQueue.main.async {
-                            guard itemsHeight.map({ abs($0 - measured) > 0.5 }) ?? true else { return }
-                            itemsHeight = measured
-                        }
+                        DispatchQueue.main.async { itemsHeight = measured }
                     }
+            }
+            .onGeometryChange(for: CGFloat.self, of: { $0.size.height }) { measured in
+                guard viewportHeight.map({ abs($0 - measured) > 0.5 }) ?? true else { return }
+                DispatchQueue.main.async { viewportHeight = measured }
             }
             .scrollIndicators(overflows ? .automatic : .never)
             .scrollBounceBehavior(.basedOnSize)
-            .modifier(UDHeightClamp(measured: itemsHeight, cap: cap))
-            .onChange(of: itemsHeight == nil) {
+            .onChange(of: overflows) {
                 // 当前选中项不在首屏时滚到可见（长模型列表里选中的是第 30 个，展开直接看到它）。
-                // 等首次实测落地、ScrollView 钉到最终高度后再滚——更早滚会被随后的改高冲掉。
-                guard !didInitialScroll, overflows,
+                guard overflows, !didInitialScroll,
                       let active = items.first(where: { $0.active })?.id else { return }
                 didInitialScroll = true
                 DispatchQueue.main.async { proxy.scrollTo(active, anchor: .center) }
@@ -100,7 +89,8 @@ public struct UDMenu: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // reserved 8 = 外层 .padding(4) 的上下两份。
+        UDPanelListStack(spacing: 0, listMaxHeight: maxHeight ?? .greatestFiniteMagnitude, reserved: 8) {
             if let head {
                 Text(head.uppercased())
                     .font(UD.font(10.5))
@@ -114,7 +104,7 @@ public struct UDMenu: View {
             if maxHeight == nil && panelAvailableHeight == nil {
                 itemsStack
             } else {
-                scrollingItems
+                scrollingItems.udPanelList()
             }
         }
         .padding(4)
@@ -129,7 +119,6 @@ public struct UDMenu: View {
                 .strokeBorder(UD.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .udPanelChrome($chromeHeight, listHeight: renderedItemsHeight)
         // 落影由承载它的 `.anchoredPanel` 统一提供（见 UDDropdown）；此处不再自带，避免双重阴影。
     }
 }

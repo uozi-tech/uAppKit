@@ -63,12 +63,8 @@ public extension EnvironmentValues {
 /// 自绘面板内容里「限高内滚列表」的高度上限计算：固定上限与面板可用高度（扣掉列表以外
 /// 的标题 / 搜索框 / 底部行等「外框」）取小，且至少留几行可见。
 ///
-/// 用法（外框高由 `.udPanelChrome` 实测）：
-/// ```
-/// @Environment(\.udPanelAvailableHeight) private var available
-/// @State private var chrome: CGFloat = 0
-/// list.frame(height: min(h, UDPanelListCap.cap(420, available: available, chrome: chrome)))
-/// ```
+/// 外框高要和列表高在**同一次布局**里得出，一般直接用 `UDPanelListStack`（它内部调这里）；
+/// 外框是定高行、能直接算出来时（如 `UDModelPicker`）也可以手动调。
 public enum UDPanelListCap {
     /// 屏幕边缘再局促，列表也至少留这么高（约两三行）。
     public static let minimum: CGFloat = 64
@@ -87,6 +83,7 @@ public extension View {
     /// 只在面板确实受限（环境里有 `udPanelAvailableHeight`，即锚点贴近屏幕边缘）时才挂
     /// 几何观测：外层观测会在列表每次滚动的布局里被重算，实测让导入目标表浮层滚动帧
     /// p95 多出约 2ms（ImportTargetMenuCostTests），不受限时外框高也用不上。
+    @available(*, deprecated, message: "外框高下一拍才写回，受限面板会先多出一截再缩回（打开时闪一下）；改用 UDPanelListStack")
     func udPanelChrome(_ chrome: Binding<CGFloat>, listHeight: CGFloat?) -> some View {
         modifier(UDPanelChromeProbe(chrome: chrome, listHeight: listHeight))
     }
