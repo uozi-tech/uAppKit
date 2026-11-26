@@ -84,8 +84,9 @@ public struct UPaneSplitter: View {
                 .frame(width: orientation == .vertical ? thin : long,
                        height: orientation == .vertical ? long : thin)
                 .opacity(dragging || hovering ? 1 : 0)
+                .animation(UDPaneDividerHighlight.animation, value: dragging || hovering)
         } else {
-            // 静息态画 1px UD.border 实线分隔；悬停 / 拖动时加粗到 3px 并转浅 accent（1px 太细、
+            // 静息态画 1px UD.border 实线分隔；悬停 / 拖动时淡入一条 3px 的浅 accent（1px 太细、
             // 看不出能拖）。粗线只画在 overlay 里，布局仍按 1px 算，两侧分组不会跟着挤动。
             Rectangle()
                 .fill(UD.border)
@@ -94,12 +95,8 @@ public struct UPaneSplitter: View {
                     height: orientation == .horizontal ? 1 : nil
                 )
                 .overlay {
-                    if dragging || hovering {
-                        Rectangle()
-                            .fill(UD.accentDivider)
-                            .frame(width: orientation == .vertical ? 3 : nil,
-                                   height: orientation == .horizontal ? 3 : nil)
-                    }
+                    UDPaneDividerHighlight(orientation == .vertical ? .vertical : .horizontal,
+                                           active: dragging || hovering)
                 }
         }
     }
