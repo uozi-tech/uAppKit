@@ -5,8 +5,9 @@ import SwiftUI
 /// uTerm DesignKit 实体浮层菜单 —— 下拉 / 上下文菜单 / 列表（设计稿 `Components.html` Menu）。
 ///
 /// 纯展示组件：只读 `UD` token + 普通值输入，不依赖任何 domain model。
-/// **实底，无模糊**（背景 `UD.overlay`），与 popover/玻璃面区分。选中态用
-/// `UD.rowSelected` 实底 + 尾部对勾，hover 用白/黑 5% 叠加，其余透明。
+/// **实底，无模糊**（背景 `UD.overlay`），与 popover/玻璃面区分。选中态（`active`）用
+/// `UD.rowSelected` 实底 + 尾部对勾；勾选态（`checked`，开关类、可以同时勾好几项）只有对勾、不铺底；
+/// hover 用白/黑 5% 叠加，其余透明。
 public struct UDMenu: View {
     /// 菜单宽度。
     let width: CGFloat
@@ -81,7 +82,7 @@ public struct UDMenu: View {
             .onChange(of: overflows) {
                 // 当前选中项不在首屏时滚到可见（长模型列表里选中的是第 30 个，展开直接看到它）。
                 guard overflows, !didInitialScroll,
-                      let active = items.first(where: { $0.active })?.id else { return }
+                      let active = items.first(where: { $0.active || $0.checked })?.id else { return }
                 didInitialScroll = true
                 DispatchQueue.main.async { proxy.scrollTo(active, anchor: .center) }
             }
@@ -170,7 +171,7 @@ private struct UDMenuItemRow: View {
                 .foregroundStyle(foreground)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if item.active {
+            if item.active || item.checked {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(UD.accentInk)
@@ -193,16 +194,28 @@ private struct UDMenuItemRow: View {
     private var foreground: Color {
         if item.danger { return UD.danger }
         // v2「驾驶舱」样式：激活行文字与图标同用 accent 色。
-        return item.active ? UD.accent : UD.text2
+        return item.active || item.checked ? UD.accent : UD.text2
     }
 
     /// hover 行底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
     private static let hoverBg = UD.dyn(.white(0.05), .black(0.05))
 
     private var background: Color {
-        if item.active { return UD.rowSelected }
-        if hovered { return Self.hoverBg }
-        return .clear
+        switch UDMenuRowFill(active: item.active, hovered: hovered) {
+        case .selected: UD.rowSelected
+        case .hover: Self.hoverBg
+        case .none: .clear
+        }
+    }
+}
+
+/// 菜单行底色取哪一种。只有 `active` 铺选中底；`checked` 只打对勾，和没勾的一样只在 hover 时有底
+/// ——一列连着勾上的项铺满选中底会糊成一大块。
+nonisolated enum UDMenuRowFill: Equatable {
+    case selected, hover, none
+
+    init(active: Bool, hovered: Bool) {
+        self = active ? .selected : hovered ? .hover : .none
     }
 }
 
@@ -217,10 +230,12 @@ public struct UDMenuItem: Identifiable {
     var systemImage: String?
     /// 前导 6pt 圆点色（模型 / 状态指示）。
     var dotColor: Color?
-    /// 尾部快捷键标签（`active` 时被对勾取代）。
+    /// 尾部快捷键标签（`active` / `checked` 时被对勾取代）。
     var kbd: String?
-    /// 选中态：实底 + 尾部对勾。
+    /// 选中态：实底 + 尾部对勾。单选列表里「当前这一项」用它。
     var active: Bool
+    /// 勾选态：只有尾部对勾与强调色文字，不铺底。开关类、可以同时勾好几项的菜单用它。
+    var checked: Bool
     /// 危险项：文本染 `UD.danger`。
     var danger: Bool
     /// 是否为分隔线。
@@ -234,6 +249,7 @@ public struct UDMenuItem: Identifiable {
         dotColor: Color? = nil,
         kbd: String? = nil,
         active: Bool = false,
+        checked: Bool = false,
         danger: Bool = false,
         isDivider: Bool = false,
         action: (() -> Void)? = nil
@@ -243,6 +259,7 @@ public struct UDMenuItem: Identifiable {
         self.dotColor = dotColor
         self.kbd = kbd
         self.active = active
+        self.checked = checked
         self.danger = danger
         self.isDivider = isDivider
         self.action = action
