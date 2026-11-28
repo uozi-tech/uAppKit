@@ -76,7 +76,7 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
     /// `@State` 只在第一次建视图时取初值，所以要在视图挂上去之前调用。
     func withDragState(_ state: UPaneDragState) -> Self {
         var copy = self
-        copy._dragState = State(initialValue: state)
+        copy._ownDragState = State(initialValue: state)
         return copy
     }
 
