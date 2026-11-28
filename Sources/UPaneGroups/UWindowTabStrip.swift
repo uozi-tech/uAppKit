@@ -94,6 +94,11 @@ public struct UWindowTabStrip<TabMenu: View>: View {
                 guard let id else { return }
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
             }
+            // 一排的宽度定下来（第一次排版、加减了标签）时再滚一次：窗口刚出现时上面那次早于排版，滚不动。
+            .onChange(of: rowWidth) { _, _ in
+                guard let activeTabID else { return }
+                proxy.scrollTo(activeTabID)
+            }
         }
         .frame(height: height)
         .onChange(of: tabIDs, initial: true) { _, ids in order.ids = ids }

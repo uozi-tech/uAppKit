@@ -80,6 +80,26 @@ final class UWindowTabStripViewTests: XCTestCase {
         XCTAssertLessThan(scroll?.frame.width ?? .infinity, 600)
     }
 
+    /// 窗口一出现、当前标签就在放不下的那一截里（重启接回、拖出成新窗口）：一开始就滚到它，不等它下次换。
+    func testActiveTabFarToTheRightIsScrolledIntoViewOnFirstAppearance() throws {
+        let ids = (0..<12).map { _ in UUID() }
+        let strip = HStack(spacing: 0) {
+            UWindowTabStrip(
+                stripID: UUID(), tabIDs: ids, activeTabID: ids[10], dragType: .plainText,
+                descriptor: { _ in UPaneTabDescriptor(title: "a fairly long tab title") },
+                onActivate: { _ in }, onRequestClose: { _ in }, onMove: { _, _ in })
+            Spacer(minLength: 40)
+        }
+        let (window, hostView) = host(strip, size: NSSize(width: 500, height: 38))
+        defer { window.contentView = nil }
+
+        let scroll = try XCTUnwrap(firstScrollView(in: hostView))
+        let visible = scroll.contentView.bounds
+        let content = try XCTUnwrap(scroll.documentView).frame.width
+        XCTAssertGreaterThan(content, visible.width, "标签放不下，要能滚")
+        XCTAssertGreaterThan(visible.minX, content / 2, "第 11 个标签在后半截：一出现就滚过去了")
+    }
+
     func testEmptyMenuOverloadBuilds() {
         let strip = UWindowTabStrip(
             stripID: UUID(), tabIDs: [UUID()], activeTabID: nil, dragType: .plainText,
