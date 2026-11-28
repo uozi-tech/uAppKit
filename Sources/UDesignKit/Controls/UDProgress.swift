@@ -41,6 +41,8 @@ public struct UDLinearBar: View {
             .frame(height: height)
         }
         .frame(height: height)
+        // 两条 Capsule 对辅助功能什么都不是：替身为系统进度条，读得出百分比。
+        .accessibilityRepresentation { ProgressView(value: clamped) }
     }
 }
 
@@ -92,6 +94,7 @@ public struct UDIndeterminateBar: View {
             .clipShape(Capsule())
         }
         .frame(height: height)
+        .accessibilityRepresentation { ProgressView() }
     }
 }
 
@@ -122,30 +125,64 @@ public struct UDRing: View {
                 .stroke(color, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
 
-            Text("\(Int(clamped * 100))")
+            // 纯数字，不进文案目录（不带 bundle 的插值 `Text` 会去 App 主 bundle 查 "%lld"）。
+            Text(verbatim: String(Int(clamped * 100)))
                 .font(UD.mono(10))
                 .foregroundStyle(UD.text2)
         }
         .frame(width: size, height: size)
+        // 圆心只是个裸数字「72」，读不出是进度：替身为系统进度条。
+        .accessibilityRepresentation { ProgressView(value: clamped) }
     }
 }
 
 // MARK: - 传输行
 
 /// 文件传输卡片：标题（方向箭头 + 文件名 + 百分比）、线性进度条、底部速率 / 大小。
+///
+/// 速率与总大小由调用方给（以前写死成「2.4 MB/s」「x / 12.8 MB」，任何文件都显示这组假数）。
+/// 不给就不显示：底行只剩方向。
 public struct UDTransferRow: View {
     public enum Direction { case up, down }
 
     var name: String
     var progress: Double
     var direction: Direction
+    var rate: String?
+    var totalBytes: Int64?
+    var width: CGFloat?
 
     private var clamped: Double { min(max(progress, 0), 1) }
 
-    public init(name: String, progress: Double, direction: Direction) {
+    /// - Parameters:
+    ///   - rate: 已格式化的速率（如 `UFormat.bytes(n) + "/s"`）；nil 不显示。
+    ///   - totalBytes: 文件总字节数；给了就在右下显示「已传 / 总量」（已传按 `progress` 折算）。
+    ///   - width: 卡片定宽；nil 随父视图。默认 320 与原版一致。
+    public init(name: String, progress: Double, direction: Direction,
+                rate: String? = nil, totalBytes: Int64? = nil, width: CGFloat? = 320) {
         self.name = name
         self.progress = progress
         self.direction = direction
+        self.rate = rate
+        self.totalBytes = totalBytes
+        self.width = width
+    }
+
+    private var directionText: String {
+        switch (direction, rate) {
+        case (.up, nil): String(localized: "上传", bundle: ModuleBundle.bundle)
+        case (.down, nil): String(localized: "下载", bundle: ModuleBundle.bundle)
+        case let (.up, rate?):
+            String(localized: "上传 · \(rate)", bundle: ModuleBundle.bundle, comment: "传输卡片底行：方向 + 速率，%@ 是已格式化的速率（如 2.4 MB/s）")
+        case let (.down, rate?):
+            String(localized: "下载 · \(rate)", bundle: ModuleBundle.bundle, comment: "传输卡片底行：方向 + 速率，%@ 是已格式化的速率（如 2.4 MB/s）")
+        }
+    }
+
+    private var sizeText: String? {
+        guard let totalBytes else { return nil }
+        let done = Int64((Double(totalBytes) * clamped).rounded(.down))
+        return "\(UFormat.bytes(done)) / \(UFormat.bytes(totalBytes))"
     }
 
     /// 卡片底。提成常量而非在 body 里现调 `UD.dyn`——理由见 `UD.dyn` 的注释。
@@ -165,7 +202,7 @@ public struct UDTransferRow: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                Text("\(Int(clamped * 100))%")
+                Text(verbatim: "\(Int(clamped * 100))%")
                     .font(UD.mono(10.5))
                     .foregroundStyle(UD.text3)
             }
@@ -173,15 +210,17 @@ public struct UDTransferRow: View {
             UDLinearBar(progress: clamped, height: 4)
 
             HStack {
-                Text(verbatim: "\(direction == .up ? String(localized: "上传", bundle: ModuleBundle.bundle) : String(localized: "下载", bundle: ModuleBundle.bundle)) · 2.4 MB/s")
+                Text(verbatim: directionText)
                 Spacer()
-                Text(String(format: "%.1f / 12.8 MB", clamped * 12.8))
+                if let sizeText {
+                    Text(verbatim: sizeText)
+                }
             }
             .font(UD.mono(9.5))
             .foregroundStyle(UD.text4)
         }
         .padding(UDTransferRowLayout.cardPadding)
-        .frame(width: 320)
+        .frame(width: width)
         .background {
             RoundedRectangle(cornerRadius: UD.Radius.lg)
                 .fill(Self.cardBg)
@@ -214,8 +253,10 @@ public struct UDTransferRow: View {
         UDIndeterminateBar()
             .frame(width: 320)
 
-        UDTransferRow(name: "banner.png", progress: 0.72, direction: .up)
-        UDTransferRow(name: "backup-2026.tar.gz", progress: 0.38, direction: .down)
+        UDTransferRow(name: "banner.png", progress: 0.72, direction: .up,
+                      rate: "2.4 MB/s", totalBytes: 13_421_773)
+        UDTransferRow(name: "backup-2026.tar.gz", progress: 0.38, direction: .down,
+                      rate: "860 KB/s", totalBytes: 1_288_490_189)
     }
     .padding(UD.Space.xxxl)
     .background(UD.bg)
