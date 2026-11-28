@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// 单条会话历史记录（AI 助手会话列表项）。纯展示输入，不依赖任何 domain model。
+///
+/// `id` 由 `key`（缺省取 `title`）确定性派生，宿主重新求值时同一会话保持同一身份。
 public struct UDChatSessionItem: Identifiable {
-    public let id = UUID()
+    public let id: UUID
     /// 会话标题。
     let title: String
     /// 首条消息预览（单行截断）。
@@ -12,7 +14,9 @@ public struct UDChatSessionItem: Identifiable {
     /// 是否为当前活动会话。
     let active: Bool
 
-    public init(title: String, preview: String, updated: String, active: Bool = false) {
+    /// - Parameter key: 会话身份的键（通常传会话 id）；nil 时用 `title`。
+    public init(title: String, preview: String, updated: String, active: Bool = false, key: String? = nil) {
+        self.id = UDStableID.uuid("ud.session:" + (key ?? title))
         self.title = title
         self.preview = preview
         self.updated = updated
@@ -42,15 +46,15 @@ public struct UDSessionsDropdown: View {
             footer
         }
         .frame(width: 280)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: 9)
                 .fill(UD.overlay)
-        )
-        .overlay(
+        }
+        .overlay {
             // 浮层细发丝边：单层 UD.border（白 7% / 黑 10%），无内高光。
             RoundedRectangle(cornerRadius: 9)
                 .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
         .clipShape(RoundedRectangle(cornerRadius: 9))
         .udShadow(.md)
     }
@@ -78,8 +82,8 @@ public struct UDSessionsDropdown: View {
     private var list: some View {
         UDCappedScroll(maxHeight: Self.listMaxHeight) {
             VStack(spacing: 1) {
-                ForEach(sessions) { session in
-                    row(session)
+                ForEach(UDStableID.keyed(sessions, id: \.id), id: \.key) { entry in
+                    row(entry.item)
                 }
             }
             .padding(4)
@@ -110,11 +114,13 @@ public struct UDSessionsDropdown: View {
         }
         .padding(.vertical, 8)
         .padding(.horizontal, 10)
-        .background(
+        .background {
             // v2：选中项 = accent 14% 填充、无 accent 描边。
             RoundedRectangle(cornerRadius: UD.Radius.sm)
                 .fill(session.active ? UD.accentTint : .clear)
-        )
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(session.active ? .isSelected : [])
     }
 
     // MARK: - 尾部

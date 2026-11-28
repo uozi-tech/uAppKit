@@ -8,14 +8,19 @@ import SwiftUI
 // MARK: - 单条遥测项
 
 /// 状态栏 / 行内单条遥测项：图标 + 标签，整体按 `color` 着色。
+///
+/// `id` 由 `key`（缺省取 `systemImage`）确定性派生：标签每秒在变（时间、负载），身份不能跟着变，
+/// 否则状态栏每次刷新都把所有项当新视图重建。同图标的多项由 `UDStatusBar` 按出现次序区分。
 public struct UDFooterItem: View, Identifiable {
-    public let id = UUID()
+    public let id: UUID
     let systemImage: String
     let color: Color
     let label: String
     var iconSize: CGFloat = 11
 
-    public init(systemImage: String, color: Color, label: String, iconSize: CGFloat = 11) {
+    /// - Parameter key: 项身份的键；nil 时用 `systemImage`。
+    public init(systemImage: String, color: Color, label: String, iconSize: CGFloat = 11, key: String? = nil) {
+        self.id = UDStableID.uuid("ud.footer:" + (key ?? systemImage))
         self.systemImage = systemImage
         self.color = color
         self.label = label
@@ -61,9 +66,9 @@ public struct UDStatusBar: View {
 
     public var body: some View {
         HStack(spacing: UD.Space.md) {
-            ForEach(leading) { $0 }
+            ForEach(UDStableID.keyed(leading, id: \.id), id: \.key) { $0.item }
             Spacer(minLength: UD.Space.md)
-            ForEach(trailing) { $0 }
+            ForEach(UDStableID.keyed(trailing, id: \.id), id: \.key) { $0.item }
         }
         .font(UD.monoKbd)
         .lineLimit(1)
@@ -98,8 +103,11 @@ public struct UDStatusBar: View {
 
 /// 居中版权行（设计稿 about / 设置底部）。
 public struct UDCopyrightFooter: View {
+    public init() {}
+
     public var body: some View {
-        Text("© 2024–2026 uozi · All rights reserved")
+        // 版权行原样显示，不进文案目录（不带 bundle 的字面量会去 app 的主 bundle 查表）。
+        Text(verbatim: "© 2024–2026 uozi · All rights reserved")
             .font(UD.font(13))
             .foregroundStyle(UD.text4)
             .frame(maxWidth: .infinity)
@@ -112,10 +120,10 @@ public struct UDCopyrightFooter: View {
         UDStatusBar()
             .frame(width: 760)
             .clipShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
-            .overlay(
+            .overlay {
                 RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                     .strokeBorder(UD.border, lineWidth: 1)
-            )
+            }
 
         HStack(spacing: UD.Space.md) {
             UDFooterItem(systemImage: "cpu", color: UD.mCPU, label: "8x 2.40GHz")

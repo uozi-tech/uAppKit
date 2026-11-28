@@ -39,9 +39,15 @@ public struct UDMenu: View {
         self.items = items
     }
 
+    /// 行键：派生 id 重名（多条分隔线、同名项）时按出现次序区分，见 `UDStableID.keyed`。
+    private var rows: [(key: String, item: UDMenuItem)] {
+        UDStableID.keyed(items, id: \.id)
+    }
+
     private var itemsStack: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(items) { item in
+            ForEach(rows, id: \.key) { row in
+                let item = row.item
                 if item.isDivider {
                     Rectangle()
                         .fill(UD.border)
@@ -49,7 +55,7 @@ public struct UDMenu: View {
                         .padding(.horizontal, 2)
                         .padding(.vertical, 4)
                 } else {
-                    UDMenuItemRow(item: item).id(item.id)
+                    UDMenuItemRow(item: item).id(row.key)
                 }
             }
         }
@@ -82,7 +88,7 @@ public struct UDMenu: View {
             .onChange(of: overflows) {
                 // 当前选中项不在首屏时滚到可见（长模型列表里选中的是第 30 个，展开直接看到它）。
                 guard overflows, !didInitialScroll,
-                      let active = items.first(where: { $0.active || $0.checked })?.id else { return }
+                      let active = rows.first(where: { $0.item.active || $0.item.checked })?.key else { return }
                 didInitialScroll = true
                 DispatchQueue.main.async { proxy.scrollTo(active, anchor: .center) }
             }
@@ -110,15 +116,15 @@ public struct UDMenu: View {
         }
         .padding(4)
         .frame(width: width)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: 9)
                 .fill(UD.overlay)
-        )
-        .overlay(
+        }
+        .overlay {
             // 浮层细发丝边：单层 UD.border（白 7% / 黑 10%），无内高光。
             RoundedRectangle(cornerRadius: 9)
                 .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
         .clipShape(RoundedRectangle(cornerRadius: 9))
         // 落影由承载它的 `.anchoredPanel` 统一提供（见 UDDropdown）；此处不再自带，避免双重阴影。
     }
@@ -148,10 +154,15 @@ private struct UDMenuItemRow: View {
         if let action = item.action {
             Button(action: { action(); dismiss() }) { rowBody }
                 .buttonStyle(.udPlain)
+                .accessibilityAddTraits(isMarked ? .isSelected : [])
         } else {
             rowBody
+                .accessibilityAddTraits(isMarked ? .isSelected : [])
         }
     }
+
+    /// 选中 / 勾选：读屏念「已选」，尾部对勾只是它的视觉表达。
+    private var isMarked: Bool { item.active || item.checked }
 
     private var rowBody: some View {
         HStack(spacing: 8) {
@@ -175,6 +186,7 @@ private struct UDMenuItemRow: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(UD.accentInk)
+                    .accessibilityHidden(true)
             } else if let kbd = item.kbd {
                 Text(UFormat.shortcut(kbd))
                     .font(UD.mono(10))
@@ -183,10 +195,10 @@ private struct UDMenuItemRow: View {
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 9)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: UD.Radius.sm)
                 .fill(background)
-        )
+        }
         .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         .onHover { hovered = $0 }
     }
@@ -222,8 +234,12 @@ nonisolated enum UDMenuRowFill: Equatable {
 /// uTerm DesignKit 菜单项模型 —— `UDMenu` 的数据载体。
 ///
 /// `isDivider == true` 时只渲染一条分隔线，其余字段忽略；用 `.divider()` 构造。
+///
+/// **身份稳定**：`id` 由 `key`（缺省取 `label`）确定性派生，调用方在 `body` 里每次现造的同一项
+/// 得到同一个 `id`——行的 hover 态、按到一半的点击都不会因宿主重新求值而丢。标签会变（带计数、
+/// 状态字）的项传一个固定的 `key`。分隔线与同名项的重名由 `UDMenu` 按出现次序区分。
 public struct UDMenuItem: Identifiable {
-    public let id = UUID()
+    public let id: UUID
     /// 行标题。
     var label: String
     /// 前导 SF Symbol 名（与 `dotColor` 二选一，`dotColor` 优先）。
@@ -243,7 +259,9 @@ public struct UDMenuItem: Identifiable {
     /// 点击回调。非 nil 时整行变 `Button`（功能菜单）；nil 为纯展示（Gallery）。
     var action: (() -> Void)?
 
+    /// - Parameter key: 行身份的键；nil 时用 `label`。
     public init(
+        key: String? = nil,
         label: String,
         systemImage: String? = nil,
         dotColor: Color? = nil,
@@ -254,6 +272,7 @@ public struct UDMenuItem: Identifiable {
         isDivider: Bool = false,
         action: (() -> Void)? = nil
     ) {
+        self.id = UDStableID.uuid(isDivider ? "ud.menu.divider" : "ud.menu.item:" + (key ?? label))
         self.label = label
         self.systemImage = systemImage
         self.dotColor = dotColor
