@@ -29,10 +29,12 @@ public struct UControlSettingsSections: View {
     private let clientLinkEnabled: Binding<Bool>?
 
     @State private var copied = false
+    /// 「已拷贝」两秒后复原的那次计时；再点一次就换一个新的，旧的作废。
+    @State private var copiedReset: Task<Void, Never>?
 
     /// - Parameters:
     ///   - socketPath: 「接口地址」行显示与拷贝的路径。
-    ///   - skills: 由 app 持有（`@State`），这样切走设置页再回来不会重新检测。
+    ///   - skills: 由 app 持有（`@State`），这样切走设置页再回来不会再闪一次「检测中」（每次出现仍会在后台重新对齐一遍）。
     ///   - clientLinkEnabled: `~/.local/bin/<ctl>` 开关的持久化值（app 的 `@AppStorage`）。nil，或
     ///     `skills.clientLink` / `copy.clientLink` 为 nil 时不显示这一行。
     public init(
@@ -65,7 +67,19 @@ public struct UControlSettingsSections: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            background.refreshLoginItemStatus()
+            // 保留上一次注册失败的说明：用户多半正是切去系统设置处理它，回来时不该看着它消失。
+            background.refreshLoginItemStatus(preserveError: true)
+        }
+    }
+
+    private func copySocketPath() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(socketPath, forType: .string)
+        copied = true
+        copiedReset?.cancel()
+        copiedReset = Task {
+            guard (try? await Task.sleep(for: .seconds(2))) != nil else { return }
+            copied = false
         }
     }
 
@@ -79,25 +93,18 @@ public struct UControlSettingsSections: View {
         let copy = copy.interface
         return UDSettingsGroup(title: copy.title, footer: copy.footer) {
             UDSettingsRow(label: copy.enableLabel, hint: copy.enableHint) {
-                UDToggle(Binding(get: { control.isEnabled }, set: { control.isEnabled = $0 }))
+                UDToggle(Bindable(control).isEnabled)
             }
 
             UDSettingsRow(label: copy.mutationsLabel, hint: copy.mutationsHint) {
-                UDToggle(Binding(get: { control.allowMutations }, set: { control.allowMutations = $0 }))
+                UDToggle(Bindable(control).allowMutations)
                     .disabled(!control.isEnabled)
                     .opacity(control.isEnabled ? 1 : 0.45)
             }
 
             UDSettingsRow(label: copy.socketLabel, hint: socketPath, hintStyle: .monospaced) {
-                UDButton(title: copied ? copy.copiedButton : copy.copyButton, style: .secondary) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(socketPath, forType: .string)
-                    copied = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        copied = false
-                    }
-                }
+                UDButton(title: copied ? copy.copiedButton : copy.copyButton, style: .secondary,
+                         action: copySocketPath)
             }
 
             if let error = control.startupError {
@@ -118,10 +125,7 @@ public struct UControlSettingsSections: View {
                 ))
             }
             UDSettingsRow(label: copy.onDemandLabel, hint: copy.onDemandHint) {
-                UDToggle(Binding(
-                    get: { background.allowOnDemandLaunch },
-                    set: { background.allowOnDemandLaunch = $0 }
-                ))
+                UDToggle(Bindable(background).allowOnDemandLaunch)
             }
             if let error = background.loginItemError {
                 UDSettingsInlineNote(tone: .danger, text: error)
@@ -231,7 +235,7 @@ private struct StatusPill: View {
             .foregroundStyle(color)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(Capsule(style: .continuous).fill(color.opacity(0.14)))
+            .background(color.opacity(0.14), in: Capsule(style: .continuous))
     }
 }
 
