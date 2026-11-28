@@ -64,19 +64,18 @@ public struct UDComposer<ModelControl: View>: View {
                     Image(systemName: "plus")
                 }
                 .buttonStyle(UDComposerIconStyle())
-                .help(String(localized: "附加上下文", bundle: ModuleBundle.bundle))
-                .accessibilityLabel(String(localized: "附加上下文", bundle: ModuleBundle.bundle))
+                .udHelp(String(localized: "附加上下文", bundle: ModuleBundle.bundle))
 
                 Button(action: submit) {
                     Text(queueing ? "⊕" : "↩")
                         .font(UD.font(12))
                 }
                 .buttonStyle(UDComposerIconStyle())
-                .help(queueing ? String(localized: "排队发送（Agent 忙碌中）", bundle: ModuleBundle.bundle) : String(localized: "发送", bundle: ModuleBundle.bundle))
                 // 钮面是「↩ / ⊕」符号：读屏会念符号名，显式给动作名。
-                .accessibilityLabel(queueing
-                    ? String(localized: "排队发送", bundle: ModuleBundle.bundle, comment: "对话输入区发送钮的读屏标签：Agent 忙碌时提交即排队")
-                    : String(localized: "发送", bundle: ModuleBundle.bundle))
+                .udHelp(queueing ? String(localized: "排队发送（Agent 忙碌中）", bundle: ModuleBundle.bundle) : String(localized: "发送", bundle: ModuleBundle.bundle),
+                        accessibilityName: queueing
+                            ? String(localized: "排队发送", bundle: ModuleBundle.bundle, comment: "对话输入区发送钮的读屏标签：Agent 忙碌时提交即排队")
+                            : String(localized: "发送", bundle: ModuleBundle.bundle))
             }
         }
         .padding(UDComposerLayout.contentPadding)

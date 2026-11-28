@@ -723,8 +723,7 @@ public struct UDSettingsMoreMenu: View {
             UDMenu(width: 200, items: items)
         }
         .fixedSize()
-        .help(Text(verbatim: help))
-        .accessibilityLabel(Text(verbatim: help))
+        .udHelp(help)
     }
 }
 #endif

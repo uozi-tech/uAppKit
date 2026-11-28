@@ -144,16 +144,14 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
                 if canStop {
                     Button(action: onStop) { Image(systemName: "stop.fill") }
                         .buttonStyle(UDAgentComposerPrimaryStyle(role: .stop))
-                        .help(stopHelp)
-                        .accessibilityLabel(String(localized: "停止", bundle: ModuleBundle.bundle))
+                        .udHelp(stopHelp, accessibilityName: String(localized: "停止", bundle: ModuleBundle.bundle))
                 }
                 // 忙碌且不能发时只留停止：同一个位置，发送 ⇄ 停止。
                 if canSend || !canStop {
                     Button(action: onSend) { Image(systemName: "arrow.up") }
                         .buttonStyle(UDAgentComposerPrimaryStyle(role: .send))
                         .disabled(!canSend)
-                        .help(sendHelp)
-                        .accessibilityLabel(String(localized: "发送", bundle: ModuleBundle.bundle))
+                        .udHelp(sendHelp, accessibilityName: String(localized: "发送", bundle: ModuleBundle.bundle))
                 }
             }
         }

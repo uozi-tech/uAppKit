@@ -141,8 +141,8 @@ public struct UDTextField: View {
         }
         .buttonStyle(.udPlain)
         .onHover { revealHovering = $0 }
-        .help(revealed ? String(localized: "隐藏", bundle: ModuleBundle.bundle) : String(localized: "查看原文", bundle: ModuleBundle.bundle))
-        .accessibilityLabel(revealed ? String(localized: "隐藏原文", bundle: ModuleBundle.bundle) : String(localized: "查看原文", bundle: ModuleBundle.bundle))
+        .udHelp(revealed ? String(localized: "隐藏", bundle: ModuleBundle.bundle) : String(localized: "查看原文", bundle: ModuleBundle.bundle),
+                accessibilityName: revealed ? String(localized: "隐藏原文", bundle: ModuleBundle.bundle) : String(localized: "查看原文", bundle: ModuleBundle.bundle))
     }
 
     /// 掩码 ⇄ 明文。`SecureField` 和 `TextField` 是两个不同的 AppKit 视图，换一个必然

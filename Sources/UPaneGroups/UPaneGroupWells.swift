@@ -147,8 +147,7 @@ struct UPaneCardStripButton<Label: View>: View {
         }
         .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
-        .help(help)
-        .accessibilityLabel(accessibilityLabel)
+        .udHelp(help, accessibilityName: accessibilityLabel)
     }
 }
 #endif

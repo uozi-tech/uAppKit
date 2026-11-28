@@ -61,10 +61,9 @@ public struct UDGlyphButton: View {
         }
         .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
-        .help(help)
         // `.help` 只是 AX 的帮助文本，不是名字；自绘 `.glyph` 是 Shape，没有可读的名字，
-        // 不补的话 VoiceOver 只听到一个无名「按钮」。
-        .udAccessibilityLabel(help.isEmpty ? nil : Text(verbatim: help))
+        // 不补的话 VoiceOver 只听到一个无名「按钮」。名字借 help，`udHelp` 同时清掉重复的 AXHelp。
+        .udHelp(help)
     }
 }
 

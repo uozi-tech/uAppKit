@@ -95,6 +95,36 @@ final class UPaneGroupsAccessibilityTests: XCTestCase {
                        "chip 里的标题 / 图标 / × 应当并成一个元素，不再各自露出来：\(dump(content))")
     }
 
+    /// 没给 help 时 chip 的 tooltip 是标题，和读屏名字同一句：AXHelp 要为空，免得 VoiceOver 念两遍。
+    /// 给了不同的 help 时照常报出。
+    func testTabHelpIsNotRepeatedAsAXHelpWhenItEqualsTheTitle() throws {
+        let model = UPaneGroupsModel<TestPayload>()
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "alpha") }
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "beta") }
+        let view = UPaneGroupArea(
+            model: model,
+            dragType: .plainText,
+            descriptor: { tab in
+                UPaneTabDescriptor(title: tab.customTitle ?? "tab", icon: .system("doc"),
+                                   help: tab.customTitle == "beta" ? "~/projects/beta.sql" : nil)
+            },
+            content: { _, _ in Color.clear },
+            emptyGroup: { _ in Color.clear },
+            onRequestClose: { _ in })
+        let window = host(view)
+        defer { window.contentView = NSView(); window.orderOut(nil) }
+        let content = try XCTUnwrap(window.contentView)
+
+        func help(of name: String) -> String? {
+            nodes(in: content)
+                .first { role($0) == NSAccessibility.Role.button.rawValue && label($0) == name }
+                .map { ($0.value(forKey: "accessibilityHelp") as? String) ?? "" }
+        }
+        XCTAssertTrue(waitUntil { help(of: "alpha") != nil && help(of: "beta") != nil }, "\(dump(content))")
+        XCTAssertEqual(help(of: "alpha"), "", "help 缺省借标题，和名字同一句，AXHelp 要清空")
+        XCTAssertEqual(help(of: "beta"), "~/projects/beta.sql", "不同的 help 照常作为提示")
+    }
+
     func testPressingATabActivatesItAndItsCloseActionRequestsClose() throws {
         let closes = CloseLog()
         let model = UPaneGroupsModel<TestPayload>()

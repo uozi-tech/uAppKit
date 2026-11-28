@@ -336,8 +336,7 @@ private struct UDTabCloseButton: View {
         }
         .buttonStyle(.udPlain)
         .onHover { hovered = $0 }
-        .help(String(localized: "关闭标签", bundle: ModuleBundle.bundle))
-        .accessibilityLabel(Text("关闭标签", bundle: ModuleBundle.bundle))
+        .udHelp(String(localized: "关闭标签", bundle: ModuleBundle.bundle))
     }
 }
 

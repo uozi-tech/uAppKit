@@ -676,9 +676,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.udPlain)
-                .help(String(localized: "关闭这个空分组（⌘W）", bundle: ModuleBundle.bundle))
-                .accessibilityLabel(Text("关闭空分组", bundle: ModuleBundle.bundle,
-                                         comment: "标签条右侧图标钮的辅助功能名字：收掉这个没有标签的分屏分组"))
+                .udHelp(String(localized: "关闭这个空分组（⌘W）", bundle: ModuleBundle.bundle),
+                        accessibilityName: String(localized: "关闭空分组", bundle: ModuleBundle.bundle,
+                                                  comment: "标签条右侧图标钮的辅助功能名字：收掉这个没有标签的分屏分组"))
             }
 
             if showsSplitButton, splitAllowed {
@@ -690,9 +690,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.udPlain)
-                .help(String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: ModuleBundle.bundle))
-                .accessibilityLabel(Text("拆分分组", bundle: ModuleBundle.bundle,
-                                         comment: "标签条右侧图标钮的辅助功能名字：在旁边开一个新的分屏分组"))
+                .udHelp(String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: ModuleBundle.bundle),
+                        accessibilityName: String(localized: "拆分分组", bundle: ModuleBundle.bundle,
+                                                  comment: "标签条右侧图标钮的辅助功能名字：在旁边开一个新的分屏分组"))
             }
         }
         .frame(height: stripHeight)
@@ -864,6 +864,8 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
             // 按下不产生鼠标事件，不补这一层的话 VoiceOver 根本切不了标签、也听不出哪个是当前的。
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(title(d))
+            // 没给 help 时 tooltip 用的是标题，和名字同一句：AXHelp 清空，免得 VoiceOver 念两遍。
+            .accessibilityHint(Text(verbatim: d.help.flatMap { $0 == title(d) ? nil : $0 } ?? ""))
             .accessibilityAddTraits(isFront ? [.isButton, .isSelected] : [.isButton])
             .accessibilityAction { onActivate() }
             .accessibilityAction(named: Text("关闭", bundle: ModuleBundle.bundle, comment: "关闭标签页")) {

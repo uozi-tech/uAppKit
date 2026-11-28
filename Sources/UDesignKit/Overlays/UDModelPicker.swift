@@ -186,8 +186,8 @@ public struct UDModelPicker: View {
                 }
                 .buttonStyle(UDComposerGhostIconStyle())
                 .allowsHitTesting(!isRefreshing)
-                .help(String(localized: "重新获取模型列表", bundle: ModuleBundle.bundle))
-                .accessibilityLabel(String(localized: "刷新模型列表", bundle: ModuleBundle.bundle))
+                .udHelp(String(localized: "重新获取模型列表", bundle: ModuleBundle.bundle),
+                        accessibilityName: String(localized: "刷新模型列表", bundle: ModuleBundle.bundle))
             }
         }
         .padding(.bottom, 4)
@@ -345,9 +345,8 @@ private struct UDModelPickerRow: View {
         }
         .buttonStyle(.udPlain)
         .onHover(perform: onHover)
-        .help(item.title)
         // 行尾说明（如「不在列表中」）也要念出来，不能被标签整个盖掉。
-        .accessibilityLabel(item.detail.map { "\(item.title), \($0)" } ?? item.title)
+        .udHelp(item.title, accessibilityName: item.detail.map { "\(item.title), \($0)" } ?? item.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

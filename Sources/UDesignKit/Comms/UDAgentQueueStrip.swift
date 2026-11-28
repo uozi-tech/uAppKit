@@ -161,8 +161,7 @@ private struct IconButton: View {
         }
         .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
-        .help(help)
-        .accessibilityLabel(label)
+        .udHelp(help, accessibilityName: label)
     }
 }
 #endif
