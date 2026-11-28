@@ -184,9 +184,7 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
             .buttonStyle(.udPlain)
             .opacity(0)
             .frame(width: 0, height: 0)
-            // 只为快捷键存在的隐形按钮：先收成不带子元素的单个元素再藏起来，
-            // 免得读屏 / AX 审计里冒出一个没名字的按钮。
-            .accessibilityElement(children: .ignore)
+            // 只为快捷键存在的隐形按钮，读屏不该看见它。
             .accessibilityHidden(true)
     }
 
