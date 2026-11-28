@@ -65,6 +65,7 @@ public struct UDComposer<ModelControl: View>: View {
                 }
                 .buttonStyle(UDComposerIconStyle())
                 .help(String(localized: "附加上下文", bundle: ModuleBundle.bundle))
+                .accessibilityLabel(String(localized: "附加上下文", bundle: ModuleBundle.bundle))
 
                 Button(action: submit) {
                     Text(queueing ? "⊕" : "↩")
@@ -72,21 +73,25 @@ public struct UDComposer<ModelControl: View>: View {
                 }
                 .buttonStyle(UDComposerIconStyle())
                 .help(queueing ? String(localized: "排队发送（Agent 忙碌中）", bundle: ModuleBundle.bundle) : String(localized: "发送", bundle: ModuleBundle.bundle))
+                // 钮面是「↩ / ⊕」符号：读屏会念符号名，显式给动作名。
+                .accessibilityLabel(queueing
+                    ? String(localized: "排队发送", bundle: ModuleBundle.bundle, comment: "对话输入区发送钮的读屏标签：Agent 忙碌时提交即排队")
+                    : String(localized: "发送", bundle: ModuleBundle.bundle))
             }
         }
         .padding(UDComposerLayout.contentPadding)
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
-        .background(
+        .background {
             // v2：composer 升级为浮层形态 —— overlay 白底 + border 描边 + shadow-sm
             // （白底列表容器 / 浮层是仅存的合法描边场景之一）。
             RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous)
                 .fill(UD.overlay)
-        )
-        .overlay(
+        }
+        .overlay {
             RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous)
                 .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
         .udShadow(.sm)
     }
 
@@ -143,11 +148,11 @@ public struct UDModelPillLabel: View {
         .padding(.leading, 10)
         .padding(.trailing, 8)
         .frame(height: 28)
-        .background(
+        .background {
             // v2 chip 形态：uw03 灰底、无边。
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(UD.uw03)
-        )
+        }
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
@@ -181,10 +186,10 @@ private struct UDComposerIconStyle: ButtonStyle {
             .font(UD.font(12))
             .foregroundStyle(UD.text3)
             .frame(width: 28, height: 28)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(hovering ? UD.panelHover : UD.uw04)
-            )
+            }
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .onHover { hovering = $0 }
     }

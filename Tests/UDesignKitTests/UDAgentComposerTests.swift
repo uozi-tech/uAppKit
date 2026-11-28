@@ -10,10 +10,19 @@ final class UDAgentComposerTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(UDAgentComposerLayout.primarySize, UDAgentComposerLayout.controlHeight)
     }
 
-    /// 回车要触发发送动作，而不是把焦点留在发送按钮上。
+    /// 回车要触发发送动作，而不是把焦点留在发送按钮上；且与发送钮同一个门（`canSend`）。
     func testReturnKeyRoutesToSendAction() throws {
-        XCTAssertTrue(try source().contains(".onSubmit(onSend)"),
-                      "UDAgentComposer 必须把 Return 路由到发送动作。")
+        XCTAssertTrue(try source().contains(".onSubmit(submitIfAllowed)"),
+                      "UDAgentComposer 必须把 Return 路由到（受 canSend 约束的）发送动作。")
+    }
+
+    /// 发送钮灰着（`canSend == false`：输入为空、不排队的面板正忙）时回车不发。
+    func testReturnRespectsCanSend() {
+        var sent = 0
+        XCTAssertFalse(UDAgentComposerSubmit.perform(canSend: false) { sent += 1 })
+        XCTAssertEqual(sent, 0)
+        XCTAssertTrue(UDAgentComposerSubmit.perform(canSend: true) { sent += 1 })
+        XCTAssertEqual(sent, 1)
     }
 
     /// 停止必须能从键盘触发，且只在 Agent 在跑时生效。
@@ -25,7 +34,7 @@ final class UDAgentComposerTests: XCTestCase {
     /// 聚焦时卡片不换强调描边、也不加外环：只留一圈常态 `UD.border`。
     func testFocusDoesNotDrawAccentRing() throws {
         let src = try source()
-        XCTAssertTrue(src.contains(".overlay(shape.strokeBorder(UD.border, lineWidth: 1))"),
+        XCTAssertTrue(src.contains(".overlay { shape.strokeBorder(UD.border, lineWidth: 1) }"),
                       "UDAgentComposer 的描边应恒为 UD.border。")
         XCTAssertFalse(src.contains("UD.accent.opacity(isFocused"),
                        "UDAgentComposer 聚焦时不应再画外环。")

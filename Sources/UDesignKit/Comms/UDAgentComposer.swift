@@ -93,6 +93,11 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         if let focus { focus.wrappedValue = true } else { ownFocus = true }
     }
 
+    /// ↩ 与发送钮同一个门：`canSend` 为假（输入为空、不排队的面板正忙）时回车不发。
+    private func submitIfAllowed() {
+        UDAgentComposerSubmit.perform(canSend: canSend, onSend: onSend)
+    }
+
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let status {
@@ -128,7 +133,7 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
                     .foregroundStyle(UD.text)
                     .lineLimit(minLines...maxLines)
                     .focused(focus ?? $ownFocus)
-                    .onSubmit(onSend)
+                    .onSubmit(submitIfAllowed)
                     .onExitCommand { if canStop { onStop() } }
             }
             .padding(.horizontal, 6)
@@ -156,10 +161,21 @@ public struct UDAgentComposer<Accessory: View, Toolbar: View>: View {
         .padding([.horizontal, .bottom], 8)
         .background { cardBackground(shape) }
         // 聚焦不换描边、不加外环：光标已经说明了焦点，蓝框在面板里太抢眼。
-        .overlay(shape.strokeBorder(UD.border, lineWidth: 1))
+        .overlay { shape.strokeBorder(UD.border, lineWidth: 1) }
         // 卡片留白处也能点进输入框（工具栏上的控件各自吃掉自己的点击）。
         .contentShape(shape)
         .onTapGesture { takeFocus() }
+    }
+}
+
+/// 回车提交的判定（单测守它）：与发送钮的 `.disabled(!canSend)` 一致。
+enum UDAgentComposerSubmit {
+    /// 发出去了返回 true。
+    @discardableResult
+    static func perform(canSend: Bool, onSend: () -> Void) -> Bool {
+        guard canSend else { return false }
+        onSend()
+        return true
     }
 }
 
@@ -248,8 +264,10 @@ public struct UDComposerGhostLabel<Content: View>: View {
         .padding(.horizontal, 6)
         .frame(minWidth: UDAgentComposerLayout.controlHeight)
         .frame(height: UDAgentComposerLayout.controlHeight)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-            .fill(open ? UD.uw06 : hovering ? UD.uw04 : .clear))
+        .background {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(open ? UD.uw06 : hovering ? UD.uw04 : .clear)
+        }
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .onHover { hovering = $0 }
     }
@@ -273,8 +291,10 @@ public struct UDComposerGhostIconStyle: ButtonStyle {
                 .foregroundStyle(hovering ? UD.text : UD.text3)
                 .frame(width: UDAgentComposerLayout.controlHeight,
                        height: UDAgentComposerLayout.controlHeight)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(configuration.isPressed ? UD.uw06 : hovering ? UD.uw04 : .clear))
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(configuration.isPressed ? UD.uw06 : hovering ? UD.uw04 : .clear)
+                }
                 .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .onHover { hovering = $0 }
         }
@@ -302,7 +322,7 @@ private struct UDAgentComposerPrimaryStyle: ButtonStyle {
                 .font(.system(size: role == .stop ? 9.5 : 12, weight: .bold))
                 .foregroundStyle(foreground)
                 .frame(width: UDAgentComposerLayout.primarySize, height: UDAgentComposerLayout.primarySize)
-                .background(Circle().fill(fill))
+                .background { Circle().fill(fill) }
                 .contentShape(Circle())
                 .onHover { hovering = $0 }
         }
@@ -383,9 +403,10 @@ public struct UDOptionMenu: View {
         }
         .padding(4)
         .frame(width: width)
-        .background(RoundedRectangle(cornerRadius: 9).fill(UD.overlay))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1))
-        .udShadow(.menu)
+        .background { RoundedRectangle(cornerRadius: 9).fill(UD.overlay) }
+        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1) }
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        // 落影由承载它的 `.anchoredPanel` 统一提供（同 `UDMenu`）；自带一层会叠成双重阴影。
     }
 }
 
@@ -420,7 +441,7 @@ private struct UDOptionMenuRow: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 7)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 6).fill(hovering ? UD.panelHover : .clear))
+            .background { RoundedRectangle(cornerRadius: 6).fill(hovering ? UD.panelHover : .clear) }
             .contentShape(RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.udPlain)

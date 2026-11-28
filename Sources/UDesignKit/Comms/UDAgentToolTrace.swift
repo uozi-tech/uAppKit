@@ -66,9 +66,21 @@ public struct UDAgentToolTrace: View {
         .padding(.horizontal, 10)
         .padding(.vertical, expanded ? 10 : 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: UD.Radius.md).fill(expanded ? UD.panelHi : Color.clear))
-        .overlay(RoundedRectangle(cornerRadius: UD.Radius.md)
-            .stroke(status == .failed ? Self.failedStroke : Color.clear, lineWidth: 1))
+        .background { RoundedRectangle(cornerRadius: UD.Radius.md).fill(expanded ? UD.panelHi : Color.clear) }
+        .overlay {
+            RoundedRectangle(cornerRadius: UD.Radius.md)
+                .stroke(status == .failed ? Self.failedStroke : Color.clear, lineWidth: 1)
+        }
+        // `expanded` 的初值只在第一次建视图时取：调用开始时是 pending / running，后来才变成 failed，
+        // 不跟着状态走的话「出错默认展开」永远不会发生。用户自己收起后不再强行展开（只认变成 failed 那一下）。
+        .onChange(of: status) { old, new in
+            if Self.shouldAutoExpand(from: old, to: new) { expanded = true }
+        }
+    }
+
+    /// 状态从别的变成 `failed` 时自动展开（单测守它）。
+    static func shouldAutoExpand(from old: Status, to new: Status) -> Bool {
+        old != .failed && new == .failed
     }
 
     private static let failedStroke = UD.danger.opacity(0.4)

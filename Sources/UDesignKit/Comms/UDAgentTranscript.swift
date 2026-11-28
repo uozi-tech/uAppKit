@@ -181,9 +181,9 @@ public struct UDAgentTranscript<Row: Identifiable, RowContent: View, Footer: Vie
                 .padding(insets)
             }
             .defaultScrollAnchor(.bottom)
-            .modifier(TailFollow(followsTail: $followsTail, rowCount: rows.count) {
-                scheduleScrollToBottom(proxy)
-            })
+            .modifier(TailFollow(followsTail: $followsTail, rowCount: rows.count,
+                                 repin: { scheduleScrollToBottom(proxy) },
+                                 onUserScroll: { tailScroll.cancel() }))
             .onChange(of: resetToken) { _, _ in
                 expandedLimit = nil
                 followsTail = true
@@ -208,7 +208,7 @@ public struct UDAgentTranscript<Row: Identifiable, RowContent: View, Footer: Vie
                     .foregroundStyle(UD.text3)
                     .padding(.horizontal, 10)
                     .frame(height: 26)
-                    .background(Capsule().fill(UD.fillSoft))
+                    .background { Capsule().fill(UD.fillSoft) }
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.udPlain)
@@ -219,7 +219,11 @@ public struct UDAgentTranscript<Row: Identifiable, RowContent: View, Footer: Vie
 
     private func scheduleScrollToBottom(_ proxy: ScrollViewProxy) {
         guard followsTail else { return }
-        tailScroll.schedule { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+        // 合并窗口（100ms）里用户可能已经开始往上滚：到点时再看一次，别把人拽回底部。
+        tailScroll.schedule {
+            guard followsTail else { return }
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+        }
     }
 }
 
@@ -228,6 +232,8 @@ private struct TailFollow: ViewModifier {
     @Binding var followsTail: Bool
     let rowCount: Int
     let repin: () -> Void
+    /// 用户开始拖 / 滚：取消在排的贴底滚动。
+    let onUserScroll: () -> Void
 
     func body(content: Content) -> some View {
         if #available(macOS 15, iOS 18, *) {
@@ -237,6 +243,7 @@ private struct TailFollow: ViewModifier {
                 .onScrollPhaseChange { _, phase, context in
                     if phase == .tracking || phase == .interacting {
                         followsTail = false
+                        onUserScroll()
                     }
                     if phase == .idle {
                         followsTail = UDTranscriptScrollPolicy.isNearBottom(
