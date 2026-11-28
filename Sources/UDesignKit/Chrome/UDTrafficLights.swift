@@ -63,9 +63,9 @@ public struct UDTrafficLights: View {
     private func circle(fill: Color, glyph: String) -> some View {
         Circle()
             .fill(fill)
-            .overlay(
+            .overlay {
                 Circle().strokeBorder(Self.strokeColor, lineWidth: 0.5)
-            )
+            }
             .overlay {
                 if hovered {
                     Image(systemName: glyph)

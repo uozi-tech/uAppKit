@@ -11,7 +11,7 @@ public extension View {
     /// / `UDTextArea` / `UDSearchField` 早就在内部挂了这个监听，本修饰符把同一套
     /// 逻辑开放给外面自绘的输入框（数据表设计器的单元格输入就是一例）。
     func udDismissFocusOnOutsideClick(_ isFocused: FocusState<Bool>.Binding) -> some View {
-        overlay(UDInputFocusDismissMonitor(isFocused: isFocused))
+        overlay { UDInputFocusDismissMonitor(isFocused: isFocused) }
     }
 }
 

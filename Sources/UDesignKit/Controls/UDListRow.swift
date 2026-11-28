@@ -50,10 +50,10 @@ public struct UDListRow: View {
             .padding(.horizontal, 10)
             .frame(height: 30)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(hovering && isEnabled ? UD.rowHover : UD.bg)
-            )
+            }
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.udPlain)

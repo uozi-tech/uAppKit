@@ -91,10 +91,10 @@ private struct UDButtonKbd: View {
             .font(.system(size: 10.5, weight: .medium, design: .monospaced))
             .padding(.horizontal, 5)
             .padding(.vertical, 1.5)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(Color.primary.opacity(0.14))
-            )
+            }
             .opacity(0.9)
             // 按钮拿到的宽度比理想宽度少一点时（CJK 标题量宽偏差），别把 "esc" 折成两行。
             .fixedSize()
@@ -127,14 +127,14 @@ private struct UDButtonStyle: ButtonStyle {
                     .frame(height: height)
                     .padding(.horizontal, 14)
                     .frame(maxWidth: fillsWidth ? .infinity : nil)
-                    .background(
+                    .background {
                         RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                             .fill(c.bg)
-                    )
-                    .overlay(
+                    }
+                    .overlay {
                         RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                             .strokeBorder(c.border, lineWidth: 1)
-                    )
+                    }
             }
         }
         .contentShape(Rectangle())
@@ -343,13 +343,13 @@ private struct UDIconButtonStyle: ButtonStyle {
             .font(.system(size: size <= 20 ? 10 : 12))
             .foregroundStyle(c.text)
             .frame(width: size, height: size)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: radius, style: .continuous).fill(c.bg)
-            )
-            .overlay(
+            }
+            .overlay {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(c.border, lineWidth: 1)
-            )
+            }
             .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
             .onHover { hovering = $0 }
     }

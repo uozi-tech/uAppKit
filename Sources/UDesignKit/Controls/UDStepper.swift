@@ -38,9 +38,9 @@ public struct UDStepper<V: Strideable>: View {
             }
         }
         .frame(height: 28)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous).fill(UD.uw04)
-        )
+        }
         .clipShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
         .opacity(isEnabled ? 1 : 0.45)
         .allowsHitTesting(isEnabled)

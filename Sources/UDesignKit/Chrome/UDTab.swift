@@ -108,9 +108,9 @@ public struct UDPreviewTab: View {
         .padding(.leading, UDTabLayout.leadingPadding)
         .padding(.trailing, UDTabLayout.trailingPadding)
         .frame(height: height)
-        .background(tabBackground)
-        .overlay(activeTopBorder, alignment: .top)
-        .overlay(activeSideBorders)
+        .background { tabBackground }
+        .overlay(alignment: .top) { activeTopBorder }
+        .overlay { activeSideBorders }
         .contentShape(Rectangle())
         // 双击识别用单击手势 + `NSApp.currentEvent.clickCount`，不能挂
         // `TapGesture(count: 2).exclusively(before: TapGesture(count: 1))`：
@@ -224,9 +224,9 @@ public struct UDTermTab: View {
         .padding(.leading, UDTabLayout.leadingPadding)
         .padding(.trailing, UDTabLayout.trailingPadding)
         .frame(height: height)
-        .background(tabBackground)
-        .overlay(activeTopBorder, alignment: .top)
-        .overlay(activeSideBorders)
+        .background { tabBackground }
+        .overlay(alignment: .top) { activeTopBorder }
+        .overlay { activeSideBorders }
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .onHover { hovered = $0 }
@@ -281,12 +281,11 @@ public struct UDTabBar<Content: View>: View {
             content
         }
         .background(UD.panel)
-        .overlay(
+        .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(UD.border)
-                .frame(height: 1),
-            alignment: .bottom
-        )
+                .frame(height: 1)
+        }
         .clipShape(
             UnevenRoundedRectangle(
                 topLeadingRadius: 8,
@@ -295,7 +294,7 @@ public struct UDTabBar<Content: View>: View {
                 topTrailingRadius: 8
             )
         )
-        .overlay(
+        .overlay {
             UnevenRoundedRectangle(
                 topLeadingRadius: 8,
                 bottomLeadingRadius: 0,
@@ -303,7 +302,7 @@ public struct UDTabBar<Content: View>: View {
                 topTrailingRadius: 8
             )
             .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
     }
 }
 

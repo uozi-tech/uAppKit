@@ -70,10 +70,10 @@ public struct UDSidebarRow: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 28)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: UD.Radius.sm)
                     .fill(background)
-            )
+            }
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         }
         .buttonStyle(.udPlain)

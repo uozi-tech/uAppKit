@@ -64,11 +64,11 @@ public struct UDStatusBadge: View {
         .padding(.leading, 7)
         .padding(.trailing, 8)
         .padding(.vertical, 2)
-        .background(
+        .background {
             // v2 状态徽标：语义色 14% 胶囊底、无边（idle 用中性 uw03）。
             Capsule()
                 .fill(state == .idle ? UD.uw03 : state.color.opacity(0.14))
-        )
+        }
     }
 
     private var dot: some View {

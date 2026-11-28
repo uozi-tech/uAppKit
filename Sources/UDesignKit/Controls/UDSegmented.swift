@@ -32,16 +32,16 @@ public struct UDSegmented<Value: Hashable>: View {
         }
         .padding(3)
         .frame(height: 30)
-        .background(
+        .background {
             // v2「填充即边界」：容器 uw04 淡灰底、无边（透明描边占位防跳动）；
             // 选中段是浮在上面的中性底。
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(UD.uw04)
-        )
-        .overlay(
+        }
+        .overlay {
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .strokeBorder(.clear, lineWidth: 1)
-        )
+        }
         .fixedSize(horizontal: !fillsWidth, vertical: false)
         .frame(maxWidth: fillsWidth ? .infinity : nil)
     }

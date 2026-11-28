@@ -72,11 +72,11 @@ public struct UDToolbarNewButton: View {
             .foregroundStyle(UD.accentInk)
             .padding(.horizontal, 14)
             .frame(height: 32)
-            .background(
+            .background {
                 // v2 tint 主按钮：accent 14% 底 + accent 色文字、无边。
                 RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                     .fill(UD.accentTint)
-            )
+            }
         }
         .buttonStyle(.udPlain)
     }

@@ -52,11 +52,11 @@ public struct UDGlyphButton: View {
             UIconRefView(icon, size: iconSize, box: iconSize)
                 .foregroundStyle(active ? tint : (hovering ? UD.text : UD.text3))
                 .frame(width: width, height: height)
-                .background(
+                .background {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .fill(active ? tint.opacity(activeFillOpacity)
                                      : (hovering ? UD.panelHover : Color.clear))
-                )
+                }
                 .contentShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         }
         .buttonStyle(.udPlain)

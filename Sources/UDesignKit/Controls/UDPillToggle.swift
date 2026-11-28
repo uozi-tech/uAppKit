@@ -50,14 +50,14 @@ public struct UDPillToggle: View {
                 }
             }
             .padding(.horizontal, 13).padding(.vertical, 8)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(isOn ? UD.accentTint : (hovering && isEnabled ? UD.panelHover : UD.bg))
-            )
-            .overlay(
+            }
+            .overlay {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .stroke(isOn ? Color.clear : UD.border, lineWidth: 1)
-            )
+            }
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.udPlain)

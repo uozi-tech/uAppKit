@@ -182,14 +182,14 @@ public struct UDTransferRow: View {
         }
         .padding(UDTransferRowLayout.cardPadding)
         .frame(width: 320)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: UD.Radius.lg)
                 .fill(Self.cardBg)
-        )
-        .overlay(
+        }
+        .overlay {
             RoundedRectangle(cornerRadius: UD.Radius.lg)
                 .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
         .udShadow(.sm)
     }
 }

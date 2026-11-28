@@ -56,35 +56,35 @@ public struct UDSearchField: View {
                     .foregroundStyle(UD.text4)
                     .padding(.vertical, 2)
                     .padding(.horizontal, 6)
-                    .background(
+                    .background {
                         // v2 键帽：uw03 胶囊底、无边。
                         RoundedRectangle(cornerRadius: UD.Radius.xs) // 4
                             .fill(UD.uw03)
-                    )
+                    }
             }
         }
         .padding(.horizontal, UD.Space.lg) // 12
         .frame(height: 32)
         .frame(width: width)
         .frame(maxWidth: width == nil ? .infinity : nil)
-        .background(
+        .background {
             // 暗：白 6% 填充承担边界；日：白底 + `inputBorder` 细边。聚焦不换底色。
             RoundedRectangle(cornerRadius: UD.Radius.md) // 8
                 .fill(UD.inputFill)
-        )
-        .overlay(
+        }
+        .overlay {
             // 闲置 `inputBorder`（暗夜透明）；聚焦 = accent 描边（始终有，`showsFocusRing` 只管外圈柔环）。
             RoundedRectangle(cornerRadius: UD.Radius.md)
                 .strokeBorder(focused ? UD.accent : UD.inputBorder, lineWidth: 1)
-        )
-        .overlay(
+        }
+        .overlay {
             // 聚焦焦点环：3pt 柔环（强调色 13%）。`showsFocusRing: false`（浮层里）不画，accent 描边照样有。
             RoundedRectangle(cornerRadius: UD.Radius.md)
                 .stroke(UD.accent.opacity(showsFocusRing && focused ? 0.13 : 0), lineWidth: 3)
-        )
-        .overlay(
+        }
+        .overlay {
             UDInputFocusDismissMonitor(isFocused: $focused)
-        )
+        }
         .onAppear { focused = autoFocus }
         .onChange(of: autoFocus) { _, newValue in
             focused = newValue

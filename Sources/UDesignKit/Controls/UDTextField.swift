@@ -83,22 +83,22 @@ public struct UDTextField: View {
             // 留白上原本落不到它身上，用户会以为「要点两次」。整框可点，点到就聚焦。
             .contentShape(Rectangle())
             .onTapGesture { if isEnabled { focused = true } }
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: UD.Radius.md)
                     .fill(fieldBackground)
-            )
-            .overlay(
+            }
+            .overlay {
                 // 闲置 `inputBorder`（暗夜透明）；聚焦 accent / 错误红。
                 RoundedRectangle(cornerRadius: UD.Radius.md)
                     .strokeBorder(borderColor, lineWidth: 1)
-            )
-            .overlay(
+            }
+            .overlay {
                 RoundedRectangle(cornerRadius: UD.Radius.md)
                     .stroke(ringColor, lineWidth: 3)
-            )
-            .overlay(
+            }
+            .overlay {
                 UDInputFocusDismissMonitor(isFocused: $focused)
-            )
+            }
             .opacity(isEnabled ? 1 : 0.55)
             .onAppear { focused = autoFocus }
             .onChange(of: autoFocus) { _, newValue in

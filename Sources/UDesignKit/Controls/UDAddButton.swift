@@ -40,11 +40,11 @@ public struct UDAddButton: View {
             .frame(maxWidth: fullWidth ? .infinity : nil)
             .frame(height: 32)
             .padding(.horizontal, fullWidth ? 0 : 14)
-            .overlay(
+            .overlay {
                 RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                     .strokeBorder(hovering && isEnabled ? UD.text3 : UD.borderHi,
                                   style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-            )
+            }
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
         }
         .buttonStyle(.udPlain)

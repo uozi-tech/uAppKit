@@ -48,10 +48,10 @@ public struct UDDisclosureHeader: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(hovering ? UD.rowHover : .clear)
-            )
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.udPlain)

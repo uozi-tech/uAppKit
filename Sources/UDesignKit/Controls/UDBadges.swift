@@ -24,10 +24,10 @@ public struct UDGroupChip: View {
             .foregroundStyle(textColor)
             .padding(.vertical, 2)
             .padding(.horizontal, 8)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: UD.Radius.xs, style: .continuous)
                     .fill(fillColor)
-            )
+            }
     }
 
     private var textColor: Color {
@@ -59,10 +59,10 @@ public struct UDSelectableGroupChip: View {
                 .foregroundStyle(selected ? UD.accentInk : UD.text3)
                 .padding(.vertical, 4)
                 .padding(.horizontal, 10)
-                .background(
+                .background {
                     RoundedRectangle(cornerRadius: UD.Radius.xs, style: .continuous)
                         .fill(selected ? UD.accentTint : UD.uw03)
-                )
+                }
         }
         .buttonStyle(.udPlain)
     }
@@ -93,10 +93,10 @@ public struct UDCountBadge: View {
             .padding(.horizontal, 5)
             .frame(minWidth: 18)
             .frame(height: 18)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
                     .fill(accent ? UD.accentTint : UD.uw03)
-            )
+            }
     }
 }
 
@@ -151,10 +151,10 @@ public struct UDKbd: View {
             .padding(.horizontal, 5)
             .frame(minWidth: 18)
             .frame(height: 20)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: UD.Radius.xs, style: .continuous)
                     .fill(UD.uw03)
-            )
+            }
     }
 }
 

@@ -34,9 +34,9 @@ private struct UDCardModifier: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: UD.Layout.cardRadius, style: .continuous)
         content
-            .background(shape.fill(fill))
+            .background { shape.fill(fill) }
             .clipShape(shape)
-            .overlay(shape.strokeBorder(UD.cardRing, lineWidth: 1))
+            .overlay { shape.strokeBorder(UD.cardRing, lineWidth: 1) }
             // 只有日间补一层极轻投影（0 1 2 · 4%）；暗夜靠明度差与轮廓成边。
             .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.04), radius: 1, x: 0, y: 1)
     }
