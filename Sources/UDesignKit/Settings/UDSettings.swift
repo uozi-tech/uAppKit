@@ -78,12 +78,14 @@ private struct UDSettingsCardModifier: ViewModifier {
     @Environment(\.udSettingsSurface) private var surface
 
     func body(content: Content) -> some View {
-        content.background(
+        content.background {
             RoundedRectangle(cornerRadius: UDSettingsMetrics.cardRadius, style: .continuous)
                 .fill(surface)
-                .overlay(RoundedRectangle(cornerRadius: UDSettingsMetrics.cardRadius, style: .continuous)
-                    .strokeBorder(UDSettingsLine.card, lineWidth: 1))
-        )
+                .overlay {
+                    RoundedRectangle(cornerRadius: UDSettingsMetrics.cardRadius, style: .continuous)
+                        .strokeBorder(UDSettingsLine.card, lineWidth: 1)
+                }
+        }
     }
 }
 
@@ -420,14 +422,14 @@ public enum UDSettingsListIcon: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: UDSettingsMetrics.listIcon, height: UDSettingsMetrics.listIcon)
-                .background(shape.fill(tint.opacity(0.14)))
+                .background { shape.fill(tint.opacity(0.14)) }
                 .accessibilityHidden(true)
         case .monogram(let text, let tint):
             Text(verbatim: text)
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                 .foregroundStyle(tint)
                 .frame(width: UDSettingsMetrics.listIcon, height: UDSettingsMetrics.listIcon)
-                .background(shape.fill(tint.opacity(0.14)))
+                .background { shape.fill(tint.opacity(0.14)) }
                 .accessibilityHidden(true)
         }
     }
@@ -577,32 +579,61 @@ public struct UDSettingsNumberField: View {
     private let suffix: String?
 
     @FocusState private var focused: Bool
+    /// 输入框里正在编辑的数。不直接绑 `value`：越界值被钳回、而 `value` 本来就等于边界时，绑定没有
+    /// 变化，SwiftUI 不会重排输入框，框里会一直留着「999」而实际值是上限。经草稿提交，钳完把草稿也
+    /// 写回，框里的字跟着变成钳后的值。
+    @State private var draft: Int
 
     public init(value: Binding<Int>, width: CGFloat = 80, minValue: Int = 0, maxValue: Int = .max,
                 suffix: String? = nil) {
         _value = value
+        _draft = State(initialValue: value.wrappedValue)
         self.width = width
         self.minValue = minValue
         self.maxValue = maxValue
         self.suffix = suffix
     }
 
+    /// 钳值（单测守它）。
+    static func clamped(_ number: Int, min minValue: Int, max maxValue: Int) -> Int {
+        min(maxValue, max(minValue, number))
+    }
+
+    private func commit() {
+        let clamped = Self.clamped(draft, min: minValue, max: maxValue)
+        draft = clamped
+        if value != clamped { value = clamped }
+    }
+
     public var body: some View {
         HStack(spacing: 8) {
-            TextField("", value: Binding(
-                get: { value },
-                set: { value = min(maxValue, max(minValue, $0)) }
-            ), format: .number)
+            TextField("", value: $draft, format: .number)
                 .textFieldStyle(.plain)
                 .focused($focused)
+                .onSubmit(commit)
+                .onChange(of: focused) { _, isFocused in
+                    if !isFocused { commit() }
+                }
+                // 范围内的改动即时生效（与原先绑定直写一致）；越界的等提交时钳回。
+                .onChange(of: draft) { _, newDraft in
+                    if Self.clamped(newDraft, min: minValue, max: maxValue) == newDraft, newDraft != value {
+                        value = newDraft
+                    }
+                }
+                // 外部改了值（重置、同步）：草稿跟上。
+                .onChange(of: value) { _, newValue in
+                    if draft != newValue { draft = newValue }
+                }
                 .multilineTextAlignment(.trailing)
                 .font(.system(size: 13, design: .monospaced))
                 .foregroundStyle(UD.text)
                 .padding(.horizontal, 10)
                 .frame(width: width, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(UD.inputFill))
-                .overlay(RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(focused ? UD.accent : UD.inputBorder, lineWidth: 1))
+                .background { RoundedRectangle(cornerRadius: 7).fill(UD.inputFill) }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(focused ? UD.accent : UD.inputBorder, lineWidth: 1)
+                }
                 .animation(.easeOut(duration: 0.15), value: focused)
                 .accessibilityValue(Text(verbatim: suffix.map { "\(value) \($0)" } ?? "\(value)"))
             if let suffix {
@@ -644,8 +675,10 @@ public struct UDSettingsPicker<Value: Hashable>: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(open ? UD.button2Hover : UD.button2))
+            .background {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(open ? UD.button2Hover : UD.button2)
+            }
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         } content: {
             UDMenu(width: menuWidth, items: options.map { option in
@@ -676,8 +709,10 @@ public struct UDSettingsMoreMenu: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(open ? UD.text : UD.text2)
                 .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(open ? UD.button2Hover : UD.button2))
+                .background {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(open ? UD.button2Hover : UD.button2)
+                }
                 .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         } content: {
             UDMenu(width: 200, items: items)
