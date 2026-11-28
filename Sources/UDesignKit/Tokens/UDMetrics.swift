@@ -67,34 +67,33 @@ private struct UDShadowModifier: ViewModifier {
     @Environment(\.colorScheme) private var scheme
 
     func body(content: Content) -> some View {
-        layers.reduce(AnyView(content)) { view, layer in
-            AnyView(view.shadow(color: .black.opacity(layer.opacity),
-                                radius: layer.radius, x: 0, y: layer.y))
-        }
+        // 各级都是单层投影，直接挂一个 `.shadow`，不需要 AnyView 擦类型。
+        let layer = self.layer
+        content.shadow(color: .black.opacity(layer.opacity), radius: layer.radius, x: 0, y: layer.y)
     }
 
     /// 设计稿 CSS 投影 → SwiftUI 单层近似。
     /// `radius = blur/2`，`y = offsetY`，不透明度在设计稿值基础上略压低（补偿 SwiftUI
     /// 无负 spread 致投影偏满）。深色重、浅色轻。
-    private var layers: [UDShadowLayer] {
+    private var layer: UDShadowLayer {
         let dark = scheme == .dark
         switch level {
         case .sm:   // CSS 0 2 8 -4  · 深 0.40 / 浅 0.12
             return dark
-                ? [UDShadowLayer(opacity: 0.34, radius: 4, y: 2)]
-                : [UDShadowLayer(opacity: 0.10, radius: 4, y: 2)]
+                ? UDShadowLayer(opacity: 0.34, radius: 4, y: 2)
+                : UDShadowLayer(opacity: 0.10, radius: 4, y: 2)
         case .md:   // CSS 0 8 24 -12 · 深 0.50 / 浅 0.14
             return dark
-                ? [UDShadowLayer(opacity: 0.42, radius: 12, y: 8)]
-                : [UDShadowLayer(opacity: 0.12, radius: 12, y: 8)]
+                ? UDShadowLayer(opacity: 0.42, radius: 12, y: 8)
+                : UDShadowLayer(opacity: 0.12, radius: 12, y: 8)
         case .lg:   // CSS 0 16 40 -16 · 深 0.55 / 浅 0.18
             return dark
-                ? [UDShadowLayer(opacity: 0.46, radius: 20, y: 16)]
-                : [UDShadowLayer(opacity: 0.16, radius: 20, y: 16)]
+                ? UDShadowLayer(opacity: 0.46, radius: 20, y: 16)
+                : UDShadowLayer(opacity: 0.16, radius: 20, y: 16)
         case .menu: // CSS 0 12 32 -14 · 深 0.55 / 浅 0.16
             return dark
-                ? [UDShadowLayer(opacity: 0.46, radius: 16, y: 12)]
-                : [UDShadowLayer(opacity: 0.14, radius: 16, y: 12)]
+                ? UDShadowLayer(opacity: 0.46, radius: 16, y: 12)
+                : UDShadowLayer(opacity: 0.14, radius: 16, y: 12)
         }
     }
 }

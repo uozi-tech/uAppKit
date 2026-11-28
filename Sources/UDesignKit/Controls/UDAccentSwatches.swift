@@ -47,10 +47,16 @@ private struct Swatch: View {
     let action: () -> Void
     @State private var hovering = false
 
+    /// 各色块的填充，进程内只建一次。不能在 body 里现调 `UD.dyn`：每次都是新的 NSColor，
+    /// `Color` 的相等判断落到实例同一性上，这一帧永远不等于上一帧（理由见 `UD.dyn` 的注释）。
+    private static let fills: [AccentColor: Color] = Dictionary(uniqueKeysWithValues: AccentColor.allCases.map {
+        ($0, UD.dyn($0.base(dark: true), $0.base(dark: false)))
+    })
+
     var body: some View {
         Button(action: action) {
             RoundedRectangle(cornerRadius: size * 0.27, style: .continuous)
-                .fill(UD.dyn(color.base(dark: true), color.base(dark: false)))
+                .fill(Self.fills[color] ?? UD.accentDefault)
                 .frame(width: size, height: size)
                 .overlay {
                     if selected {

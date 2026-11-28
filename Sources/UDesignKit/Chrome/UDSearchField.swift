@@ -51,7 +51,7 @@ public struct UDSearchField: View {
                 .clipShape(UDInputContentClip(horizontalInset: 0, verticalOutset: 16))
 
             if showsHotkeyChip {
-                Text("⌘ K")
+                Text(verbatim: "⌘ K")
                     .font(UD.monoKbd)
                     .foregroundStyle(UD.text4)
                     .padding(.vertical, 2)

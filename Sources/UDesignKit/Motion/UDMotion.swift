@@ -341,6 +341,11 @@ public struct UDPulseHalo: View {
     var scale: UDMotionRamp<CGFloat>
     var duration: TimeInterval
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 「减弱动态效果」打开时不画光晕（只占位），与 `UDBreathingDot` 一致；
+    /// 以前只有 `UDHostDot` / `UDStatusBadge` 在外面自己判，直接用本组件的调用方照样一直闪。
+    ///
     /// - Parameters:
     ///   - diameter: 光晕静止直径（动画在此基础上做 `scale`）。
     ///   - peakOpacity: 不透明度峰值，动画从它衰减到 0。注意取的是**实际**峰值 ——
@@ -358,13 +363,19 @@ public struct UDPulseHalo: View {
     }
 
     public var body: some View {
-        UDMotionShape(
-            color: color,
-            content: .fill(cornerRadius: nil, size: nil),
-            motion: UDMotion(opacity: .init(from: peakOpacity, to: 0), scale: scale,
-                             duration: duration, autoreverses: true,
-                             timing: .easeInEaseOut)
-        )
+        Group {
+            if reduceMotion {
+                Color.clear
+            } else {
+                UDMotionShape(
+                    color: color,
+                    content: .fill(cornerRadius: nil, size: nil),
+                    motion: UDMotion(opacity: .init(from: peakOpacity, to: 0), scale: scale,
+                                     duration: duration, autoreverses: true,
+                                     timing: .easeInEaseOut)
+                )
+            }
+        }
         .frame(width: diameter, height: diameter)
         .allowsHitTesting(false)
     }
