@@ -82,7 +82,7 @@ public struct UDAgentApprovalCard: View {
             }
             .frame(maxHeight: 180)
             .fixedSize(horizontal: false, vertical: true)
-            .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(UD.uw03))
+            .background { RoundedRectangle(cornerRadius: UD.Radius.sm).fill(UD.uw03) }
 
             if let note, !note.isEmpty {
                 Label(note, systemImage: "info.circle")
@@ -101,8 +101,8 @@ public struct UDAgentApprovalCard: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: UD.Radius.md).fill(Self.tint))
-        .overlay(RoundedRectangle(cornerRadius: UD.Radius.md).stroke(Self.stroke, lineWidth: 1))
+        .background { RoundedRectangle(cornerRadius: UD.Radius.md).fill(Self.tint) }
+        .overlay { RoundedRectangle(cornerRadius: UD.Radius.md).stroke(Self.stroke, lineWidth: 1) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(String(localized: "\(title)：\(toolName)", bundle: ModuleBundle.bundle, comment: "审批卡片读屏标签：标题：工具名"))
     }

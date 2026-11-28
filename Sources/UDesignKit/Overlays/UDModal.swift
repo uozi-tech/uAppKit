@@ -23,12 +23,12 @@ public extension View {
     /// 套上模态卡片的底、圆角与四周均匀投影（不描边）。只管外观，不管背板与居中；
     /// 自绘居中弹层直接用 `UDModal`。
     func udModalCard(cornerRadius: CGFloat = UD.ModalCard.cornerRadius) -> some View {
-        background(
+        background {
             RoundedRectangle(cornerRadius: cornerRadius)
                 .fill(UD.overlay)
                 .shadow(color: UD.ModalCard.contactShadow, radius: 1)
                 .shadow(color: UD.ModalCard.ambientShadow, radius: 18)
-        )
+        }
     }
 
     /// 系统 `.sheet` 里的弹窗内容统一用的底色、正文色与强调色。
@@ -73,6 +73,9 @@ public struct UDModal<Content: View>: View {
             UDModalBackdrop(onDismiss: onDismiss)
             content
                 .udModalCard(cornerRadius: cornerRadius)
+                // 读屏：卡片是模态的，VoiceOver 不再游走到背板后面的控件上。
+                .accessibilityElement(children: .contain)
+                .accessibilityAddTraits(.isModal)
                 .padding(UD.ModalCard.windowInset)
         }
     }
@@ -113,12 +116,17 @@ public struct UDConfirmModal<Message: View>: View {
                 HStack(alignment: .top, spacing: 12) {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(UD.danger.opacity(0.14))
-                        .overlay(RoundedRectangle(cornerRadius: 10)
-                            .strokeBorder(UD.danger.opacity(0.3), lineWidth: 1))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(UD.danger.opacity(0.3), lineWidth: 1)
+                        }
                         .frame(width: 36, height: 36)
-                        .overlay(Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(UD.danger))
+                        .overlay {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(UD.danger)
+                        }
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(title)
                             .font(.system(size: 14, weight: .medium))

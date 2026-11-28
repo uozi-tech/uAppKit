@@ -152,10 +152,10 @@ public struct UDModelPicker: View {
         }
         .padding(4)
         .frame(width: width)
-        .background(RoundedRectangle(cornerRadius: 9).fill(UD.overlay))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1))
+        .background { RoundedRectangle(cornerRadius: 9).fill(UD.overlay) }
+        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1) }
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .background(UDModelPickerKeyMonitor(onKey: handle))
+        .background { UDModelPickerKeyMonitor(onKey: handle) }
         .onAppear {
             highlighted = selection ?? visibleItems.first?.id
             if let selection {
@@ -203,16 +203,18 @@ public struct UDModelPicker: View {
     }
 
     private var list: some View {
-        UDCappedScroll(maxHeight: listCap) {
+        // 过滤只跑一遍：`visibleGroups` 是计算属性，每读一次都重新过滤。
+        let groups = visibleGroups
+        return UDCappedScroll(maxHeight: listCap) {
             VStack(alignment: .leading, spacing: 0) {
-                if visibleGroups.isEmpty {
+                if groups.isEmpty {
                     Text(isSearching ? String(localized: "没有匹配「\(query)」的模型", bundle: ModuleBundle.bundle) : String(localized: "还没有配置模型服务", bundle: ModuleBundle.bundle))
                         .font(UD.font(12))
                         .foregroundStyle(UD.text3)
                         .padding(.horizontal, 9).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ForEach(visibleGroups) { group in
+                ForEach(groups) { group in
                     groupHeader(group)
                     ForEach(group.items) { item in
                         UDModelPickerRow(item: item,
@@ -288,16 +290,17 @@ public struct UDModelPicker: View {
     }
 }
 
-/// 过滤规则（单测守它）：不区分大小写的子串匹配；分组名命中则整组保留。
+/// 过滤规则（单测守它）：不区分大小写、不区分变音符号的子串匹配（`localizedStandardContains`，
+/// 同 Finder 搜索）；分组名命中则整组保留。
 enum UDModelPickerFilter {
     static func filter(_ groups: [UDModelPickerGroup], query: String) -> [UDModelPickerGroup] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return groups }
         return groups.compactMap { group in
-            if group.title.localizedCaseInsensitiveContains(needle) {
+            if group.title.localizedStandardContains(needle) {
                 return group.items.isEmpty ? nil : group
             }
-            let hits = group.items.filter { $0.title.localizedCaseInsensitiveContains(needle) }
+            let hits = group.items.filter { $0.title.localizedStandardContains(needle) }
             return hits.isEmpty ? nil : UDModelPickerGroup(id: group.id, title: group.title,
                                                            items: hits, status: group.status)
         }
@@ -334,14 +337,17 @@ private struct UDModelPickerRow: View {
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 9)
-            .background(RoundedRectangle(cornerRadius: UD.Radius.sm)
-                .fill(selected ? UD.rowSelected : highlighted ? Self.highlightBg : .clear))
+            .background {
+                RoundedRectangle(cornerRadius: UD.Radius.sm)
+                    .fill(selected ? UD.rowSelected : highlighted ? Self.highlightBg : .clear)
+            }
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         }
         .buttonStyle(.udPlain)
         .onHover(perform: onHover)
         .help(item.title)
-        .accessibilityLabel(item.title)
+        // 行尾说明（如「不在列表中」）也要念出来，不能被标签整个盖掉。
+        .accessibilityLabel(item.detail.map { "\(item.title), \($0)" } ?? item.title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -364,8 +370,10 @@ private struct UDModelPickerActionRow: View {
             .foregroundStyle(UD.text2)
             .padding(.vertical, 7)
             .padding(.horizontal, 9)
-            .background(RoundedRectangle(cornerRadius: UD.Radius.sm)
-                .fill(hovering ? UD.panelHover : .clear))
+            .background {
+                RoundedRectangle(cornerRadius: UD.Radius.sm)
+                    .fill(hovering ? UD.panelHover : .clear)
+            }
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.sm))
         }
         .buttonStyle(.udPlain)

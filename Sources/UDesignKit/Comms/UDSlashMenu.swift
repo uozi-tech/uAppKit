@@ -53,8 +53,8 @@ public struct UDSlashMenu: View {
                 if let id { proxy.scrollTo(id) }
             }
         }
-        .background(RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous).fill(UD.overlay))
-        .overlay(RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous).strokeBorder(UD.border, lineWidth: 1))
+        .background { RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous).fill(UD.overlay) }
+        .overlay { RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous).strokeBorder(UD.border, lineWidth: 1) }
         .clipShape(RoundedRectangle(cornerRadius: UD.Radius.lg, style: .continuous))
         .udShadow(.md)
         .accessibilityElement(children: .contain)
@@ -86,7 +86,7 @@ public struct UDSlashMenu: View {
             }
             .padding(.horizontal, 8)
             .frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(selected ? UD.accentSoft : Color.clear))
+            .background { RoundedRectangle(cornerRadius: UD.Radius.sm).fill(selected ? UD.accentSoft : Color.clear) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.udPlain)

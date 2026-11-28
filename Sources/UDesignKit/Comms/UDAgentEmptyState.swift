@@ -106,7 +106,7 @@ public struct UDAgentEmptyState: View {
                             }
                             .padding(.horizontal, 10)
                             .frame(height: 32)
-                            .background(RoundedRectangle(cornerRadius: UD.Radius.md).fill(UD.uw03))
+                            .background { RoundedRectangle(cornerRadius: UD.Radius.md).fill(UD.uw03) }
                             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.md))
                         }
                         .buttonStyle(.udPlain)

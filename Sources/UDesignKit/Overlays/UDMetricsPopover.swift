@@ -93,24 +93,24 @@ public struct UDMetricsPopover: View {
         .padding(.vertical, 12)
         .padding(.horizontal, 14)
         .frame(width: Self.width)
-        .background(
+        .background {
             RoundedRectangle(cornerRadius: UD.Radius.lg)
                 .fill(UD.overlayHi)
-        )
-        .overlay(
+        }
+        .overlay {
             // 浮层细发丝边：单层 UD.border（白 7% / 黑 10%），无内高光。
             RoundedRectangle(cornerRadius: UD.Radius.lg)
                 .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
         .udShadow(.lg)
         .overlay(alignment: .bottomTrailing) {
             if showsPointer {
                 Rectangle()
                     .fill(UD.overlayHi)
-                    .overlay(
+                    .overlay {
                         Rectangle()
                             .strokeBorder(UD.border, lineWidth: 1)
-                    )
+                    }
                     .frame(width: 10, height: 10)
                     .rotationEffect(.degrees(45))
                     .offset(x: -16, y: 5)
@@ -124,7 +124,7 @@ public struct UDMetricsPopover: View {
         let hot = value > 80
 
         HStack(spacing: 6) {
-            Text("\(index + 1)")
+            Text(index + 1, format: .number)
                 .font(UD.mono(10.5))
                 .foregroundStyle(UD.text3)
                 .frame(width: 20, alignment: .leading)
@@ -143,7 +143,8 @@ public struct UDMetricsPopover: View {
             }
             .frame(height: 4)
 
-            Text("\(Int(value))%")
+            // 百分比走 FormatStyle（按 locale 排符号与间距），不手拼「数字 + %」。
+            Text(value / 100, format: .percent.precision(.fractionLength(0)))
                 .font(UD.mono(10.5))
                 .foregroundStyle(hot ? UD.warning : UD.text2)
                 .frame(width: 38, alignment: .trailing)

@@ -73,7 +73,7 @@ public struct UDChatMessage<Content: View>: View {
         if isUser {
             inner
                 .padding(UDChatMessageLayout.userBubblePadding)
-                .background(userBubbleBackground)
+                .background { userBubbleBackground }
         } else {
             inner
         }
@@ -133,10 +133,10 @@ public struct UDMonoTag: View {
             .foregroundStyle(UD.text)
             .padding(.vertical, 1)
             .padding(.horizontal, 4)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(Self.tagBg)
-            )
+            }
     }
 }
 
@@ -158,10 +158,10 @@ public struct UDCodeChip: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: UD.Radius.sm, style: .continuous)
                     .fill(UD.uw05)
-            )
+            }
             .padding(.vertical, 6)
     }
 }

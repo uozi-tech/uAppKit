@@ -91,10 +91,10 @@ public struct UDToolCall: View {
         }
         .background(Self.cardBg)
         .clipShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
-        .overlay(
+        .overlay {
             RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous)
                 .strokeBorder(UD.border, lineWidth: 1)
-        )
+        }
         .padding(.vertical, 8)
     }
 
@@ -189,11 +189,11 @@ public struct UDToolCall: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 26)
-                .background(
+                .background {
                     // v2 tint 主按钮：accent 14% 底（禁用 7%），无 accent 描边。
                     RoundedRectangle(cornerRadius: UD.Radius.sm, style: .continuous)
                         .fill(UD.accent.opacity(approvalsDisabled ? 0.07 : 0.14))
-                )
+                }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.udPlain)
@@ -206,10 +206,10 @@ public struct UDToolCall: View {
                     .foregroundStyle(approvalsDisabled ? UD.text4 : UD.text3)
                     .padding(.horizontal, 12)
                     .frame(height: 26)
-                    .background(
+                    .background {
                         RoundedRectangle(cornerRadius: UD.Radius.sm, style: .continuous)
                             .fill(UD.uw04)
-                    )
+                    }
                     .contentShape(Rectangle())
             }
             .buttonStyle(.udPlain)

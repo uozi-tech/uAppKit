@@ -56,9 +56,10 @@ public struct UDAgentQueueStrip: View {
                 }
             }
             .padding(UDAgentQueueLayout.trayInset)
-            .background(
+            .background {
                 RoundedRectangle(cornerRadius: UDAgentQueueLayout.trayRadius, style: .continuous)
-                    .fill(UD.uw03))
+                    .fill(UD.uw03)
+            }
         }
     }
 }
@@ -116,7 +117,7 @@ private struct Row: View {
         .padding(.leading, 8)
         .padding(.trailing, 4)
         .frame(height: UDAgentQueueLayout.rowHeight)
-        .background(shape.fill(hovering ? UD.uw04 : .clear))
+        .background { shape.fill(hovering ? UD.uw04 : .clear) }
         .contentShape(shape)
         .onHover { hovering = $0 }
         .onTapGesture(perform: onEdit)
@@ -155,7 +156,7 @@ private struct IconButton: View {
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(hovering ? UD.text : dimmed ? UD.text4 : UD.text3)
                 .frame(width: 20, height: 20)
-                .background(shape.fill(hovering ? UD.uw06 : .clear))
+                .background { shape.fill(hovering ? UD.uw06 : .clear) }
                 .contentShape(shape)
         }
         .buttonStyle(.udPlain)
