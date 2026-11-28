@@ -63,22 +63,40 @@ public final class AgentRuntimeSession<Context: Sendable> {
 
     // MARK: - 可观察状态
 
-    public private(set) var messages: [AgentMessage] = []
+    public private(set) var messages: [AgentMessage] = [] {
+        didSet { transcriptRevision &+= 1 }
+    }
     /// 与 `messages` 一一对应的展示身份。SwiftUI 的行身份必须独立于数组位置：恢复 / 插入消息后，
     /// 后续行的展开态不该被当成另一行。
-    public private(set) var messageIDs: [UUID] = []
+    public private(set) var messageIDs: [UUID] = [] {
+        didSet { transcriptRevision &+= 1 }
+    }
     public private(set) var state: State = .idle
     /// 正在吐的这条回复（还没进 `messages`）；不在吐时为 nil。按 `streamingPublishInterval` 节流更新。
     public private(set) var streamingText: String?
     /// 正在 `tool.run` 里的那条调用。
-    public private(set) var runningToolCallID: String?
+    public private(set) var runningToolCallID: String? {
+        // 结算 / 取消时常把 nil 再写成 nil：没变就别让面板行缓存失效。
+        didSet { if runningToolCallID != oldValue { transcriptRevision &+= 1 } }
+    }
     /// 最近一次带用量的回复（只有非流式回退带）。
     public private(set) var lastUsage: LLMUsage?
     /// user 消息的展示别名（按 `messages` 下标）：`/` 命令展开成长 prompt 发送，气泡里只显示原文。
-    public private(set) var userDisplayOverrides: [Int: String] = [:]
+    public private(set) var userDisplayOverrides: [Int: String] = [:] {
+        didSet { transcriptRevision &+= 1 }
+    }
     /// 排队消息的展示别名。
     public private(set) var queuedDisplayOverrides: [UUID: String] = [:]
     private var queue = AgentMessageQueue()
+
+    // MARK: - 展示层缓存（包内）
+
+    /// 面板行的输入（`messages` / `messageIDs` / `userDisplayOverrides` / `runningToolCallID`）
+    /// 每变一次加一。流式文字、状态变化不动它：面板据此判断缓存的行还能不能用。
+    @ObservationIgnored package private(set) var transcriptRevision = 0
+    /// AgentRuntimeUI 的面板行缓存。行的类型在 UI 层，这里只按修订号存一份，免得每次流式刷新
+    /// （每 50ms）都把整段对话重新折一遍。
+    @ObservationIgnored package var transcriptCache: (revision: Int, value: any Sendable)?
 
     // MARK: - 配置
 
@@ -101,7 +119,9 @@ public final class AgentRuntimeSession<Context: Sendable> {
     @ObservationIgnored private let auditLog: AgentAuditLog?
 
     @ObservationIgnored private var inflightTask: Task<Void, Never>?
-    @ObservationIgnored private var currentTurnID: UUID?
+    /// 不加 `@ObservationIgnored`：`isBusy` 由它推出，输入区的「停止」按钮要跟着它刷新 ——
+    /// 一轮结束时它是最后一个变的值，之后没有别的可观察变化来带动视图。
+    private var currentTurnID: UUID?
     /// 本轮工具循环里 assistant 消息的 thinking 块（按其第一个 tool call 的 id）。新的用户消息
     /// 一来就清空 —— 跨轮不回传是 API 允许的「从历史前端移除」。
     @ObservationIgnored private var thinkingReplay: [String: [LLMThinkingBlock]] = [:]
@@ -167,6 +187,10 @@ public final class AgentRuntimeSession<Context: Sendable> {
     /// 有一轮正拥有这个会话。比 `state` 早一拍为真，「该发还是该排队」看它。
     public var isBusy: Bool { currentTurnID != nil }
 
+    /// `submit` 现在能不能接下这条消息（发出去或排进队列）。还没选模型时为 false：
+    /// 面板据此保留输入框里的草稿，而不是清掉一条注定发不出去的消息。
+    public var canSubmit: Bool { !model.isEmpty }
+
     /// 面板的提交入口：空闲时开新一轮（并等到这一轮及其后排队的各轮都结束才返回），
     /// 忙碌时排队 —— 不打断在途的这一轮。
     /// - Parameter delivery: 只在忙碌时有意义：排到整轮结束（缺省），还是这一步的工具跑完就并入会话。
@@ -209,9 +233,11 @@ public final class AgentRuntimeSession<Context: Sendable> {
 
         let turnID = UUID()
         currentTurnID = turnID
-        if let gateReset {
-            await gateReset.value
-            self.gateReset = nil
+        if let pending = gateReset {
+            await pending.value
+            // 等待期间 `reset()` / `restore()` 可能又排了一次新的清理（它会先等这次）：只清掉自己等完的
+            // 那一个，新的留给下一次 `send` 去等，否则旧对话的放行列表可能漏进新对话的第一轮。
+            if gateReset == pending { gateReset = nil }
         }
         guard owns(turnID) else { return }
 
@@ -272,6 +298,7 @@ public final class AgentRuntimeSession<Context: Sendable> {
         clearQueue()
         clearStreaming()
         runningToolCallID = nil
+        lastUsage = nil
         thinkingReplay.removeAll()
         messageIDs = restored.map { _ in UUID() }
         messages = restored

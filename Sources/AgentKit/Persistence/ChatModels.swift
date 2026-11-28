@@ -51,15 +51,38 @@ public final class ChatSession {
     /// degrades to the original createdAt-only ordering — no behavior change
     /// for uTerm's existing store.
     public var orderedMessages: [ChatMessageRecord] {
-        (messages ?? []).sorted { ($0.orderIndex, $0.createdAt) < ($1.orderIndex, $1.createdAt) }
+        (messages ?? []).sorted(by: Self.precedes)
+    }
+
+    /// The message `orderedMessages.last` would return, found in one pass
+    /// instead of sorting the whole relationship (write-through calls this
+    /// on every appended message).
+    public var lastMessage: ChatMessageRecord? {
+        Self.last(of: messages ?? [])
     }
 
     /// Second-line preview for the history list: the last user message
     /// (preferring its display alias, e.g. uTable's `/explain` shorthand,
-    /// when one was recorded).
+    /// when one was recorded). One pass, no sort: the history menu asks for
+    /// this on up to 100 sessions at once.
     public var preview: String {
-        guard let last = orderedMessages.last(where: { $0.roleRaw == "user" }) else { return "" }
+        guard let last = Self.last(of: (messages ?? []).filter { $0.roleRaw == "user" }) else { return "" }
         return last.displayText.isEmpty ? last.text : last.displayText
+    }
+
+    static func precedes(_ lhs: ChatMessageRecord, _ rhs: ChatMessageRecord) -> Bool {
+        (lhs.orderIndex, lhs.createdAt) < (rhs.orderIndex, rhs.createdAt)
+    }
+
+    /// Same element as the stable sort's `last`: among equal keys the one
+    /// that comes later in the input wins.
+    static func last(of records: [ChatMessageRecord]) -> ChatMessageRecord? {
+        var result: ChatMessageRecord?
+        for record in records {
+            if let current = result, precedes(record, current) { continue }
+            result = record
+        }
+        return result
     }
 }
 

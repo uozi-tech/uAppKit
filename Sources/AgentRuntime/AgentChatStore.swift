@@ -32,18 +32,18 @@ public final class AgentChatStore {
             currentSession = session
         }
         guard let session = currentSession else { return }
-        let ordered = session.orderedMessages
-        switch codec.encode(message, display: display, lastRow: ordered.last.map(AgentTranscriptRow.init)) {
+        let last = session.lastMessage
+        switch codec.encode(message, display: display, lastRow: last.map(AgentTranscriptRow.init)) {
         case .skip:
             return
         case .append(let row):
             let record = ChatMessageRecord(roleRaw: row.roleRaw, text: row.text,
-                                           orderIndex: nextOrderIndex(ordered))
+                                           orderIndex: nextOrderIndex(session))
             row.apply(to: record)
             record.session = session
             context.insert(record)
         case .replaceLast(let row):
-            guard let last = ordered.last else { return }
+            guard let last else { return }
             row.apply(to: last)
         }
         session.updatedAt = Date()
@@ -81,10 +81,18 @@ public final class AgentChatStore {
         return (try? context.fetch(descriptor)) ?? []
     }
 
-    public func delete(_ session: ChatSession) {
+    /// 删除一条会话（连同消息）。返回写库失败的原因（nil = 成功），供调用方提示用户；
+    /// 不关心的调用方照旧当语句调用。
+    @discardableResult
+    public func delete(_ session: ChatSession) -> Error? {
         if currentSession?.id == session.id { currentSession = nil }
         context.delete(session)
-        try? context.save()
+        do {
+            try context.save()
+            return nil
+        } catch {
+            return error
+        }
     }
 
     /// 把一个字符串作用域（如仓库路径）换成稳定的 `scopeID`：同一输入永远同一个 UUID。
@@ -92,7 +100,7 @@ public final class AgentChatStore {
         DeterministicUUID.make(namespace: namespace, name: key)
     }
 
-    private func nextOrderIndex(_ ordered: [ChatMessageRecord]) -> Int {
-        (ordered.map(\.orderIndex).max() ?? -1) + 1
+    private func nextOrderIndex(_ session: ChatSession) -> Int {
+        ((session.messages ?? []).map(\.orderIndex).max() ?? -1) + 1
     }
 }

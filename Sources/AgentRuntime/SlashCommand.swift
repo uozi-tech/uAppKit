@@ -32,13 +32,14 @@ public struct SlashCommandMatcher: Sendable {
         self.commands = commands
     }
 
-    /// 菜单过滤：trigger 前缀，或标题 / 副标题包含，均可命中；空查询给全表。
+    /// 菜单过滤：trigger 前缀，或标题 / 副标题包含（`localizedStandardContains`：不分大小写、
+    /// 不分变音符号与全半角，和系统搜索框一致），均可命中；空查询给全表。
     public func matches(for query: String) -> [SlashCommand] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return commands }
         return commands.filter {
-            $0.trigger.hasPrefix(q) || $0.title.localizedCaseInsensitiveContains(q)
-                || $0.subtitle.localizedCaseInsensitiveContains(q)
+            $0.trigger.hasPrefix(q) || $0.title.localizedStandardContains(q)
+                || $0.subtitle.localizedStandardContains(q)
         }
     }
 
