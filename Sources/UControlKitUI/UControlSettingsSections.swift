@@ -98,8 +98,7 @@ public struct UControlSettingsSections: View {
 
             UDSettingsRow(label: copy.mutationsLabel, hint: copy.mutationsHint) {
                 UDToggle(Bindable(control).allowMutations, label: Text(verbatim: copy.mutationsLabel))
-                    .disabled(!control.isEnabled)
-                    .opacity(control.isEnabled ? 1 : 0.45)
+                    .disabled(!control.isEnabled)   // UDToggle 自己降透明，这里不再叠一层
             }
 
             UDSettingsRow(label: copy.socketLabel, hint: socketPath, hintStyle: .monospaced) {

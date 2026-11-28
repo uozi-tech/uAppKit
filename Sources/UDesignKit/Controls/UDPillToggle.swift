@@ -60,7 +60,7 @@ public struct UDPillToggle: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .buttonStyle(.udPlain)
+        .buttonStyle(.udPlainKeepsDisabledLook)
         .opacity(isEnabled ? 1 : 0.6)
         .onHover { hovering = $0 }
         // 开 / 关只靠底色与状态点区分，对辅助功能补成系统开关：读得出状态，按下走 `action`

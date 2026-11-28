@@ -75,7 +75,7 @@ public struct UDCheckbox: View {
             } label: {
                 label
             }
-            .buttonStyle(.udPlain)
+            .buttonStyle(.udPlainKeepsDisabledLook)
             .opacity(isEnabled ? 1 : 0.45)
             .allowsHitTesting(isEnabled)
             .onHover { hovering = $0 }

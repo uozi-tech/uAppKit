@@ -47,7 +47,7 @@ public struct UDAddButton: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
         }
-        .buttonStyle(.udPlain)
+        .buttonStyle(.udPlainKeepsDisabledLook)
         .onHover { hovering = $0 }
     }
 }

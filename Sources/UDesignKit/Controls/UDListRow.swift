@@ -56,7 +56,7 @@ public struct UDListRow: View {
             }
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
-        .buttonStyle(.udPlain)
+        .buttonStyle(.udPlainKeepsDisabledLook)
         .opacity(isEnabled ? 1 : 0.5)
         .onHover { hovering = $0 }
     }
