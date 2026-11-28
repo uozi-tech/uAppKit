@@ -106,6 +106,21 @@ final class AgentRuntimeUITests: XCTestCase {
         XCTAssertTrue(panel[footerStart.lowerBound...].contains("session.streamingText"))
     }
 
+    /// ⌘↩ 的隐形按钮只为快捷键存在：先 `.accessibilityElement(children: .ignore)` 再藏，
+    /// 否则 uTable 的 AX 审计里会冒出一个无名按钮。进程内的 AX 树分不出两种写法，只能盯源文本。
+    func testCommandReturnShortcutButtonIsFullyHiddenFromAccessibility() throws {
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/AgentRuntimeUI/UDAgentPanel.swift")
+        let panel = try String(contentsOf: file, encoding: .utf8)
+        let start = try XCTUnwrap(panel.range(of: "private var commandReturnShortcut: some View"))
+        let end = try XCTUnwrap(panel.range(of: "private func submit(", range: start.upperBound..<panel.endIndex))
+        let block = panel[start.upperBound..<end.lowerBound]
+        let ignore = try XCTUnwrap(block.range(of: ".accessibilityElement(children: .ignore)"), "隐形按钮要先收成单个元素")
+        let hidden = try XCTUnwrap(block.range(of: ".accessibilityHidden(true)"))
+        XCTAssertLessThan(ignore.lowerBound, hidden.lowerBound, "要先 .ignore 再 accessibilityHidden")
+    }
+
     #if os(macOS)
     private var windows: [NSWindow] = []
 
