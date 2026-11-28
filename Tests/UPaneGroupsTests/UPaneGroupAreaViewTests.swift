@@ -3,6 +3,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
+import UAppKitBridge
 @testable import UPaneGroups
 
 /// 视图层能测的那部分：**拍平挂载**这条硬约束是可观测的 —— 把面板内容做成一个
@@ -61,7 +62,8 @@ final class UPaneGroupAreaViewTests: XCTestCase {
         RunLoop.current.run(until: Date().addingTimeInterval(0.3))
     }
 
-    private func area(_ model: UPaneGroupsModel<TestPayload>) -> some View {
+    private func area(_ model: UPaneGroupsModel<TestPayload>)
+        -> UPaneGroupArea<TestPayload, Marker, Color, EmptyView, EmptyView> {
         UPaneGroupArea(
             model: model,
             dragType: .plainText,
@@ -349,6 +351,206 @@ final class UPaneGroupAreaViewTests: XCTestCase {
         // 组件里没有任何一条直接调 closeTab 的路径 —— 这里只钉住「模型没被动过」。
         XCTAssertEqual(model.allTabs.map(\.id), [a])
         XCTAssertTrue(box.requested.isEmpty)
+    }
+
+    // MARK: 切活动组不重求面板内容
+
+    /// 点进另一组（只改 `activeGroupID`）不该把 app 的 `content` 再调一遍：区域 body 不读活动组，
+    /// 面板的活动态由 `ActivePaneGateDriver` 单独观察。gate 照样跟着翻。
+    func testFocusingAnotherGroupDoesNotReinvokeContent() throws {
+        final class Calls: @unchecked Sendable { var content = 0 }
+        let calls = Calls()
+        final class Seen: @unchecked Sendable { var gates: [UUID: ActivePaneGate] = [:] }
+        let seen = Seen()
+        struct Probe: View {
+            let tabID: UUID
+            let seen: Seen
+            @Environment(\.activePaneGate) private var gate
+            var body: some View {
+                Color.clear.onAppear { if let gate { seen.gates[tabID] = gate } }
+            }
+        }
+
+        let model = UPaneGroupsModel<TestPayload>()
+        let a = model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        let b = model.openTab { UPaneTab(payload: .scratch, customTitle: "b") }
+        let g2 = try XCTUnwrap(model.activeGroupID)
+
+        let view = UPaneGroupArea(
+            model: model,
+            dragType: .plainText,
+            descriptor: { _ in UPaneTabDescriptor(title: "t") },
+            content: { tab, _ in
+                calls.content += 1
+                return Probe(tabID: tab.id, seen: seen)
+            },
+            emptyGroup: { _ in Color.clear },
+            onRequestClose: { _ in })
+        let (window, hostView) = host(view)
+        defer { window.contentView = nil }
+        let gateA = try XCTUnwrap(seen.gates[a])
+        let gateB = try XCTUnwrap(seen.gates[b])
+        XCTAssertTrue(gateB.isActive)
+
+        let before = calls.content
+        model.focusGroup(g1)
+        settle(hostView, window)
+        XCTAssertEqual(calls.content, before, "切活动组把面板内容重求了 \(calls.content - before) 次")
+        XCTAssertTrue(gateA.isActive, "gate 仍要跟着活动组翻")
+        XCTAssertFalse(gateB.isActive)
+
+        model.focusGroup(g2)
+        settle(hostView, window)
+        XCTAssertEqual(calls.content, before)
+        XCTAssertFalse(gateA.isActive)
+        XCTAssertTrue(gateB.isActive)
+    }
+
+    /// `.activeGroupOnly` 下 app 写进一个失效的 `activeGroupID`：按 `resolvedActiveGroupID`
+    /// 回落到第一组，照样挂一个面板，而不是一个都不挂。
+    func testActiveGroupOnlyWithAStaleActiveGroupStillMountsTheFirstGroup() throws {
+        let model = UPaneGroupsModel<TestPayload>(policy: .init(keepAlive: .activeGroupOnly))
+        let a = model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "c") }
+        model.activeGroupID = UUID()
+
+        let (window, hostView) = host(area(model))
+        defer { window.contentView = nil }
+        XCTAssertEqual(markers(in: hostView).map(\.tabID), [a])
+    }
+
+    // MARK: 切前台标签的回调
+
+    private func areaReportingTabChanges(_ model: UPaneGroupsModel<TestPayload>,
+                                         into log: TabChangeLog) -> some View {
+        UPaneGroupArea(
+            model: model,
+            dragType: .plainText,
+            descriptor: { _ in UPaneTabDescriptor(title: "t") },
+            content: { tab, _ in Marker(tabID: tab.id) },
+            emptyGroup: { _ in Color.clear },
+            onRequestClose: { _ in },
+            onActiveTabChanged: { log.groups.append($0) })
+    }
+
+    final class TabChangeLog: @unchecked Sendable { var groups: [UUID] = [] }
+
+    /// 关掉不是最后一枚的前台标签：下标没变（还是 0），前台却换成了下一枚 —— 回调要发。
+    func testClosingTheFrontTabReportsAChangeEvenWhenTheIndexStays() throws {
+        let log = TabChangeLog()
+        let model = UPaneGroupsModel<TestPayload>()
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "b") }
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "c") }
+        let gid = try XCTUnwrap(model.activeGroupID)
+        model.activateTab(groupID: gid, index: 0)
+
+        let (window, hostView) = host(areaReportingTabChanges(model, into: log))
+        defer { window.contentView = nil }
+        XCTAssertEqual(log.groups, [])
+
+        model.closeTab(groupID: gid, index: 0)
+        settle(hostView, window)
+        XCTAssertEqual(model.groups[gid]?.activeIndex, 0, "前提：下标没变")
+        XCTAssertEqual(log.groups, [gid], "前台换了人，回调没发")
+    }
+
+    /// 预览标签原地顶替：同一个槽位、下标不变，前台换成新标签。
+    func testReplacingTheTransientTabInPlaceReportsAChange() throws {
+        let log = TabChangeLog()
+        let model = UPaneGroupsModel<TestPayload>()
+        model.openTab({ UPaneTab(payload: .scratch, customTitle: "p1") }, asTransient: true)
+        let gid = try XCTUnwrap(model.activeGroupID)
+
+        let (window, hostView) = host(areaReportingTabChanges(model, into: log))
+        defer { window.contentView = nil }
+
+        model.openTab({ UPaneTab(payload: .scratch, customTitle: "p2") }, asTransient: true)
+        settle(hostView, window)
+        XCTAssertEqual(model.groups[gid]?.activeIndex, 0)
+        XCTAssertEqual(log.groups, [gid])
+    }
+
+    /// 反过来：拖着前台标签在本组里换位置，只改下标、前台还是它 —— 不是切标签，不发。
+    func testReorderingTheFrontTabIsNotATabChange() throws {
+        let log = TabChangeLog()
+        let model = UPaneGroupsModel<TestPayload>()
+        let a = model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "b") }
+        let c = model.openTab { UPaneTab(payload: .scratch, customTitle: "c") }
+        let gid = try XCTUnwrap(model.activeGroupID)
+        XCTAssertEqual(model.activeTab?.id, c)
+
+        let (window, hostView) = host(areaReportingTabChanges(model, into: log))
+        defer { window.contentView = nil }
+
+        model.reorderTab(c, before: a)
+        settle(hostView, window)
+        XCTAssertEqual(model.groups[gid]?.activeIndex, 0, "前提：下标变了")
+        XCTAssertEqual(model.activeTab?.id, c)
+        XCTAssertEqual(log.groups, [], "前台没换，不该当成切标签")
+
+        // 真的切标签照常发。
+        model.activateTab(groupID: gid, index: 1)
+        settle(hostView, window)
+        XCTAssertEqual(log.groups, [gid])
+    }
+
+    // MARK: 共享拖拽状态的几何表
+
+    /// 每组的尺寸实时写进 `groupBounds`；组塌缩出树后那一格要删掉。
+    func testGroupBoundsAreWrittenAndPrunedWhenAGroupCollapses() throws {
+        let dragState = UPaneDragState()
+        let model = UPaneGroupsModel<TestPayload>()
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        let g2 = try XCTUnwrap(model.activeGroupID)
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "b") }
+
+        let (window, hostView) = host(area(model).withDragState(dragState))
+        defer { window.contentView = nil }
+        XCTAssertEqual(Set(dragState.groupBounds.keys), [g1, g2])
+        let bounds = try XCTUnwrap(dragState.groupBounds[g1])
+        XCTAssertGreaterThan(bounds.width, 0)
+        XCTAssertEqual(bounds.origin, .zero)
+
+        model.closeTab(groupID: g2, index: 0)
+        settle(hostView, window)
+        XCTAssertEqual(model.groupCount, 1)
+        XCTAssertEqual(Set(dragState.groupBounds.keys), [g1], "塌缩掉的组还留在 groupBounds 里")
+        XCTAssertEqual(try XCTUnwrap(dragState.groupBounds[g1]).width, 800, accuracy: 0.5,
+                       "剩下那组的尺寸要跟着变成整块区域")
+    }
+
+    // MARK: 后台面板不装按下监视器
+
+    /// `.allTabs` 下同组的后台面板也挂着；它们的按下探针不该各占一份进程级监视器。
+    func testOnlyFrontPanesObservePointerDown() throws {
+        let model = UPaneGroupsModel<TestPayload>()
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "a") }
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "b") }
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "c") }
+        let gid = try XCTUnwrap(model.activeGroupID)
+
+        let (window, hostView) = host(area(model))
+        defer { window.contentView = nil }
+
+        func probes(_ view: NSView) -> [PointerDownProbeView] {
+            (view as? PointerDownProbeView).map { [$0] } ?? view.subviews.flatMap { probes($0) }
+        }
+        // 3 枚 chip 各一个（按下即激活），3 个面板各一个。
+        let all = probes(hostView)
+        XCTAssertEqual(all.count, 6)
+        XCTAssertEqual(all.filter(\.isObserving).count, 4, "3 枚 chip + 1 个前台面板")
+
+        model.activateTab(groupID: gid, index: 0)
+        settle(hostView, window)
+        XCTAssertEqual(probes(hostView).filter(\.isObserving).count, 4, "切标签后仍只有前台面板在旁观")
     }
 }
 #endif

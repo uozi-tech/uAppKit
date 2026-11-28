@@ -210,5 +210,52 @@ final class UPaneTabDragSourceTests: XCTestCase {
 
         XCTAssertEqual(model.locateTab(a)?.groupID, g2, "标签应当并进落点所在的组")
     }
+
+    /// 面板按 `tab.id` 定身份，换组时不重建（见 `UPaneGroupArea` 的拍平说明）。挂在面板上的落点区
+    /// 因此也跟着这个标签走：它得**实时**认出「我现在在哪一组」，不能停在挂上去那一刻的组。
+    ///
+    /// g1 [a, b]、g2 [c, d]。把 d 并进 g1 之后，在 d 的面板正中松开 b：落点在 g1 里，
+    /// b 本来就在 g1，应当是 no-op —— 若落点区还记着 g2，b 会被错并进 g2。
+    func testPaneDropTargetFollowsItsTabIntoAnotherGroup() throws {
+        let model = UPaneGroupsModel<TestPayload>()
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "alpha") }
+        let b = model.openTab { UPaneTab(payload: .scratch, customTitle: "beta") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        model.openTab { UPaneTab(payload: .scratch, customTitle: "gamma") }
+        let d = model.openTab { UPaneTab(payload: .scratch, customTitle: "delta") }
+        let g2 = try XCTUnwrap(model.locateTab(d)?.groupID)
+
+        let (window, hostView) = host(model)
+        defer { window.contentView = nil }
+
+        model.moveTab(d, toGroup: g1, zone: .center)
+        settle(window)
+        XCTAssertEqual(model.locateTab(d)?.groupID, g1)
+        XCTAssertEqual(model.groupCount, 2)
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("UPaneTabDragSourceTests-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects([UPaneTabDragPayload.pasteboardItem(tabID: b, type: dragType)]))
+
+        let target = try XCTUnwrap(find(UPaneGroupAreaViewTests.MarkerView.self, in: hostView)
+            .first { $0.tabID == d })
+        let centre = target.convert(NSPoint(x: target.bounds.midX, y: target.bounds.midY), to: nil)
+        let info = FakeDraggingInfo(window: window, location: centre, pasteboard: pasteboard)
+        let destination = try XCTUnwrap(
+            descendants(of: hostView).last {
+                !$0.registeredDraggedTypes.isEmpty && $0.convert($0.bounds, to: nil).contains(centre)
+            })
+        _ = destination.draggingEntered(info)
+        _ = destination.draggingUpdated(info)
+        _ = destination.prepareForDragOperation(info)
+        _ = destination.performDragOperation(info)
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+
+        XCTAssertEqual(model.locateTab(b)?.groupID, g1,
+                       "落点区还停在 d 原来的组 g2 —— 面板换组后投放代理没有跟着走")
+        XCTAssertNotEqual(g1, g2)
+    }
 }
 #endif

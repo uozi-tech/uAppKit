@@ -89,6 +89,11 @@ public final class UPaneDragState {
     /// `@ObservationIgnored`：不参与视图观察（无人在 body 里读），避免布局回写触发重绘。
     @ObservationIgnored public var groupBounds: [UUID: CGRect] = [:]
 
+    /// 只留树上还在的组的尺寸（组塌缩后由区域调用）。
+    func pruneGroupBounds(keeping live: Set<UUID>) {
+        groupBounds = groupBounds.filter { live.contains($0.key) }
+    }
+
     @ObservationIgnored private var endPollTask: Task<Void, Never>?
 
     /// 拖拽开始时由标签 chip 的拖拽源调用（拖过死区、会话起来之前）。这里不接会话的

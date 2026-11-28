@@ -179,6 +179,33 @@ final class UPaneTabActivityTests: XCTestCase {
         model.activateTab(groupID: gid, index: 9)
         XCTAssertEqual(model.activeGroup?.activeIndex, 0)
     }
+
+    /// `activeGroupID` 是公开可写的：app 写进来一个已经不在树里的 id 时，生效的活动组要回落到
+    /// 第一个叶子 —— 与 `activeGroup` 同一个口径，而不只是兜住 nil。
+    @MainActor
+    func testResolvedActiveGroupFallsBackFromAStaleID() throws {
+        let model = makeModel()
+        model.openTab { tab("a") }
+        let g1 = try XCTUnwrap(model.activeGroupID)
+        model.splitGroup(g1)
+        let g2 = try XCTUnwrap(model.activeGroupID)
+        model.openTab { tab("b") }
+        XCTAssertEqual(model.resolvedActiveGroupID, g2)
+
+        model.activeGroupID = UUID()
+        XCTAssertEqual(model.resolvedActiveGroupID, model.root.firstLeafID)
+        XCTAssertEqual(model.resolvedActiveGroupID, g1)
+        XCTAssertEqual(model.activeGroup?.id, g1)
+        XCTAssertEqual(model.tabActivity(groupID: g1, index: 0), .active,
+                       "失效的 id 不该让全区域一枚 .active 标签都没有")
+        XCTAssertEqual(model.tabActivity(groupID: g2, index: 0), .frontUnfocused)
+
+        model.activeGroupID = nil
+        XCTAssertEqual(model.resolvedActiveGroupID, g1)
+
+        model.activeGroupID = g2
+        XCTAssertEqual(model.resolvedActiveGroupID, g2, "有效的 id 原样生效")
+    }
 }
 
 // MARK: - 关 / 塌缩 / 垃圾回收

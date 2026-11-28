@@ -20,43 +20,43 @@ public struct PaneDropHighlight: View {
             case .center:
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(color, lineWidth: 2)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(color.opacity(0.06)))
+                    .background(color.opacity(0.06), in: .rect(cornerRadius: 8, style: .circular))
             case .top:
                 VStack(spacing: 0) {
                     Rectangle().fill(color).frame(height: thickness)
                     Color.clear
                 }
-                .background(
+                .background(alignment: .top) {
                     Rectangle().fill(color.opacity(0.10))
-                        .frame(height: geo.size.height / 2),
-                    alignment: .top)
+                        .frame(height: geo.size.height / 2)
+                }
             case .bottom:
                 VStack(spacing: 0) {
                     Color.clear
                     Rectangle().fill(color).frame(height: thickness)
                 }
-                .background(
+                .background(alignment: .bottom) {
                     Rectangle().fill(color.opacity(0.10))
-                        .frame(height: geo.size.height / 2),
-                    alignment: .bottom)
+                        .frame(height: geo.size.height / 2)
+                }
             case .leading:
                 HStack(spacing: 0) {
                     Rectangle().fill(color).frame(width: thickness)
                     Color.clear
                 }
-                .background(
+                .background(alignment: .leading) {
                     Rectangle().fill(color.opacity(0.10))
-                        .frame(width: geo.size.width / 2),
-                    alignment: .leading)
+                        .frame(width: geo.size.width / 2)
+                }
             case .trailing:
                 HStack(spacing: 0) {
                     Color.clear
                     Rectangle().fill(color).frame(width: thickness)
                 }
-                .background(
+                .background(alignment: .trailing) {
                     Rectangle().fill(color.opacity(0.10))
-                        .frame(width: geo.size.width / 2),
-                    alignment: .trailing)
+                        .frame(width: geo.size.width / 2)
+                }
             }
         }
         .allowsHitTesting(false)

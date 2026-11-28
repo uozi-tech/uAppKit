@@ -68,6 +68,14 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
 
     private var drawsWells: Bool { style.kind == .card && wellsEnabled }
 
+    /// 测试用：换上一份外面持有的拖拽会话状态，好断言 `groupBounds` 之类的共享表。
+    /// `@State` 只在第一次建视图时取初值，所以要在视图挂上去之前调用。
+    func withDragState(_ state: UPaneDragState) -> Self {
+        var copy = self
+        copy._dragState = State(initialValue: state)
+        return copy
+    }
+
     /// 完整初始化器。带默认值的便捷版本见下方 extension。
     public init(
         model: UPaneGroupsModel<Payload>,
@@ -205,6 +213,12 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
+            // 组塌缩出树就把它在 `groupBounds` 里那一格删掉：每次分屏都铸新 id，不删的话这张表
+            // 只涨不跌。在这里按树上现有的组整表收，不靠组外壳的 `onDisappear` —— 那个回调
+            // 什么时候发由 SwiftUI 定，可能拖到很久以后。
+            .onChange(of: layout.panes.map(\.paneID)) { _, ids in
+                dragState.pruneGroupBounds(keeping: Set(ids))
+            }
         }
         .background(style.areaBackground)
     }
@@ -224,11 +238,13 @@ public struct UPaneGroupArea<Payload, Content: View, EmptyGroup: View, StripAcce
     /// 挂多少由 `policy.keepAlive` 决定。
     private func mountedTabs(in layout: LayoutFrames, areaSize: CGSize) -> [MountedTab<Payload>] {
         let keepAlive = model.policy.keepAlive
-        let activeGroupID = model.activeGroupID ?? model.root.firstLeafID
+        // 只有 `.activeGroupOnly` 需要知道活动组。另外两档不读：body 一读 `activeGroupID`，点进
+        // 另一组（什么都没改）就让整个区域 body 重求一遍 —— 重摊几何、重建每个组外壳与面板宿主
+        // 的值。面板的活动态由 `ActivePaneGateDriver` 单独观察。
+        let activeGroupID = keepAlive == .activeGroupOnly ? model.resolvedActiveGroupID : nil
         return layout.panes.flatMap { pane -> [MountedTab<Payload>] in
             guard let group = model.groups[pane.paneID], !group.tabs.isEmpty else { return [] }
-            let isActiveGroup = pane.paneID == activeGroupID
-            if keepAlive == .activeGroupOnly && !isActiveGroup { return [] }
+            if keepAlive == .activeGroupOnly && pane.paneID != activeGroupID { return [] }
             let insets = bodyInsets(for: pane.rect, areaSize: areaSize)
             let rect = drawsWells
                 ? UPaneGroupGeometry.rect(pane.rect, insetBy: insets)
@@ -367,10 +383,6 @@ private struct UPaneContentHost<Payload, Content: View>: View {
     /// 身份稳定的「本面板是不是活动面板」信号 —— 见 `ActivePaneGate`。
     @State private var gate = ActivePaneGate(isActive: false)
 
-    private var isActivePane: Bool {
-        item.isFront && (model.activeGroupID ?? model.root.firstLeafID) == item.groupID
-    }
-
     var body: some View {
         content(item.tab, item.isFront)
             // `minWidth/minHeight: 0` 不能省：flexible frame 没有下限时会跟着内容的
@@ -382,7 +394,13 @@ private struct UPaneContentHost<Payload, Content: View>: View {
             .clipped()   // AppKit 内容不许画到自己的面板外面
             .opacity(item.isFront ? 1 : 0)
             .environment(\.activePaneGate, gate)
-            .onChange(of: isActivePane, initial: true) { _, now in gate.isActive = now }
+            // 活动态只由这个薄视图观察：宿主 body 不读 `activeGroupID`，切活动组时只有它重求，
+            // 面板内容不动。以前宿主为了 `onChange` 自己读它，每次点进别的组都要把 app 的
+            // `content` 对每个已挂载标签再调一遍（`testFocusingAnotherGroupDoesNotReinvokeContent`）。
+            .background {
+                ActivePaneGateDriver(model: model, groupID: item.groupID,
+                                     isFront: item.isFront, gate: gate)
+            }
             // 面板盖在组外壳上面，所以落点区得挂在这里一份（外壳那份只剩标签条与
             // 空组）。位置换算要补上标签条的高度：分区判定用的是**整个组**的坐标系。
             .onDrop(of: [dragType] + foreignDropTypes, delegate: UPaneGroupDropDelegate(
@@ -400,14 +418,32 @@ private struct UPaneContentHost<Payload, Content: View>: View {
             // 自己吃掉 mouseDown，挂在祖先上的 SwiftUI 点击手势**永不触发**。
             // 用 NSEvent 旁观探针补上：不消费事件、对命中测试透明。
             .simultaneousGesture(TapGesture().onEnded { model.focusGroup(item.groupID) })
-            .onPointerDown {
-                // 同组的后台标签和前台标签矩形完全重合，必须按前台过滤，
-                // 否则一次点击会被同组每个已挂载标签各响应一次。
+            // 同组的后台标签和前台标签矩形完全重合，必须按前台过滤，否则一次点击会被同组每个
+            // 已挂载标签各响应一次。后台面板干脆不装监视器（`.allTabs` 下每次按下都要过一遍
+            // 所有面板的监视器），闭包里的判断留作兜底。
+            .onPointerDown(isEnabled: item.isFront) {
                 if item.isFront { model.focusGroup(item.groupID) }
             }
             // 最外层：隐藏的标签既不该被点到，也不该抢落点。
             .allowsHitTesting(item.isFront)
             .accessibilityHidden(!item.isFront)
+    }
+}
+
+/// 把「本面板是不是活动面板」写进 `ActivePaneGate`。**唯一**为面板读 `activeGroupID` 的地方：
+/// 切活动组时失效重求的只有这个空视图，面板宿主与 app 的内容都不动。
+private struct ActivePaneGateDriver<Payload>: View {
+    let model: UPaneGroupsModel<Payload>
+    let groupID: UUID
+    let isFront: Bool
+    let gate: ActivePaneGate
+
+    var body: some View {
+        let isActive = isFront && model.resolvedActiveGroupID == groupID
+        Color.clear
+            .onChange(of: isActive, initial: true) { _, now in gate.isActive = now }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -439,7 +475,7 @@ private struct PaneFocusRing<Payload>: View {
     let model: UPaneGroupsModel<Payload>
 
     var body: some View {
-        let isActive = (model.activeGroupID ?? model.root.firstLeafID) == groupID
+        let isActive = model.resolvedActiveGroupID == groupID
         RoundedRectangle(cornerRadius: 6)
             .strokeBorder(isActive ? UD.accent : Color.clear, lineWidth: 1.5)
             .allowsHitTesting(false)
@@ -496,15 +532,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
         .background(style.areaBackground)
         // 把本组当前尺寸实时写进共享拖拽状态，供投放代理的分区判定读取。
         // 不能让 delegate 捕获尺寸 —— 窗口 resize 后会变旧，见 `groupBounds`。
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { dragState.groupBounds[groupID] = CGRect(origin: .zero, size: geo.size) }
-                    .onChange(of: geo.size) { _, newSize in
-                        dragState.groupBounds[groupID] = CGRect(origin: .zero, size: newSize)
-                    }
-            }
-        )
+        .onGeometryChange(for: CGSize.self, of: { $0.size }) { size in
+            dragState.groupBounds[groupID] = CGRect(origin: .zero, size: size)
+        }
         .onDrop(of: [dragType] + foreignDropTypes, delegate: UPaneGroupDropDelegate(
             targetID: groupID,
             dragState: dragState,
@@ -517,7 +547,10 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
         // 组内任意一次按下都把它变成活动组。simultaneous 保证标签 / 关闭 /
         // 内部按钮照常触发。
         .simultaneousGesture(TapGesture().onEnded { model.focusGroup(groupID) })
-        .onChange(of: group?.activeIndex) { _, _ in
+        // 按**前台标签的 id** 判「切了前台标签」，不按下标：关掉不是最后一枚的前台标签、预览标签
+        // 原地顶替、把下标 0 的标签拖去别的组，前台都换了人而下标没变。反过来，拖着前台标签在
+        // 本组里换位置只改下标、前台还是它，也不该当成切标签。
+        .onChange(of: group?.activeTab?.id) { _, _ in
             if model.policy.releasesHiddenEditorFocusOnTabSwitch {
                 UPaneFocusRelease.releaseHiddenEditorFocus()
             }
@@ -584,16 +617,19 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
     /// 默认无底线，`stripDivider` 打开时在条内底部画 1pt 线（含在 `stripHeight` 里）。
     private var cardTabStrip: some View {
         HStack(spacing: 2) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 tabRow(spacing: 2)
                     .frame(height: stripHeight)
             }
+            .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             stripAccessory(groupID)
 
             if (group?.tabs.isEmpty ?? true), model.groupCount > 1 {
-                UPaneCardStripButton(help: String(localized: "关闭这个空分组（⌘W）", bundle: ModuleBundle.bundle),
+                UPaneCardStripButton(accessibilityLabel: String(localized: "关闭空分组", bundle: ModuleBundle.bundle,
+                                                                comment: "标签条右侧图标钮的辅助功能名字：收掉这个没有标签的分屏分组"),
+                                     help: String(localized: "关闭这个空分组（⌘W）", bundle: ModuleBundle.bundle),
                                      action: { model.closeEmptyGroup(groupID: groupID) }) {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .semibold))
@@ -601,7 +637,9 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
             }
 
             if showsSplitButton, splitAllowed {
-                UPaneCardStripButton(help: String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: ModuleBundle.bundle),
+                UPaneCardStripButton(accessibilityLabel: String(localized: "拆分分组", bundle: ModuleBundle.bundle,
+                                                                comment: "标签条右侧图标钮的辅助功能名字：在旁边开一个新的分屏分组"),
+                                     help: String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: ModuleBundle.bundle),
                                      action: { model.splitGroup(groupID, direction: resolvedSplitDirection()) }) {
                     UPaneTabIconView(icon: splitButtonIcon, size: 14)
                 }
@@ -618,9 +656,10 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
 
     private var classicTabStrip: some View {
         HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
+            ScrollView(.horizontal) {
                 tabRow(spacing: 0)
             }
+            .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             stripAccessory(groupID)
@@ -638,6 +677,8 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                 }
                 .buttonStyle(.udPlain)
                 .help(String(localized: "关闭这个空分组（⌘W）", bundle: ModuleBundle.bundle))
+                .accessibilityLabel(Text("关闭空分组", bundle: ModuleBundle.bundle,
+                                         comment: "标签条右侧图标钮的辅助功能名字：收掉这个没有标签的分屏分组"))
             }
 
             if showsSplitButton, splitAllowed {
@@ -650,6 +691,8 @@ private struct UPaneGroupChrome<Payload, EmptyGroup: View, StripAccessory: View,
                 }
                 .buttonStyle(.udPlain)
                 .help(String(localized: "拆分出一个新分组（⌘\\，或直接拖动标签到区域边缘）", bundle: ModuleBundle.bundle))
+                .accessibilityLabel(Text("拆分分组", bundle: ModuleBundle.bundle,
+                                         comment: "标签条右侧图标钮的辅助功能名字：在旁边开一个新的分屏分组"))
             }
         }
         .frame(height: stripHeight)
@@ -816,6 +859,16 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
             .modifier(OptionalContextMenu(isEnabled: TabMenu.self != EmptyView.self,
                                           menu: { tabMenu(tab) }))
             .help(d.help ?? title(d))
+            // 对 VoiceOver 是**一个**标签：按下（AX 默认动作）= 切到它，前台标签带「已选中」，
+            // × 收成一个具名动作。激活本来只走 NSEvent 旁观（`onPointerDown`），辅助功能的
+            // 按下不产生鼠标事件，不补这一层的话 VoiceOver 根本切不了标签、也听不出哪个是当前的。
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(title(d))
+            .accessibilityAddTraits(isFront ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityAction { onActivate() }
+            .accessibilityAction(named: Text("关闭", bundle: ModuleBundle.bundle, comment: "关闭标签页")) {
+                onClose()
+            }
     }
 
     @ViewBuilder
@@ -854,8 +907,8 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
                     .foregroundStyle(hoveringClose ? UD.text
                                      : (isFront || hovering ? UD.text3 : Color.clear))
                     .frame(width: 18, height: 18)
-                    .background(RoundedRectangle(cornerRadius: 5)
-                        .fill(hoveringClose ? UD.panelHover : Color.clear))
+                    .background(hoveringClose ? UD.panelHover : Color.clear,
+                                in: .rect(cornerRadius: 5, style: .circular))
             }
             .buttonStyle(.udPlain)
             .onHover { hoveringClose = $0 }
@@ -863,9 +916,8 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
         }
         .padding(.leading, 10).padding(.trailing, 4)
         .frame(height: UPaneGroupStyle.pillHeight)
-        .background(
-            RoundedRectangle(cornerRadius: UPaneGroupStyle.pillRadius, style: .continuous)
-                .fill(isFront ? UD.panelHi : (hovering ? UD.panelHover : Color.clear)))
+        .background(isFront ? UD.panelHi : (hovering ? UD.panelHover : Color.clear),
+                    in: .rect(cornerRadius: UPaneGroupStyle.pillRadius, style: .continuous))
     }
 
     @ViewBuilder
@@ -892,8 +944,8 @@ private struct UPaneTabChip<Payload, TabMenu: View>: View {
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(hoveringClose ? UD.text : UD.text2)
                     .frame(width: 22, height: 22)
-                    .background(RoundedRectangle(cornerRadius: 5)
-                        .fill(hoveringClose ? UD.panelHover : Color.clear))
+                    .background(hoveringClose ? UD.panelHover : Color.clear,
+                                in: .rect(cornerRadius: 5, style: .circular))
             }
             .buttonStyle(.udPlain)
             .onHover { hoveringClose = $0 }
@@ -941,8 +993,8 @@ private struct UPaneTabDragPreviewChip: View {
                 .foregroundStyle(UD.text2)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 7).fill(UD.overlay))
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(UD.borderHi, lineWidth: 1))
+        .background(UD.overlay, in: .rect(cornerRadius: 7, style: .circular))
+        .overlay { RoundedRectangle(cornerRadius: 7).stroke(UD.borderHi, lineWidth: 1) }
     }
 }
 #endif

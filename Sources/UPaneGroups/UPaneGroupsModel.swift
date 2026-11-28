@@ -184,9 +184,19 @@ public final class UPaneGroupsModel<Payload> {
     /// 树里所有组的 id，深度优先。
     public var groupIDs: [UUID] { root.leafIDs }
 
+    /// 真正生效的活动组 id：`activeGroupID` 指向一个还在的组时就是它，否则（nil，或 app 写进来
+    /// 一个已经不存在的 id）回落到树的第一个叶子。
+    ///
+    /// 视图层判「哪一组是活动组」一律读它，与 `activeGroup` 同一个口径 —— 以前视图各自写
+    /// `activeGroupID ?? root.firstLeafID`，只兜得住 nil：一个失效的 id 会让全区域没有一枚
+    /// `.active` 标签、没有焦点框，`.activeGroupOnly` 保活下一个面板都不挂。
+    public var resolvedActiveGroupID: UUID? {
+        if let id = activeGroupID, groups[id] != nil { return id }
+        return root.firstLeafID
+    }
+
     public var activeGroup: UPaneGroup<Payload>? {
-        if let id = activeGroupID, let g = groups[id] { return g }
-        return root.firstLeafID.flatMap { groups[$0] }
+        resolvedActiveGroupID.flatMap { groups[$0] }
     }
     public var activeTab: UPaneTab<Payload>? { activeGroup?.activeTab }
     public var allTabs: [UPaneTab<Payload>] { root.leafIDs.flatMap { groups[$0]?.tabs ?? [] } }
@@ -198,7 +208,7 @@ public final class UPaneGroupsModel<Payload> {
     /// `.frontUnfocused`。
     public func tabActivity(groupID: UUID, index: Int) -> UPaneTabActivity {
         guard groups[groupID]?.activeIndex == index else { return .inactive }
-        return (activeGroupID ?? root.firstLeafID) == groupID ? .active : .frontUnfocused
+        return resolvedActiveGroupID == groupID ? .active : .frontUnfocused
     }
 
     /// 标签在树中的位置（组 id + 组内下标）。

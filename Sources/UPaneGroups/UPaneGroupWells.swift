@@ -106,7 +106,7 @@ private struct UPaneWellFocusRing<Payload>: View {
     let model: UPaneGroupsModel<Payload>
 
     var body: some View {
-        let isActive = (model.activeGroupID ?? model.root.firstLeafID) == groupID
+        let isActive = model.resolvedActiveGroupID == groupID
         RoundedRectangle(cornerRadius: UPaneWellMetrics.radius, style: .continuous)
             .strokeBorder(isActive ? UD.accent : Color.clear, lineWidth: 1.5)
     }
@@ -128,6 +128,8 @@ private struct WellCornerCaps: Shape {
 
 /// 标签条右侧的方形图标按钮（分屏 / 关闭空分组）：26×26、圆角 6，悬停 `panelHover`。
 struct UPaneCardStripButton<Label: View>: View {
+    /// VoiceOver 读的名字。图标钮看不见文字，`.help` 只是悬停提示、不是 AX 标签。
+    let accessibilityLabel: String
     let help: String
     let action: () -> Void
     @ViewBuilder let label: () -> Label
@@ -139,13 +141,14 @@ struct UPaneCardStripButton<Label: View>: View {
             label()
                 .foregroundStyle(hovering ? UD.text : UD.text3)
                 .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(hovering ? UD.panelHover : Color.clear))
+                .background(hovering ? UD.panelHover : Color.clear,
+                            in: .rect(cornerRadius: 6, style: .continuous))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
         .help(help)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 #endif

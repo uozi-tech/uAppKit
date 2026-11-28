@@ -30,6 +30,35 @@
         }
       }
     },
+    "关闭空分组" : {
+      "comment" : "标签条右侧图标钮的辅助功能名字：收掉这个没有标签的分屏分组",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close Empty Group"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空のグループを閉じる"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "빈 그룹 닫기"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "關閉空群組"
+          }
+        }
+      }
+    },
     "关闭这个空分组（⌘W）" : {
       "localizations" : {
         "en" : {
@@ -82,6 +111,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拆分出新群組（⌘\\，或直接將分頁拖到區域邊緣）"
+          }
+        }
+      }
+    },
+    "拆分分组" : {
+      "comment" : "标签条右侧图标钮的辅助功能名字：在旁边开一个新的分屏分组",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Split Group"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "グループを分割"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "그룹 분할"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拆分群組"
           }
         }
       }
