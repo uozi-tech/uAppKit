@@ -25,6 +25,15 @@ public final class SkillManagerModel {
     public private(set) var clientLinkStatus: SkillInstallStatus = .notInstalled
     public private(set) var clientLinkBusy = false
 
+    /// 给 `load` 与装 / 卸排先后的单调计数：每次 `load` 开始、每次装 / 卸开始与结束都加一。
+    @ObservationIgnored private var clock = 0
+    /// 最近一次 `load` 开始时的 `clock`；更晚开始的 `load` 会让早的那次作废。
+    @ObservationIgnored private var latestLoad = 0
+    /// 每个 target 最近一次装 / 卸开始或结束时的 `clock`。
+    @ObservationIgnored private var lastMutation: [SkillTarget: Int] = [:]
+    /// 测试缝：`load` 算完快照、写回之前调一次，用来把装 / 卸插进这个窗口。
+    @ObservationIgnored var beforeApplyingLoad: (@Sendable () async -> Void)?
+
     /// - Parameters:
     ///   - installers: 一般是 `catalog.installers()`；测试注入临时 home 与假 app 包。
     ///   - clientLink: 可选的 `~/.local/bin/<ctl>` 链接。
@@ -61,26 +70,41 @@ public final class SkillManagerModel {
         return .brokenLink
     }
 
-    /// 首次加载：后台判定哪些工具在用，把我们建过的链接对齐到当前 app 包，再计算聚合状态。
+    /// 加载（设置页每次出现都调）：后台判定哪些工具在用，把我们建过的链接对齐到当前 app 包，
+    /// 再计算聚合状态。
     ///
     /// 启动时 `SkillReconciler.onLaunch` 已经对齐过一遍；这里再跑一次，是为了
     /// 覆盖「运行期间 app 被挪走 / 外部删了几条链接」这类启动之后才发生的变化。
+    ///
+    /// 与装 / 卸并发时：正在装 / 卸的 target 不去对齐（不和它抢文件），快照算完时这期间装 / 卸过的
+    /// target 也不写回 —— 那份状态已经由装 / 卸自己写好了，快照是旧的。更晚开始的 `load` 让早的作废。
     public func load() async {
+        clock += 1
+        let started = clock
+        latestLoad = started
         let installers = self.installers
         let targets = self.targets
+        let busy = busyTargets
         let snapshot = await Task.detached {
             () -> (targets: [SkillTarget], statuses: [SkillTarget: SkillInstallStatus]) in
             var present: [SkillTarget] = []
             var statuses: [SkillTarget: SkillInstallStatus] = [:]
             for target in targets where installers.first?.isToolPresent(target) == true {
                 present.append(target)
+                guard !busy.contains(target) else { continue }
                 try? SkillInstaller.reconcile(installers, target: target)
                 statuses[target] = Self.aggregateStatus(installers: installers, target: target)
             }
             return (present, statuses)
         }.value
+        if let beforeApplyingLoad { await beforeApplyingLoad() }
+        guard latestLoad == started else { return }
         availableTargets = snapshot.targets
-        statuses = snapshot.statuses
+        for target in Set(statuses.keys).union(snapshot.statuses.keys) {
+            // 快照开始之后装 / 卸过（或还在装 / 卸）的 target：留着装 / 卸写下的状态。
+            if busyTargets.contains(target) || (lastMutation[target] ?? 0) > started { continue }
+            statuses[target] = snapshot.statuses[target]
+        }
         didLoad = true
         await refreshClientLink()
     }
@@ -148,7 +172,13 @@ public final class SkillManagerModel {
     private func mutate(_ target: SkillTarget, _ work: @escaping @Sendable () throws -> Void) async {
         guard !busyTargets.contains(target) else { return }
         busyTargets.insert(target)
-        defer { busyTargets.remove(target) }
+        clock += 1
+        lastMutation[target] = clock
+        defer {
+            busyTargets.remove(target)
+            clock += 1
+            lastMutation[target] = clock
+        }
 
         let installers = self.installers
         do {

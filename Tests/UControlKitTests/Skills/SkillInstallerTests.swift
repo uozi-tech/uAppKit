@@ -469,6 +469,60 @@ final class SkillInstallerTests: XCTestCase {
         XCTAssertNil(model.lastError)
     }
 
+    /// 让 `load` 算完快照后停在写回之前：返回「已停下」的信号与「放行」的开关。
+    @MainActor
+    private func pauseLoadBeforeApplying(_ model: SkillManagerModel)
+        -> (reached: AsyncStream<Void>, release: AsyncStream<Void>.Continuation) {
+        let (reached, didReach) = AsyncStream<Void>.makeStream()
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        model.beforeApplyingLoad = {
+            didReach.yield()
+            for await _ in gate { return }
+        }
+        return (reached, release)
+    }
+
+    /// 设置页刚出现、`load` 还在后台算的时候用户点了「安装」：`load` 那份更早的快照不能把
+    /// 安装写下的状态盖回「未安装」。
+    @MainActor
+    func testModelLoadDoesNotOverwriteAnInstallThatFinishedMeanwhile() async throws {
+        try makeToolDirectory(.claude)
+        let model = SkillManagerModel(installers: installers())
+        let (reached, release) = pauseLoadBeforeApplying(model)
+
+        let loading = Task { @MainActor in await model.load() }
+        for await _ in reached { break }                 // 快照已算好，里面是「未安装」
+        await model.install(.claude)
+        XCTAssertNil(model.lastError)
+        XCTAssertEqual(model.status(for: .claude), .installed)
+
+        release.yield()
+        release.finish()
+        await loading.value
+        XCTAssertTrue(model.didLoad)
+        XCTAssertEqual(model.availableTargets, [.claude])
+        XCTAssertEqual(model.status(for: .claude), .installed, "过时的快照不写回")
+    }
+
+    /// 后开始的 `load` 让先开始、晚结束的那次作废。
+    @MainActor
+    func testOlderLoadFinishingLateIsDiscarded() async throws {
+        let model = SkillManagerModel(installers: installers())
+        let (reached, release) = pauseLoadBeforeApplying(model)
+        let stale = Task { @MainActor in await model.load() }   // 此时一个工具都没有
+        for await _ in reached { break }
+
+        try makeToolDirectory(.claude)
+        model.beforeApplyingLoad = nil
+        await model.load()
+        XCTAssertEqual(model.availableTargets, [.claude])
+
+        release.yield()
+        release.finish()
+        await stale.value
+        XCTAssertEqual(model.availableTargets, [.claude], "旧的那次不能把新结果盖回去")
+    }
+
     // MARK: - 旧副本清理
 
     /// 还有链接指着旧副本就留着；全部改指后删掉。
