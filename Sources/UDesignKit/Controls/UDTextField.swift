@@ -57,10 +57,15 @@ public struct UDTextField: View {
                 Text(label)
                     .font(UD.font(11))
                     .foregroundStyle(UD.text3)
+                    // 名字挂到输入框本身（见下），这行字不再单独读一遍。
+                    .accessibilityHidden(true)
             }
 
             HStack(spacing: UD.Space.sm) { // 8
                 field
+                    // 输入框的 AX 名字默认是占位（「user@host」），读不出这是哪一栏；有标签就用标签，
+                    // 占位仍作为 AX placeholder 保留。
+                    .udAccessibilityLabel(label.map { Text(verbatim: $0) })
                     .textFieldStyle(.plain)
                     .font(monospaced ? UD.mono(13) : UD.body)
                     .foregroundStyle(UD.text)

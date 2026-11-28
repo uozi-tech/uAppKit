@@ -80,6 +80,11 @@ public struct UDCheckbox: View {
             .allowsHitTesting(isEnabled)
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.12), value: isOn)
+            // 对辅助功能是系统复选框：读得出勾 / 未勾，按下即切换（同 `UDToggle`）。
+            // 无标题的纯方块由调用处 `.accessibilityLabel(_:)` 命名。
+            .accessibilityRepresentation {
+                Toggle(isOn: $isOn) { Text(verbatim: title ?? "") }
+            }
         }
     }
 

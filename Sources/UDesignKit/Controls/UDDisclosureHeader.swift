@@ -34,6 +34,7 @@ public struct UDDisclosureHeader: View {
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .animation(.easeOut(duration: 0.12), value: isExpanded)
                     .frame(width: 12)
+                    .accessibilityHidden(true)   // 展开态由下面的 accessibilityValue 读出
                 if let systemImage {
                     Image(systemName: systemImage)
                         .font(.system(size: 11)).foregroundStyle(UD.text3)
@@ -43,7 +44,7 @@ public struct UDDisclosureHeader: View {
                     .foregroundStyle(UD.text2)
                 Spacer(minLength: 4)
                 if let count {
-                    Text("\(count)").font(UD.mono(10)).foregroundStyle(UD.text4)
+                    Text(verbatim: String(count)).font(UD.mono(10)).foregroundStyle(UD.text4)
                 }
             }
             .padding(.horizontal, 10)
@@ -56,6 +57,9 @@ public struct UDDisclosureHeader: View {
         }
         .buttonStyle(.udPlain)
         .onHover { hovering = $0 }
+        .accessibilityValue(isExpanded
+            ? Text("已展开", bundle: ModuleBundle.bundle, comment: "折叠区头的辅助功能状态：展开")
+            : Text("已折叠", bundle: ModuleBundle.bundle, comment: "折叠区头的辅助功能状态：折叠"))
     }
 }
 

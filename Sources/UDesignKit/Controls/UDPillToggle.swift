@@ -63,6 +63,12 @@ public struct UDPillToggle: View {
         .buttonStyle(.udPlain)
         .opacity(isEnabled ? 1 : 0.6)
         .onHover { hovering = $0 }
+        // 开 / 关只靠底色与状态点区分，对辅助功能补成系统开关：读得出状态，按下走 `action`
+        // （调用方拦截切换的语义不变——写回值被忽略，真正的切换由 action 决定）。
+        .accessibilityRepresentation {
+            Toggle(isOn: Binding(get: { isOn }, set: { _ in action() })) { Text(verbatim: label) }
+                .udAccessibilityHint(hint.map { Text(verbatim: $0) })
+        }
     }
 }
 

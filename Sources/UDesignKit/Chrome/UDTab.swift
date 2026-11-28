@@ -88,6 +88,7 @@ public struct UDPreviewTab: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 11))
                     .foregroundStyle(active ? UD.text2 : UD.text4)
+                    .accessibilityHidden(true)   // 文件类型图标，名字已够
 
                 Text(name)
                     .font(UD.mono(12))
@@ -100,6 +101,7 @@ public struct UDPreviewTab: View {
                         .frame(width: 6, height: 6)
                 }
             }
+            .udTabSelectAccessibility(active: active, onSelect: onSelect)
 
             UDTabCloseButton(isVisible: active || hovered,
                              action: onClose)
@@ -216,6 +218,7 @@ public struct UDTermTab: View {
                     .font(UD.mono(12))
                     .foregroundStyle(active ? UD.text : (hovered ? UD.text2 : UD.text3))
             }
+            .udTabSelectAccessibility(active: active, onSelect: onSelect)
 
             UDTabCloseButton(isVisible: active || hovered,
                              action: onClose)
@@ -334,6 +337,18 @@ private struct UDTabCloseButton: View {
         .buttonStyle(.udPlain)
         .onHover { hovered = $0 }
         .help(String(localized: "关闭标签", bundle: ModuleBundle.bundle))
+        .accessibilityLabel(Text("关闭标签", bundle: ModuleBundle.bundle))
+    }
+}
+
+private extension View {
+    /// 整片 tab 的「选中」是 `onTapGesture`（见 `UDPreviewTab.body` 的注释），VoiceOver 看不到它。
+    /// 把图标 + 名字合成一个 AX 按钮：带选中态、按下即选中；关闭钮仍是旁边独立的 AX 按钮。
+    /// 不对整片 tab 做 `.combine`：合并会把关闭钮的按下动作并进来，VoiceOver 一按就把 tab 关了。
+    func udTabSelectAccessibility(active: Bool, onSelect: @escaping () -> Void) -> some View {
+        accessibilityElement(children: .combine)
+            .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction(.default, onSelect)
     }
 }
 

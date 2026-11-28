@@ -65,6 +65,9 @@ public struct UDTriCheckbox: View {
         case .button:
             Button(action: action) { visual }
                 .buttonStyle(.udPlain)
+                .udAccessibilityLabel(accessibilityName.map { Text(verbatim: $0) })
+                .accessibilityValue(stateText)
+                .accessibilityAddTraits(state == .off ? [] : .isSelected)
         case .dense:
             visual
                 // 门控写在闭包里而不是条件挂手势：条件修饰符会改变视图标识，
@@ -72,7 +75,17 @@ public struct UDTriCheckbox: View {
                 .onTapGesture { if isEnabled { action() } }
                 .accessibilityElement()
                 .accessibilityLabel(Text(accessibilityName ?? ""))
+                .accessibilityValue(stateText)
                 .accessibilityAddTraits(state == .off ? .isButton : [.isButton, .isSelected])
+        }
+    }
+
+    /// 三态读法：`.part` 与 `.on` 都带 `isSelected`，靠值区分「部分选中」。
+    private var stateText: Text {
+        switch state {
+        case .on: Text("已选中", bundle: ModuleBundle.bundle, comment: "三态勾选框的辅助功能状态：全选")
+        case .part: Text("部分选中", bundle: ModuleBundle.bundle, comment: "三态勾选框的辅助功能状态：部分选中（派生 / 半授权）")
+        case .off: Text("未选中", bundle: ModuleBundle.bundle, comment: "三态勾选框的辅助功能状态：未选")
         }
     }
 

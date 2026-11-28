@@ -12,6 +12,8 @@ public struct UDSlider: View {
     var ticks: Int = 0
     var color: Color = UD.accentDefault
     var valueLabel: ((Double) -> String)? = nil
+    /// 辅助功能里的滑块名字（不显示）；nil 时由调用处 `.accessibilityLabel(_:)` 命名。
+    var label: Text? = nil
 
     @Environment(\.isEnabled) private var isEnabled
 
@@ -24,7 +26,8 @@ public struct UDSlider: View {
         step: Double? = nil,
         ticks: Int = 0,
         color: Color = UD.accentDefault,
-        valueLabel: ((Double) -> String)? = nil
+        valueLabel: ((Double) -> String)? = nil,
+        label: Text? = nil
     ) {
         self._value = value
         self.range = range
@@ -32,6 +35,7 @@ public struct UDSlider: View {
         self.ticks = ticks
         self.color = color
         self.valueLabel = valueLabel
+        self.label = label
     }
 
     // 当前值映射到 0...1 比例
@@ -55,6 +59,19 @@ public struct UDSlider: View {
             }
         }
         .opacity(isEnabled ? 1 : 0.45)
+        // 自绘的轨道 + 拖拽手势对 VoiceOver 什么都不是：放一个系统 Slider 当辅助功能替身，
+        // 读得出当前值（有 valueLabel 时读它），增 / 减按 step（没给 step 时按全程 1/20）调。
+        .accessibilityRepresentation {
+            Slider(value: $value, in: range, step: accessibilityStep) { label ?? Text(verbatim: "") }
+                .udAccessibilityValue(valueLabel.map { Text(verbatim: $0(value)) })
+        }
+    }
+
+    /// 辅助功能增减一档的步长。
+    private var accessibilityStep: Double {
+        if let step, step > 0 { return step }
+        let span = range.upperBound - range.lowerBound
+        return span > 0 ? span / 20 : 1
     }
 
     private var sliderArea: some View {

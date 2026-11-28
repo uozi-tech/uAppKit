@@ -59,6 +59,8 @@ public struct UDTextArea: View {
                 Text(label)
                     .font(UD.font(11))
                     .foregroundStyle(UD.text3)
+                    // 名字挂到编辑器本身（见 `editor`），这行字不再单独读一遍。
+                    .accessibilityHidden(true)
             }
 
             editor
@@ -103,8 +105,11 @@ public struct UDTextArea: View {
                     .foregroundStyle(UD.text4)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
             TextEditor(text: $text)
+                // TextEditor 没有占位也没有名字，VoiceOver 只读出「文本」；用标签（没有就用占位）命名。
+                .udAccessibilityLabel(accessibilityName.map { Text(verbatim: $0) })
                 .font(contentFont)
                 .foregroundStyle(UD.text)
                 .scrollContentBackground(.hidden)
@@ -112,6 +117,11 @@ public struct UDTextArea: View {
                 .disabled(!isEnabled)
                 .padding(.horizontal, 9).padding(.vertical, 10)
         }
+    }
+
+    private var accessibilityName: String? {
+        if let label, !label.isEmpty { return label }
+        return placeholder.isEmpty ? nil : placeholder
     }
 
     private var contentFont: Font {

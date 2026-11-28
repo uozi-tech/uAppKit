@@ -63,7 +63,7 @@ public struct UDSidebarRow: View {
                 if hovered, let shortcutHint {
                     UDKbd(shortcutHint)
                 } else if let count {
-                    Text("\(count)")
+                    Text(verbatim: String(count))
                         .font(UD.monoMetric)
                         .foregroundStyle(UD.text3)
                 }
@@ -78,6 +78,7 @@ public struct UDSidebarRow: View {
         }
         .buttonStyle(.udPlain)
         .onHover { hovered = $0 }
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var background: Color {
@@ -96,7 +97,9 @@ public struct UDSidebarSectionHeader: View {
     }
 
     public var body: some View {
-        Text(title.uppercased())
+        // `.textCase` 按当前 locale 转大写（`uppercased()` 不看 locale，土耳其语 i 会错）。
+        Text(title)
+            .textCase(.uppercase)
             .font(UD.font(10.5, weight: .medium))
             .tracking(0.6)
             .foregroundStyle(UD.text4)
