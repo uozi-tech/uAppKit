@@ -4,10 +4,12 @@ import SwiftUI
 import XCTest
 @testable import UDesignKit
 
-/// `UDDropdown` 的触发器对辅助功能是一个按钮：标签取触发器里的文字，按下（AX 默认动作）打开浮层。
+/// `UDDropdown` 的触发器对辅助功能是一个按钮：标签取触发器里的文字，按下（AX 默认动作）打开浮层，
+/// 再按一下收起。
 ///
-/// 触发器本身是 `onTapGesture`，进程内合成鼠标事件点不动它（宿主不在前台时 mouseDown 会被当成
-/// first-mouse 吞掉）；消费方（uGit 等）的界面测试和 VoiceOver 都走 `accessibilityPerformPress`。
+/// 触发器是真 `Button`（全键盘控制也够得着）。进程内合成鼠标事件点不动它（宿主不在前台时 mouseDown
+/// 会被当成 first-mouse 吞掉）；消费方（uGit 等）的界面测试和 VoiceOver 都走 `accessibilityPerformPress`。
+/// 鼠标点触发器不被 `.anchoredPanel` 当成「点外关闭」由 `UDAnchoredPanelEventsTests` 守。
 @MainActor
 final class UDDropdownAccessibilityTests: XCTestCase {
     private func nodes(in root: NSObject, depth: Int = 0) -> [NSObject] {
@@ -83,6 +85,17 @@ final class UDDropdownAccessibilityTests: XCTestCase {
         XCTAssertTrue(shown, "浮层里没有内容")
         let expanded = waitUntil { nodes(in: content).contains { label($0).contains("已展开") } }
         XCTAssertTrue(expanded, "触发器没收到展开状态")
+
+        // 再按一下触发器：收起（toggle），不是「关了又开」。
+        var openTrigger: NSObject?
+        XCTAssertTrue(waitUntil {
+            openTrigger = nodes(in: content).first { role($0) == NSAccessibility.Role.button.rawValue && label($0).contains("已展开") }
+            return openTrigger != nil
+        })
+        let pressedAgain = (try XCTUnwrap(openTrigger) as AnyObject).accessibilityPerformPress?() ?? false
+        XCTAssertTrue(pressedAgain)
+        let closed = waitUntil { (window.childWindows ?? []).isEmpty }
+        XCTAssertTrue(closed, "再按触发器没有收起浮层")
     }
 }
 #endif

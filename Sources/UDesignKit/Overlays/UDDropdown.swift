@@ -33,8 +33,6 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
     @ViewBuilder var content: () -> Content
 
     @State private var open = false
-    /// 刚被关闭的时刻 —— 去抖，避免「点触发器把它关闭那一下」又立刻重开。
-    @State private var lastClosedAt: Date?
 
     public init(
         anchor: Anchor = .leading,
@@ -51,31 +49,23 @@ public struct UDDropdown<Trigger: View, Content: View>: View {
     }
 
     public var body: some View {
-        // 收起（点外部 / ESC / 选中项后 dismiss）都会把 binding 置 false —— 顺手记录时刻用于去抖。
-        let presented = Binding<Bool>(
-            get: { open },
-            set: { newValue in
-                if !newValue { lastClosedAt = Date() }
-                open = newValue
-            }
-        )
-        return trigger(open)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if let t = lastClosedAt, Date().timeIntervalSince(t) < 0.25 { return }
-                open = true
-            }
-            // 触发器是 `onTapGesture`，对辅助功能来说原本只是一组静态文字：合成一个按钮元素
-            // （标签取触发器里的文字），默认动作打开浮层。VoiceOver 与进程内
-            // 界面测试（AX `accessibilityPerformPress`）都经这条路按得动。
-            .accessibilityElement(children: .combine)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { open = true }
-            .anchoredPanel(isPresented: presented, gap: gap,
-                           alignment: anchor == .leading ? .leading : .trailing,
-                           becomesKey: becomesKey) { dismiss in
-                content().environment(\.udMenuDismiss, dismiss)
-            }
+        // 触发器是真 `Button`：VoiceOver / 全键盘控制（Tab 聚焦、空格按下）都够得着，AX 默认动作
+        // 就是按下。再点一下收起：`.anchoredPanel` 不把落在触发器上的点击当成「点外关闭」，
+        // 这里的 toggle 就是唯一的那次状态变化，不再需要「刚关又开」的去抖。
+        Button(action: toggle) {
+            trigger(open)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.udPlain)
+        .anchoredPanel(isPresented: $open, gap: gap,
+                       alignment: anchor == .leading ? .leading : .trailing,
+                       becomesKey: becomesKey) { dismiss in
+            content().environment(\.udMenuDismiss, dismiss)
+        }
+    }
+
+    private func toggle() {
+        open.toggle()
     }
 }
 #endif

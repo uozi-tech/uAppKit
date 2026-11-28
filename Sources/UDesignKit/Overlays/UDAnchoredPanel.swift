@@ -16,6 +16,18 @@ import AppKit
 /// 内容圆角浮层之外再画一圈灰色圆角、看着像「双重背景」。落影改由内容自带 `udShadow(.md)`
 /// 提供，并在四周留 `shadowInset` 透明边让阴影不被窗口裁掉；透明边内的点击照样算「面板外」关闭。
 ///
+/// **点触发器**：落在锚点（= 触发器）上的鼠标抬起不算「面板外」，交给触发器自己处理——
+/// 触发器写 `open.toggle()` 就能「再点一下收起」。此前这一下会先被当成点外关闭、紧接着触发器
+/// 又把它 toggle 回 true，面板关不掉。
+///
+/// **ESC**：只认发往面板或锚点所在窗口、不带 ⌘⌥⌃ 的 ESC；输入法正在组字（有 marked text）时
+/// 放行，ESC 交给输入法取消组字，不收起面板。
+///
+/// **环境不跟过来**：面板内容挂在独立 `NSHostingView` 里，是一棵新的视图树——调用方子树上的
+/// 环境值（`.environment(model)` 注入的对象、locale、`controlSize`、`udSettingsSurface` 等）
+/// **不会**传进来；只有外观（`effectiveAppearance`）由本组件带过去。内容要用的环境值在
+/// `content` 闭包里自己重新注入，读 `@Environment(Model.self)` 而不注入会直接崩。
+///
 /// 用法（挂在触发按钮上）：
 /// ```
 /// triggerButton
@@ -258,6 +270,9 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             parent.addChildWindow(panel, ordered: .above)   // 随父窗口移动自动跟手
             reposition()
             panel.orderFront(nil)
+            // 读屏：非 key 面板不会自己把 VoiceOver 的注意力带过来，提示一次布局变化、指向面板内容。
+            NSAccessibility.post(element: panel, notification: .layoutChanged,
+                                 userInfo: [.uiElements: [hosting]])
             if becomesKey {
                 panel.makeKey()                 // 面板内 TextField 需要键盘焦点
                 // 自动聚焦第一个可编辑 TextField：裸 NSHostingView 里 SwiftUI 的
@@ -329,24 +344,19 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             // 内容区点击放行（内容按钮触发后自行 dismiss）；内容区外（含透明留白）/ ESC → 关。
             // 本地监听（非 @Sendable，主线程上下文），结构对齐 UDDropdownDismiss。
             localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .rightMouseUp, .keyDown]) { [weak self] event in
-                guard let self else { return event }
-                if event.type == .keyDown {
-                    if event.keyCode == 53 { self.onRequestDismiss?(); return nil }   // ESC
+                guard let self, let panel = self.panel else { return event }
+                switch UDAnchoredPanelEvents.decide(event, panel: panel, anchor: self.anchor,
+                                                    inset: anchoredPanelShadowInset) {
+                case .pass:
                     return event
+                case .dismiss:
+                    self.onRequestDismiss?()
+                    return event
+                case .dismissAndSwallow:
+                    self.onRequestDismiss?()
+                    return nil
                 }
-                if event.window == self.panel, self.hitsContent(event) { return event }
-                self.onRequestDismiss?()
-                return event
             }
-        }
-
-        /// 点击是否落在内容矩形内（= 面板去掉四周 inset 留白）。
-        private func hitsContent(_ event: NSEvent) -> Bool {
-            guard let panel else { return false }
-            let inset = anchoredPanelShadowInset
-            let p = event.locationInWindow            // 面板窗口坐标（左下原点）
-            let w = panel.frame.width, h = panel.frame.height
-            return p.x >= inset && p.x <= w - inset && p.y >= inset && p.y <= h - inset
         }
 
         func tearDown() {
@@ -364,6 +374,52 @@ private struct AnchoredPanelPresenter<PanelContent: View>: NSViewRepresentable {
             hosting = nil
             availableHeight = nil
         }
+    }
+}
+
+/// 浮层打开期间本地事件监听的判定（单测守它）：哪些事件收起面板、哪些放行、ESC 吞不吞。
+@MainActor
+enum UDAnchoredPanelEvents {
+    enum Decision: Equatable {
+        /// 不收起，事件照常派发。
+        case pass
+        /// 收起，事件照常派发（点外部：点到的控件照样响应）。
+        case dismiss
+        /// 收起并吞掉事件（ESC）。
+        case dismissAndSwallow
+    }
+
+    static func decide(_ event: NSEvent, panel: NSWindow, anchor: NSView?, inset: CGFloat) -> Decision {
+        switch event.type {
+        case .keyDown:
+            guard event.keyCode == 53,
+                  event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+                  let window = event.window,
+                  window === panel || window === anchor?.window
+            else { return .pass }
+            // 输入法组字中：ESC 是取消组字，不是收起面板。
+            if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() { return .pass }
+            return .dismissAndSwallow
+        case .leftMouseUp, .rightMouseUp:
+            if event.window === panel, hitsContent(event.locationInWindow, panelSize: panel.frame.size, inset: inset) {
+                return .pass
+            }
+            // 点在触发器（锚点）上：交给触发器自己 toggle，不当成「点外关闭」——否则同一下里先关、
+            // 触发器再把它 toggle 回开，面板永远关不掉。
+            if event.type == .leftMouseUp, let anchor, let window = anchor.window, event.window === window,
+               anchor.bounds.contains(anchor.convert(event.locationInWindow, from: nil)) {
+                return .pass
+            }
+            return .dismiss
+        default:
+            return .pass
+        }
+    }
+
+    /// 点击是否落在内容矩形内（= 面板去掉四周 inset 留白）。`point` 为面板窗口坐标（左下原点）。
+    static func hitsContent(_ point: NSPoint, panelSize: NSSize, inset: CGFloat) -> Bool {
+        point.x >= inset && point.x <= panelSize.width - inset
+            && point.y >= inset && point.y <= panelSize.height - inset
     }
 }
 
