@@ -10,6 +10,8 @@ import UDesignKit
 /// 直接用 `ProviderEditorModel` + `ProviderDraft` 自己排版。
 ///
 /// 表单不写库：`onSave` 拿到校验过的 `ProviderDraft`，由调用方写进 `ProviderStore`。
+/// 按「保存」时 Key 框里还有没存的草稿：先交给 `onSave`（调用方可以自己 `saveKey()` 并做后续通知，
+/// uGit 就是这么做的），回来后草稿若还在，表单替它存进钥匙串 —— 填了 Key 直接点「保存」不会丢。
 public struct ProviderEditorForm: View {
     @Bindable var model: ProviderEditorModel
     let requiresAPIKey: Bool
@@ -39,7 +41,7 @@ public struct ProviderEditorForm: View {
             VStack(alignment: .leading, spacing: 8) {
                 UDTextField(label: "API Key",
                             placeholder: model.hasSavedKey ? String(localized: "已保存（留空不改）", bundle: ModuleBundle.bundle) : String(localized: "粘贴 API Key", bundle: ModuleBundle.bundle),
-                            text: $model.keyDraft, errorMessage: model.keySaveError,
+                            text: $model.keyDraft, errorMessage: model.keySaveError ?? model.keyLoadError,
                             monospaced: true, isSecure: true, revealable: true)
                 HStack(spacing: 8) {
                     UDButton(title: String(localized: "保存 Key", bundle: ModuleBundle.bundle), style: .secondary) { model.saveKey() }
@@ -62,10 +64,15 @@ public struct ProviderEditorForm: View {
 
             HStack {
                 Spacer(minLength: 0)
-                UDButton(title: String(localized: "保存", bundle: ModuleBundle.bundle)) { onSave(model.draft) }
+                UDButton(title: String(localized: "保存", bundle: ModuleBundle.bundle), action: save)
                     .disabled(!model.draft.isValid)
             }
         }
+    }
+
+    private func save() {
+        onSave(model.draft)
+        if model.canSaveKey { model.saveKey() }
     }
 }
 #endif

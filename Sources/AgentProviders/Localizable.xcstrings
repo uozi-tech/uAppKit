@@ -349,6 +349,64 @@
         }
       }
     },
+    "从钥匙串移除失败：%@" : {
+      "comment" : "移除 API Key 失败；参数是钥匙串给的原因",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't remove from the keychain: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーンからの削除に失敗しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인에서 제거하지 못함: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從鑰匙圈移除失敗：%@"
+          }
+        }
+      }
+    },
+    "读取钥匙串失败：%@" : {
+      "comment" : "读已保存的 API Key 失败；参数是钥匙串给的原因",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't read the keychain: %@"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "キーチェーンの読み取りに失敗しました：%@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "키체인을 읽지 못함: %@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取鑰匙圈失敗：%@"
+          }
+        }
+      }
+    },
     "先填写或保存 API Key" : {
       "localizations" : {
         "en" : {

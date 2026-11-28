@@ -12,6 +12,9 @@ import SwiftData
 public final class ProviderStore {
     public let context: ModelContext
     public let secrets: any ProviderSecretStore
+    /// 最近一次写库失败的原因；之后一次成功的写入会清掉它。`add` 这类返回值另有用途的写操作
+    /// 失败时，调用方从这里取原因提示用户。
+    public private(set) var lastSaveError: Error?
 
     public init(context: ModelContext, secrets: any ProviderSecretStore) {
         self.context = context
@@ -74,18 +77,21 @@ public final class ProviderStore {
 
     /// 改字段后调用；也可以直接改对象属性再 `save()`。
     /// 写到同 id 的每一行上（见类型注释）。`defaultModel` 传 `.some(nil)` 表示清掉提示。
+    /// - Returns: 写库失败的原因；nil = 成功。
+    @discardableResult
     public func update(_ provider: LLMProvider, name: String? = nil, kind: ProviderKind? = nil,
-                       baseURL: String? = nil, defaultModel: String?? = nil) {
+                       baseURL: String? = nil, defaultModel: String?? = nil) -> Error? {
         for row in rows(id: provider.id) {
             if let name { row.name = name.trimmingCharacters(in: .whitespacesAndNewlines) }
             if let kind { row.kind = kind }
             if let baseURL { row.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines) }
             if let defaultModel { row.defaultModel = defaultModel }
         }
-        save()
+        return save()
     }
 
     /// 删除这个 id 的所有行，连同钥匙串里的 Key。Key 删除失败不阻止删行（返回错误供提示）。
+    /// 写库本身失败记在 `lastSaveError`（返回值的含义沿用「Key 删除失败」）。
     @discardableResult
     public func delete(_ provider: LLMProvider) -> Error? {
         let id = provider.id
@@ -100,7 +106,9 @@ public final class ProviderStore {
 
     /// 按列表拖动后的顺序重写 `sortOrder`（与 SwiftUI `move(fromOffsets:toOffset:)` 同语义，
     /// `destination` 是移动前的下标）。`ordered` 须是当前显示顺序。
-    public func move(_ ordered: [LLMProvider], fromOffsets source: IndexSet, toOffset destination: Int) {
+    /// - Returns: 写库失败的原因；nil = 成功。
+    @discardableResult
+    public func move(_ ordered: [LLMProvider], fromOffsets source: IndexSet, toOffset destination: Int) -> Error? {
         let moving = source.map { ordered[$0] }
         var result = ordered.enumerated().filter { !source.contains($0.offset) }.map(\.element)
         result.insert(contentsOf: moving, at: destination - source.count(in: 0..<destination))
@@ -109,11 +117,20 @@ public final class ProviderStore {
                 row.sortOrder = index
             }
         }
-        save()
+        return save()
     }
 
-    public func save() {
-        try? context.save()
+    /// 写库。失败不抛（读路径照常可用），原因既作返回值、也记进 `lastSaveError`。
+    @discardableResult
+    public func save() -> Error? {
+        do {
+            try context.save()
+            lastSaveError = nil
+            return nil
+        } catch {
+            lastSaveError = error
+            return error
+        }
     }
 
     // MARK: - Key

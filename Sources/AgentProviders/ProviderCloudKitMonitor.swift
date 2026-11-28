@@ -147,7 +147,8 @@ public final class ProviderCloudKitMonitor {
     @ObservationIgnored private var storeIdentifier: String?
     @ObservationIgnored private var setupStartedAt: Date?
     @ObservationIgnored private var observer: NSObjectProtocol?
-    @ObservationIgnored private var readyWaiters: [CheckedContinuation<Void, Never>] = []
+    /// 按等待者分开记：每个等待者只被自己的超时 / 取消结掉，就绪时一起放行。
+    @ObservationIgnored private var readyWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
     @ObservationIgnored private let notificationCenter: NotificationCenter
     @ObservationIgnored private let now: () -> Date
 
@@ -221,14 +222,28 @@ public final class ProviderCloudKitMonitor {
         status = .failed(failure)
     }
 
-    /// 等首次同步完成（见 `isReadyForMigration`）。超时返回 false。
+    /// 等首次同步完成（见 `isReadyForMigration`）。超时或所在任务被取消时返回 false。
+    ///
+    /// 多个调用方可以同时等、各带各的超时：一个先超时不会让别人提前收场。
     public func waitUntilReadyForMigration(timeout: Duration) async -> Bool {
         if isReadyForMigration { return true }
+        let id = UUID()
         let timeoutTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: timeout)
-            self?.resumeWaiters()
+            // 被取消（已经等到了）就什么都不做：只有真的睡满才结掉自己这一个等待者。
+            guard (try? await Task.sleep(for: timeout)) != nil else { return }
+            self?.resumeWaiter(id)
         }
-        await withCheckedContinuation { readyWaiters.append($0) }
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume()
+                    return
+                }
+                readyWaiters[id] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.resumeWaiter(id) }
+        }
         timeoutTask.cancel()
         return isReadyForMigration
     }
@@ -266,6 +281,10 @@ public final class ProviderCloudKitMonitor {
     private func resumeWaiters() {
         let waiters = readyWaiters
         readyWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
+        for waiter in waiters.values { waiter.resume() }
+    }
+
+    private func resumeWaiter(_ id: UUID) {
+        readyWaiters.removeValue(forKey: id)?.resume()
     }
 }

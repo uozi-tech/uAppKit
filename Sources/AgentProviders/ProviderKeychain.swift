@@ -33,6 +33,15 @@ public protocol KeychainBackend: Sendable {
     func add(_ attributes: [String: Any]) -> OSStatus
     func copyMatching(_ query: [String: Any]) -> (status: OSStatus, data: Data?)
     func delete(_ query: [String: Any]) -> OSStatus
+    /// `SecItemUpdate`。缺省返回 `errSecUnimplemented`：不实现它的后端（app 自己的桩）照旧走
+    /// 「先删后写」。
+    func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus
+}
+
+extension KeychainBackend {
+    public func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        errSecUnimplemented
+    }
 }
 
 /// 真钥匙串。
@@ -52,6 +61,10 @@ public struct SystemKeychainBackend: KeychainBackend {
     public func delete(_ query: [String: Any]) -> OSStatus {
         SecItemDelete(query as CFDictionary)
     }
+
+    public func update(_ query: [String: Any], attributes: [String: Any]) -> OSStatus {
+        SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+    }
 }
 
 /// 三个 app 共享的 provider API Key：钥匙串访问组 `<TEAMID>.com.uozi.shared`，
@@ -63,6 +76,8 @@ public struct SystemKeychainBackend: KeychainBackend {
 ///   访问组才生效；不弹 ACL 授权框）、`kSecAttrAccessibleWhenUnlocked`。
 /// - **读取与删除一律用 `kSecAttrSynchronizableAny`**：`kSecAttrSynchronizable` 参与匹配，
 ///   以 true 写入的条目用 false 查不到（uTerm 曾因此升级后读不到任何凭据）。
+/// - **覆盖写入不先删**：先就地更新那条可同步条目，没有才新增；新值落定之后才清掉历史上以
+///   false 写入的旧条目。中途任何一步失败，原来的 Key 都还在。
 /// - entitlements 里 `keychain-access-groups` 要包含 `$(AppIdentifierPrefix)com.uozi.shared`，
 ///   且**不能排第一**：排第一会改掉 app 现有条目的默认写入组。
 public struct ProviderKeychain: ProviderSecretStore {
@@ -105,12 +120,37 @@ public struct ProviderKeychain: ProviderSecretStore {
         }
         guard let data = trimmed.data(using: .utf8) else { throw ProviderKeychainError.dataEncodingFailed }
         let account = providerID.uuidString
-        // 先按 Any 删干净，再写唯一一条可同步条目：历史上以 false 写入的条目一并收敛。
-        try delete(account: account)
-        var attributes = baseQuery(account: account, synchronizable: kCFBooleanTrue as Any)
-        attributes[kSecValueData as String] = data
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        let status = backend.add(attributes)
+        let synchronized = baseQuery(account: account, synchronizable: kCFBooleanTrue as Any)
+        let values: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked,
+        ]
+
+        // 1. 已有可同步条目：就地改值。旧值一直在，直到新值写成。
+        let updated = backend.update(synchronized, attributes: values)
+        switch updated {
+        case errSecSuccess:
+            break
+        case errSecItemNotFound:
+            // 2. 没有：新增唯一一条可同步条目。
+            try add(synchronized, values: values)
+        case errSecUnimplemented:
+            // 后端不支持更新（app 自己的桩）：退回先删后写。
+            try delete(account: account)
+            try add(synchronized, values: values)
+            return
+        default:
+            throw ProviderKeychainError.unexpectedStatus(updated)
+        }
+        // 3. 新值已落定，再收敛历史上以 false 写入的旧条目。
+        let legacy = backend.delete(baseQuery(account: account, synchronizable: kCFBooleanFalse as Any))
+        guard legacy == errSecSuccess || legacy == errSecItemNotFound else {
+            throw ProviderKeychainError.unexpectedStatus(legacy)
+        }
+    }
+
+    private func add(_ query: [String: Any], values: [String: Any]) throws {
+        let status = backend.add(query.merging(values) { _, new in new })
         guard status == errSecSuccess else { throw ProviderKeychainError.unexpectedStatus(status) }
     }
 

@@ -94,4 +94,35 @@ final class ProviderCloudKitMonitorTests: XCTestCase {
         let ready = await monitor.waitUntilReadyForMigration(timeout: .seconds(5))
         XCTAssertTrue(ready)
     }
+
+    /// 两个调用方各带各的超时：短的先超时，不能把长的那个一起提前放走。
+    func testEachWaiterHonoursItsOwnTimeout() async {
+        let monitor = ProviderCloudKitMonitor(notificationCenter: NotificationCenter(), now: { self.start })
+        monitor.bind(storeIdentifier: "S")
+        monitor.start()
+
+        let long = Task { @MainActor in await monitor.waitUntilReadyForMigration(timeout: .seconds(10)) }
+        let short = await monitor.waitUntilReadyForMigration(timeout: .milliseconds(20))
+        XCTAssertFalse(short)
+
+        try? await Task.sleep(for: .milliseconds(100))
+        monitor.handle(event(.setup))
+        monitor.handle(event(.import, at: 3))
+        let longResult = await long.value
+        XCTAssertTrue(longResult, "长超时的等待者要一直等到真正就绪")
+    }
+
+    func testCancelledWaiterReturnsPromptly() async {
+        let monitor = ProviderCloudKitMonitor(notificationCenter: NotificationCenter(), now: { self.start })
+        monitor.bind(storeIdentifier: "S")
+        monitor.start()
+
+        let began = ContinuousClock.now
+        let waiter = Task { @MainActor in await monitor.waitUntilReadyForMigration(timeout: .seconds(30)) }
+        try? await Task.sleep(for: .milliseconds(20))
+        waiter.cancel()
+        let result = await waiter.value
+        XCTAssertFalse(result)
+        XCTAssertLessThan(ContinuousClock.now - began, .seconds(5), "取消后不该等到超时")
+    }
 }

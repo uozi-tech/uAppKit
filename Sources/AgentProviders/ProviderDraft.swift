@@ -111,6 +111,9 @@ public final class ProviderEditorModel {
     public private(set) var providerID: UUID
     public private(set) var hasSavedKey = false
     public private(set) var keySaveError: String?
+    /// 读钥匙串失败的原因（钥匙串被锁、无权访问…）；读到或确认没有 Key 时为 nil。
+    /// 这时 `hasSavedKey` 为 false 只代表「没读到」，不代表没有。
+    public private(set) var keyLoadError: String?
     public private(set) var testInFlight = false
     public private(set) var testResult: ProviderConnectionResult?
 
@@ -124,7 +127,7 @@ public final class ProviderEditorModel {
         self.draft = draft
         self.secrets = secrets
         self.fetch = fetch
-        self.hasSavedKey = ((try? secrets.load(for: providerID)) ?? nil) != nil
+        refreshSavedKey()
     }
 
     public var trimmedKeyDraft: String {
@@ -141,24 +144,49 @@ public final class ProviderEditorModel {
             try secrets.save(trimmedKeyDraft, for: providerID)
             keyDraft = ""
             keySaveError = nil
+            keyLoadError = nil
             hasSavedKey = true
             return true
         } catch {
-            keySaveError = String(localized: "保存到钥匙串失败：\(LLMServiceError.describe(error))", bundle: ModuleBundle.bundle)
+            keySaveError = String(localized: "保存到钥匙串失败：\(Self.keychainReason(error))", bundle: ModuleBundle.bundle)
             return false
         }
     }
 
-    public func removeKey() {
-        try? secrets.delete(for: providerID)
-        hasSavedKey = false
+    /// 从钥匙串删掉 Key。删除失败时 `hasSavedKey` 保持原样并给出 `keySaveError`：界面不能在
+    /// Key 其实还在（并且还在经 iCloud 钥匙串同步）的时候显示「已移除」。
+    @discardableResult
+    public func removeKey() -> Bool {
+        do {
+            try secrets.delete(for: providerID)
+            hasSavedKey = false
+            keySaveError = nil
+            keyLoadError = nil
+            return true
+        } catch {
+            keySaveError = String(localized: "从钥匙串移除失败：\(Self.keychainReason(error))", bundle: ModuleBundle.bundle,
+                                  comment: "移除 API Key 失败；参数是钥匙串给的原因")
+            return false
+        }
     }
 
     /// 测试连接。重复点击时上一次作废。
     public func testConnection(requiresAPIKey: Bool = true) async {
         testTask?.cancel()
         let endpoint = draft.endpoint
-        let key = trimmedKeyDraft.isEmpty ? (((try? secrets.load(for: providerID)) ?? nil) ?? "") : trimmedKeyDraft
+        let key: String
+        if trimmedKeyDraft.isEmpty {
+            do {
+                key = try secrets.load(for: providerID) ?? ""
+            } catch {
+                // 读不到已存的 Key 不等于没有 Key：如实报钥匙串的错，别让用户以为要重新填。
+                testInFlight = false
+                testResult = ProviderConnectionResult(ok: false, message: Self.loadErrorMessage(error))
+                return
+            }
+        } else {
+            key = trimmedKeyDraft
+        }
         let fetch = fetch
         testInFlight = true
         testResult = nil
@@ -182,6 +210,27 @@ public final class ProviderEditorModel {
         keySaveError = nil
         testInFlight = false
         testResult = nil
-        hasSavedKey = ((try? secrets.load(for: providerID)) ?? nil) != nil
+        refreshSavedKey()
+    }
+
+    /// 重读「有没有已存的 Key」。读失败记进 `keyLoadError`，不当成「没有」悄悄吞掉。
+    private func refreshSavedKey() {
+        do {
+            hasSavedKey = try secrets.load(for: providerID) != nil
+            keyLoadError = nil
+        } catch {
+            hasSavedKey = false
+            keyLoadError = Self.loadErrorMessage(error)
+        }
+    }
+
+    /// 钥匙串错误的说明。不走 `LLMServiceError.describe`：那条路把不认识的错误都折成「网络错误」。
+    private static func keychainReason(_ error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    private static func loadErrorMessage(_ error: Error) -> String {
+        String(localized: "读取钥匙串失败：\(Self.keychainReason(error))", bundle: ModuleBundle.bundle,
+               comment: "读已保存的 API Key 失败；参数是钥匙串给的原因")
     }
 }
