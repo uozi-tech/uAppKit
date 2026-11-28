@@ -50,12 +50,13 @@ extension View {
 extension UPaneGroupGeometry {
     /// 凹槽相对组矩形的内缩：贴区域外缘的边缩 `inset`，与相邻组相接的边不缩（两组之间
     /// 已有 6pt 分隔条），顶边让出标签条。
+    /// `stripHeight` 为 0（组标签条隐藏）时顶边按外缘规则处理：贴区域顶边的缩 `inset`。
     static func wellInsets(paneRect: CGRect, areaSize: CGSize,
                            stripHeight: CGFloat) -> EdgeInsets {
         let inset = UPaneWellMetrics.inset
         let epsilon: CGFloat = 0.5
         return EdgeInsets(
-            top: stripHeight,
+            top: stripHeight > 0 ? stripHeight : (paneRect.minY <= epsilon ? inset : 0),
             leading: paneRect.minX <= epsilon ? inset : 0,
             bottom: paneRect.maxY >= areaSize.height - epsilon ? inset : 0,
             trailing: paneRect.maxX >= areaSize.width - epsilon ? inset : 0)

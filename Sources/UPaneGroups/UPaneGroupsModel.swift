@@ -169,6 +169,10 @@ public final class UPaneGroupsModel<Payload> {
     @ObservationIgnored public var makeTabForNewGroup: (() -> UPaneTab<Payload>?)?
     /// `policy.allowsLastGroupEmpty == false` 时，整个区域空掉的回调。
     @ObservationIgnored public var onAreaEmptied: (() -> Void)?
+    /// 拖到某组投放区的标签**不在本模型里**时调用（别的窗口、窗口级标签条上的标签）：
+    /// 标签 id、目标组、投放区。返回 true = app 接住了（通常是先从来源 `detachTab` 再 `insertTab` 进来）。
+    /// nil 或返回 false = 和以前一样什么都不做。
+    @ObservationIgnored public var onExternalTabDrop: ((_ tabID: UUID, _ groupID: UUID, _ zone: PaneDropZone) -> Bool)?
 
     public init(policy: UPaneGroupsPolicy = .init()) {
         let group = UPaneGroup<Payload>()
@@ -383,7 +387,11 @@ public final class UPaneGroupsModel<Payload> {
     /// 组里唯一的标签拖到**本组**边缘时改走 `cloneTab`（真移动会让源组塌缩，
     /// 分完还是一个组，等于没分）。
     public func moveTab(_ tabID: UUID, toGroup targetID: UUID, zone: PaneDropZone) {
-        guard groups[targetID] != nil, let src = locateTab(tabID) else { return }
+        guard groups[targetID] != nil else { return }
+        guard let src = locateTab(tabID) else {
+            _ = onExternalTabDrop?(tabID, targetID, zone)
+            return
+        }
 
         if zone == .center {
             guard src.groupID != targetID else { return }
@@ -459,6 +467,52 @@ public final class UPaneGroupsModel<Payload> {
         groups[dst.groupID]?.activeIndex = insertAt
         activeGroupID = dst.groupID
         if src.groupID != dst.groupID { collapseIfEmpty(src.groupID) }
+    }
+
+    // MARK: 跨模型移交
+
+    /// 把标签从本模型里**摘出来**交给别处（拖到别的窗口、拖出成新窗口）：和 `closeTab` 一样
+    /// 修正下标、塌缩空组，但**不调** `onTabRemoved`（载荷没有被关掉，只是换了主人），
+    /// 也不调 `onAreaEmptied`（整个区域被摘空时由调用方决定怎么办）。找不到返回 nil。
+    @discardableResult
+    public func detachTab(_ tabID: UUID) -> UPaneTab<Payload>? {
+        guard let src = locateTab(tabID), let tab = groups[src.groupID]?.tabs[src.index] else { return nil }
+        removeAdjustingActive(at: src)
+        collapseIfEmpty(src.groupID)
+        return tab
+    }
+
+    /// 把别处摘来的标签放进本模型：`center` = 追加到 `groupID` 那一组并切到前台；边缘 = 在那一侧
+    /// 新开一组只装它。`groupID` 无效时放进活动组。id 已在本模型里时不动。
+    public func insertTab(_ tab: UPaneTab<Payload>, toGroup groupID: UUID? = nil, zone: PaneDropZone = .center) {
+        guard locateTab(tab.id) == nil else { return }
+        let targetID = resolveGroupID(groupID)
+        guard zone != .center else {
+            guard var target = groups[targetID] else { return }
+            target.tabs.append(tab)
+            target.activeIndex = target.tabs.count - 1
+            groups[targetID] = target
+            activeGroupID = targetID
+            return
+        }
+        let (direction, newLeafFirst) = Self.split(for: zone)
+        var group = UPaneGroup<Payload>()
+        group.tabs = [tab]
+        groups[group.id] = group
+        root = root.splitting(paneID: targetID, direction: direction,
+                              newPaneID: group.id, splitID: UUID(),
+                              newLeafFirst: newLeafFirst)
+        activeGroupID = group.id
+    }
+
+    /// 边缘投放区对应的分屏方向与新叶子在前还是在后。`center` 没有意义，按向右处理。
+    nonisolated static func split(for zone: PaneDropZone) -> (SplitDirection, newLeafFirst: Bool) {
+        switch zone {
+        case .leading:           return (.horizontal, true)
+        case .trailing, .center: return (.horizontal, false)
+        case .top:               return (.vertical, true)
+        case .bottom:            return (.vertical, false)
+        }
     }
 
     // MARK: 整体重置

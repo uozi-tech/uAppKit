@@ -33,6 +33,9 @@ public final class DragSourceProbeView: NSView, NSDraggingSource {
     public var makeItem: () -> NSPasteboardItem? = { nil }
     /// 跟随光标的预览图。参数是窗口的 backing scale。
     public var makeImage: (_ scale: CGFloat) -> NSImage? = { _ in nil }
+    /// 拖拽会话结束（松手）时调用：屏幕坐标与目标最终接受的操作。没有任何落点接住
+    /// （松在窗口外、松在不收这种载荷的地方）时操作为空——浏览器式「拖出成新窗口」据此判断。
+    public var onEnded: ((_ screenPoint: NSPoint, _ operation: NSDragOperation) -> Void)?
 
     /// 测试替身。真实拖拽会话会卡在 AppKit 的拖拽循环里，直到真的松开鼠标才返回，
     /// 单测里不能起。
@@ -120,12 +123,18 @@ public final class DragSourceProbeView: NSView, NSDraggingSource {
 
     /// 按住 Option 不改成「拷贝」——来源只给了「移动」，改了就哪儿都放不下。
     public func ignoreModifierKeys(for session: NSDraggingSession) -> Bool { true }
+
+    public func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint,
+                                operation: NSDragOperation) {
+        onEnded?(screenPoint, operation)
+    }
 }
 
 private struct DragSourceProbe<Preview: View>: NSViewRepresentable {
     let deadZone: CGFloat
     let canBegin: () -> Bool
     let item: () -> NSPasteboardItem?
+    let onEnded: ((_ screenPoint: NSPoint, _ operation: NSDragOperation) -> Void)?
     let preview: Preview
 
     func makeNSView(context: Context) -> DragSourceProbeView {
@@ -142,6 +151,7 @@ private struct DragSourceProbe<Preview: View>: NSViewRepresentable {
         view.deadZone = deadZone
         view.canBegin = canBegin
         view.makeItem = item
+        view.onEnded = onEnded
         // `ImageRenderer` 不继承环境：深浅色要显式带过去，否则预览永远按浅色画。
         let preview = preview.environment(\.colorScheme, context.environment.colorScheme)
         view.makeImage = { scale in
@@ -164,14 +174,17 @@ extension View {
     ///   - canBegin: 按下时问一次，返回 false 这次按下不起拖。
     ///   - item: 起拖时调用一次，返回放上拖拽板的内容（`.onDrop` 那头按它的类型认）；
     ///     返回 nil 不起拖。「拖拽开始了」的状态也在这里记。
+    ///   - onEnded: 松手时调用（屏幕坐标、落点接受的操作；没人接住时为空）。可选。
     ///   - preview: 跟随光标的预览，起拖时以本视图为中心摆放。
     public func dragSource<Preview: View>(
         deadZone: CGFloat = DragSourceProbeView.defaultDeadZone,
         canBegin: @escaping () -> Bool = { true },
         item: @escaping () -> NSPasteboardItem?,
+        onEnded: ((_ screenPoint: NSPoint, _ operation: NSDragOperation) -> Void)? = nil,
         @ViewBuilder preview: () -> Preview
     ) -> some View {
-        background(DragSourceProbe(deadZone: deadZone, canBegin: canBegin, item: item, preview: preview()))
+        background(DragSourceProbe(deadZone: deadZone, canBegin: canBegin, item: item, onEnded: onEnded,
+                                   preview: preview()))
     }
 }
 

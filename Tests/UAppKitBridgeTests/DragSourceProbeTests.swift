@@ -154,6 +154,19 @@ final class DragSourceProbeViewTests: XCTestCase {
         XCTAssertEqual(probe.draggingSession(session, sourceOperationMaskFor: .withinApplication), .move)
         XCTAssertEqual(probe.draggingSession(session, sourceOperationMaskFor: .outsideApplication), [])
     }
+
+    /// 松手把屏幕坐标与落点接受的操作交出去；没人接住时操作为空（「拖出成新窗口」靠它判断）。
+    func testEndedReportsScreenPointAndOperation() throws {
+        let session = unsafeBitCast(NSObject(), to: NSDraggingSession.self)   // 实现里不读它
+        var ended: [(NSPoint, NSDragOperation)] = []
+        probe.onEnded = { ended.append(($0, $1)) }
+
+        probe.draggingSession(session, endedAt: NSPoint(x: 10, y: 20), operation: .move)
+        probe.draggingSession(session, endedAt: NSPoint(x: 30, y: 40), operation: [])
+
+        XCTAssertEqual(ended.map(\.0), [NSPoint(x: 10, y: 20), NSPoint(x: 30, y: 40)])
+        XCTAssertEqual(ended.map(\.1), [.move, []])
+    }
 }
 
 /// `dragSource` 修饰器：挂在 SwiftUI 视图上后，探针量到的就是那个视图的范围，预览按当前深浅色出图。

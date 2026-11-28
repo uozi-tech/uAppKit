@@ -60,4 +60,46 @@ public extension View {
         environment(\.uPaneGroupStyle, style)
     }
 }
+
+/// 编辑组自己的标签条画不画。`.hidden` 给「一个窗口只有一条标签条、标签里套分屏」的布局用
+/// （iTerm2 / Ghostty / 浏览器）：窗口级标签条在别处（`UWindowTabStrip`），每个组只装一个窗格、
+/// 不画标签条，内容从组的顶边开始。分隔条、拖到边缘分屏的落点区、凹槽照旧。
+public enum UPaneGroupTabStripVisibility: Sendable, Equatable {
+    case visible
+    case hidden
+}
+
+private struct UPaneGroupTabStripKey: EnvironmentKey {
+    static let defaultValue = UPaneGroupTabStripVisibility.visible
+}
+
+/// 拖拽会话状态的共享实例。默认 nil：每个 `UPaneGroupArea` 各用自己的一份。
+/// 跨窗口拖标签时，所有窗口的标签条与编辑区注入同一份，别的窗口才看得到「正在拖哪个标签」。
+private struct UPaneSharedDragStateKey: EnvironmentKey {
+    static let defaultValue: UPaneDragState? = nil
+}
+
+public extension EnvironmentValues {
+    var uPaneGroupTabStrip: UPaneGroupTabStripVisibility {
+        get { self[UPaneGroupTabStripKey.self] }
+        set { self[UPaneGroupTabStripKey.self] = newValue }
+    }
+
+    var uPaneSharedDragState: UPaneDragState? {
+        get { self[UPaneSharedDragStateKey.self] }
+        set { self[UPaneSharedDragStateKey.self] = newValue }
+    }
+}
+
+public extension View {
+    /// 子树里 `UPaneGroupArea` 的组标签条画不画（默认画）。
+    func uPaneGroupTabStrip(_ visibility: UPaneGroupTabStripVisibility) -> some View {
+        environment(\.uPaneGroupTabStrip, visibility)
+    }
+
+    /// 子树里的 `UPaneGroupArea` 与 `UWindowTabStrip` 共用这一份拖拽状态（跨窗口拖标签用）。
+    func uPaneSharedDragState(_ state: UPaneDragState) -> some View {
+        environment(\.uPaneSharedDragState, state)
+    }
+}
 #endif
