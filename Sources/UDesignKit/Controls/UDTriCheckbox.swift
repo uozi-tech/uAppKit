@@ -65,7 +65,7 @@ public struct UDTriCheckbox: View {
         case .button:
             Button(action: action) { visual }
                 .buttonStyle(.udPlain)
-                .udAccessibilityLabel(accessibilityName.map { Text(verbatim: $0) })
+                .udRowAwareAccessibilityLabel(accessibilityName.map { Text(verbatim: $0) })
                 .accessibilityValue(stateText)
                 .accessibilityAddTraits(state == .off ? [] : .isSelected)
         case .dense:
@@ -74,7 +74,7 @@ public struct UDTriCheckbox: View {
                 // 密集网格里那等于每次状态变化都重建格子。
                 .onTapGesture { if isEnabled { action() } }
                 .accessibilityElement()
-                .accessibilityLabel(Text(accessibilityName ?? ""))
+                .udRowAwareAccessibilityLabel(accessibilityName.map { Text(verbatim: $0) })
                 .accessibilityValue(stateText)
                 .accessibilityAddTraits(state == .off ? .isButton : [.isButton, .isSelected])
         }

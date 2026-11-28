@@ -44,6 +44,7 @@ public struct UDSegmented<Value: Hashable>: View {
         }
         .fixedSize(horizontal: !fillsWidth, vertical: false)
         .frame(maxWidth: fillsWidth ? .infinity : nil)
+        .udRowAwareAccessibilityGroup()
     }
 
     // MARK: - 单段

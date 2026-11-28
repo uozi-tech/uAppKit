@@ -65,6 +65,7 @@ public struct UDSlider: View {
             Slider(value: $value, in: range, step: accessibilityStep) { label ?? Text(verbatim: "") }
                 .udAccessibilityValue(valueLabel.map { Text(verbatim: $0(value)) })
         }
+        .udRowAwareAccessibilityLabel(label)
     }
 
     /// 辅助功能增减一档的步长。

@@ -44,6 +44,7 @@ public struct UDStepper<V: Strideable>: View {
         .clipShape(RoundedRectangle(cornerRadius: UD.Radius.md, style: .continuous))
         .opacity(isEnabled ? 1 : 0.45)
         .allowsHitTesting(isEnabled)
+        .udRowAwareAccessibilityGroup()
     }
 
     private func half(system: String, enabled: Bool, _ action: @escaping () -> Void) -> some View {

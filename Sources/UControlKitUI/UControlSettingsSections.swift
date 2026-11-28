@@ -93,11 +93,11 @@ public struct UControlSettingsSections: View {
         let copy = copy.interface
         return UDSettingsGroup(title: copy.title, footer: copy.footer) {
             UDSettingsRow(label: copy.enableLabel, hint: copy.enableHint) {
-                UDToggle(Bindable(control).isEnabled, label: Text(verbatim: copy.enableLabel))
+                UDToggle(Bindable(control).isEnabled)
             }
 
             UDSettingsRow(label: copy.mutationsLabel, hint: copy.mutationsHint) {
-                UDToggle(Bindable(control).allowMutations, label: Text(verbatim: copy.mutationsLabel))
+                UDToggle(Bindable(control).allowMutations)
                     .disabled(!control.isEnabled)   // UDToggle 自己降透明，这里不再叠一层
             }
 
@@ -121,10 +121,10 @@ public struct UControlSettingsSections: View {
                 UDToggle(Binding(
                     get: { background.launchAtLogin },
                     set: { background.setLaunchAtLogin($0) }
-                ), label: Text(verbatim: copy.launchAtLoginLabel))
+                ))
             }
             UDSettingsRow(label: copy.onDemandLabel, hint: copy.onDemandHint) {
-                UDToggle(Bindable(background).allowOnDemandLaunch, label: Text(verbatim: copy.onDemandLabel))
+                UDToggle(Bindable(background).allowOnDemandLaunch)
             }
             if let error = background.loginItemError {
                 UDSettingsInlineNote(tone: .danger, text: error)
@@ -198,7 +198,7 @@ public struct UControlSettingsSections: View {
                         binding.wrappedValue = newValue
                         Task { await skills.setClientLinkEnabled(newValue) }
                     }
-                ), label: Text(verbatim: copy.label))
+                ))
                 .disabled(skills.clientLinkBusy)
             }
         }

@@ -282,6 +282,9 @@ public struct UDSettingsRow<Trailing: View>: View {
     private let icon: String?
     private let hintStyle: HintStyle
     @ViewBuilder private let trailing: () -> Trailing
+    /// 右侧控件已经拿行标题当了读屏名字（见 `udRowAwareAccessibilityLabel`）：左侧标题文字
+    /// 就不再进 AX，免得同一个名字读两遍。
+    @State private var titleAdoptedByControl = false
 
     public init(label: String, hint: String? = nil, icon: String? = nil, hintStyle: HintStyle = .text,
                 @ViewBuilder trailing: @escaping () -> Trailing) {
@@ -305,18 +308,20 @@ public struct UDSettingsRow<Trailing: View>: View {
                     .font(.system(size: 13))
                     .foregroundStyle(UD.text)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(titleAdoptedByControl)
                 if let hint {
                     hintText(hint)
                 }
             }
             Spacer(minLength: 12)
-            // 把行 label 关联到右侧控件——UDToggle / UDSegmented / Slider 等
-            // 无内建 label，VoiceOver 借此念出「<标签> 开关 / 选择」而非孤立的「开/关」。
+            // 行标题经环境交给右侧控件：UDToggle / UDSegmented / UDSlider / UDStepper / 无标题勾选框
+            // 自己没名字时拿它当读屏名字（显式 label 与调用处外挂的 accessibilityLabel 仍然优先）。
+            // 以前是把标题挂在包住控件的容器上，名字落在组上、开关本身仍是无名的。
             // 右侧先拿到自己的理想宽度（layoutPriority），长说明再折行；否则「查看事件…」会被挤成竖排。
             trailing()
                 .layoutPriority(1)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Text(verbatim: label))
+                .environment(\.udRowAccessibilityLabel, label)
+                .onPreferenceChange(UDRowLabelAdoptedKey.self) { titleAdoptedByControl = $0 }
         }
         .udSettingsRowPadding()
     }
