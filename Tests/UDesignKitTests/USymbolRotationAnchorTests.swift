@@ -64,5 +64,33 @@ final class USymbolRotationAnchorTests: XCTestCase {
         XCTAssertGreaterThan(anchor.y, 0.53, "轴心应在墨迹框中心下方：\(anchor)")
         XCTAssertLessThan(anchor.y, 0.62, "\(anchor)")
     }
+
+    /// 拟合不出（这里用不存在的符号）也要记下来，否则每次求值都重新光栅化 + 拟合。
+    func testMissingAnchorIsCachedToo() {
+        let name = "udesignkit.test.no-such-symbol"
+        XCTAssertNil(USymbolMetrics.rotationAnchor(name))
+        XCTAssertTrue(USymbolMetrics.hasCachedRotationAnchor(name), "nil 结果没进缓存")
+    }
+
+    /// 首次算轴心要光栅化 + 圆拟合（实测 10–300ms）：不转的图标钮不该付这笔，开始转了才算。
+    func testIconButtonComputesAnchorOnlyOnceSpinning() {
+        let name = "square.and.arrow.down.on.square"
+        XCTAssertFalse(USymbolMetrics.hasCachedRotationAnchor(name), "前置：别的用例没算过这个符号")
+
+        func render(spinning: Bool) {
+            let hosting = NSHostingView(rootView: UDIconButton(systemImage: name, isSpinning: spinning) {})
+            hosting.frame = NSRect(x: 0, y: 0, width: 40, height: 40)
+            hosting.layoutSubtreeIfNeeded()
+            hosting.display()
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+            hosting.layoutSubtreeIfNeeded()
+            hosting.display()
+        }
+
+        render(spinning: false)
+        XCTAssertFalse(USymbolMetrics.hasCachedRotationAnchor(name), "不转的图标钮也算了轴心")
+        render(spinning: true)
+        XCTAssertTrue(USymbolMetrics.hasCachedRotationAnchor(name), "转起来时应按圆心转，轴心得算出来")
+    }
 }
 #endif

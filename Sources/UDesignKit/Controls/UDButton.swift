@@ -64,10 +64,16 @@ public struct UDButton: View {
     }
 
     public var body: some View {
-        Button(action: action) {
+        // 进行中只拦鼠标（`allowsHitTesting`）不够：`.keyboardShortcut(.defaultAction)` 的回车、
+        // 全键盘操控的空格、VoiceOver 的按下都不走命中测试，会把「提交」再触发一遍。
+        // 动作里再判一次；不改成 `.disabled`，免得进行中的按钮换成禁用配色。
+        Button(action: performUnlessLoading) {
             HStack(spacing: 6) {
                 if isLoading {
+                    // 对辅助功能藏起来：不藏的话整个按钮的 AX 角色会变成「忙碌指示器」，
+                    // 进行中的按钮在 VoiceOver 里不再是按钮。进行中的语义由调用方切换的文案（「创建中…」）表达。
                     ProgressView().controlSize(.mini).scaleEffect(0.7).tint(spinnerTint)
+                        .accessibilityHidden(true)
                 } else if let systemImage {
                     Image(systemName: systemImage)
                 }
@@ -79,6 +85,11 @@ public struct UDButton: View {
         }
         .buttonStyle(UDButtonStyle(style: style, height: height, fillsWidth: fillsWidth))
         .allowsHitTesting(!isLoading)
+    }
+
+    private func performUnlessLoading() {
+        guard !isLoading else { return }
+        action()
     }
 }
 
@@ -213,18 +224,23 @@ public struct UDIconButton: View {
     var style: Style = .plain
     var weight: Font.Weight = .regular
     var isSpinning = false
+    /// 辅助功能里的按钮名字（不显示）。nil 时退回 SF 符号自带的描述，或调用处外挂的 `.accessibilityLabel`。
+    var label: Text?
     let action: () -> Void
 
     /// - Parameters:
     ///   - weight: 图标笔画粗细；单独站着、显得单薄的图标（如标题栏右端的开关）可用 `.medium`。
     ///   - isSpinning: 图标原地匀速旋转（刷新进行中），见 `UDRefreshButton`。
+    ///   - label: VoiceOver 读的按钮名字。纯图标钮的符号名常常读不出用途（`doc.on.doc` 只读成「文稿」），
+    ///     能说清动作时就传（如「复制 SQL」）。
     public init(systemImage: String, size: CGFloat = 28, style: Style = .plain, weight: Font.Weight = .regular,
-                isSpinning: Bool = false, action: @escaping () -> Void) {
+                isSpinning: Bool = false, label: Text? = nil, action: @escaping () -> Void) {
         self.systemImage = systemImage
         self.size = size
         self.style = style
         self.weight = weight
         self.isSpinning = isSpinning
+        self.label = label
         self.action = action
     }
 
@@ -238,6 +254,7 @@ public struct UDIconButton: View {
             }
         }
         .buttonStyle(UDIconButtonStyle(size: size, style: style))
+        .udAccessibilityLabel(label)
     }
 
     /// 环形符号绕圆心转（墨迹框中心会被箭头撑偏，见 `USymbolMetrics.rotationAnchor`）。
@@ -255,16 +272,19 @@ public struct UDIconButton: View {
 public struct UDRefreshButton: View {
     let isRefreshing: Bool
     var size: CGFloat
+    var label: Text?
     let action: () -> Void
 
-    public init(isRefreshing: Bool, size: CGFloat = 28, action: @escaping () -> Void) {
+    /// - Parameter label: VoiceOver 读的按钮名字，同 `UDIconButton.label`。
+    public init(isRefreshing: Bool, size: CGFloat = 28, label: Text? = nil, action: @escaping () -> Void) {
         self.isRefreshing = isRefreshing
         self.size = size
+        self.label = label
         self.action = action
     }
 
     public var body: some View {
-        UDIconButton(systemImage: "arrow.clockwise", size: size, isSpinning: isRefreshing) {
+        UDIconButton(systemImage: "arrow.clockwise", size: size, isSpinning: isRefreshing, label: label) {
             if !isRefreshing { action() }
         }
     }
@@ -272,10 +292,21 @@ public struct UDRefreshButton: View {
 
 /// 原地匀速旋转（一圈 1 秒）：开始时从 0° 起转；停下时把当前这一圈转完再停，不跳回 0°。
 /// `anchor` 是旋转轴心（环形符号传圆心）。「减弱动态效果」打开时不转，改为半透明。
+///
+/// `anchor` 按需求值（只在真的转起来时算）：`USymbolMetrics.rotationAnchor` 第一次算某个符号要做
+/// 光栅化 + 圆拟合，实测 10–300ms。`UDIconButton` 绝大多数不转，没必要在每个图标钮首帧都付这一笔。
 struct UDSpinningIcon<Content: View>: View {
     let isSpinning: Bool
-    var anchor: UnitPoint = .center
-    @ViewBuilder let content: Content
+    let anchor: () -> UnitPoint
+    let content: Content
+
+    init(isSpinning: Bool, anchor: @escaping @autoclosure () -> UnitPoint = .center,
+         @ViewBuilder content: () -> Content) {
+        self.isSpinning = isSpinning
+        self.anchor = anchor
+        self.content = content()
+    }
+
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// 这一轮开始转的时刻；转完收尾后清空。
     @State private var spinStart: Date?
@@ -300,9 +331,10 @@ struct UDSpinningIcon<Content: View>: View {
             if reduceMotion {
                 content.opacity(isSpinning ? 0.5 : 1)
             } else if let spinStart {
+                let pivot = anchor()
                 TimelineView(.animation) { context in
                     let date = stopAt.map { min(context.date, $0) } ?? context.date
-                    content.rotationEffect(Self.angle(at: date, since: spinStart), anchor: anchor)
+                    content.rotationEffect(Self.angle(at: date, since: spinStart), anchor: pivot)
                 }
             } else {
                 content

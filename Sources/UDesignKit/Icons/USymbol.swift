@@ -168,16 +168,26 @@ public enum USymbolMetrics {
         cacheLock.lock()
         if let hit = anchorCache[key] { cacheLock.unlock(); return hit }
         cacheLock.unlock()
-        guard let ref = reference(name, weight: weight), let center = circleCenter(of: ref.image) else { return nil }
-        let size = ref.image.size
-        // 排版框内墨迹框中心已被挪到框中心（见 `fit` 的 offset），圆心相对墨迹框中心的偏移按比例换算。
-        let anchor = UnitPoint(x: 0.5 + (center.x - ref.ink.midX) / size.width,
+        // 拟合不出（符号不存在 / 圆心落在图外）同样记下：不记的话每次求值都要重新光栅化 + 拟合一遍。
+        var anchor: UnitPoint?
+        if let ref = reference(name, weight: weight), let center = circleCenter(of: ref.image) {
+            let size = ref.image.size
+            // 排版框内墨迹框中心已被挪到框中心（见 `fit` 的 offset），圆心相对墨迹框中心的偏移按比例换算。
+            anchor = UnitPoint(x: 0.5 + (center.x - ref.ink.midX) / size.width,
                                y: 0.5 + (center.y - ref.ink.midY) / size.height)
-        cacheLock.lock(); anchorCache[key] = anchor; cacheLock.unlock()
+        }
+        cacheLock.lock(); anchorCache[key] = .some(anchor); cacheLock.unlock()
         return anchor
     }
 
-    nonisolated(unsafe) private static var anchorCache: [Key: UnitPoint] = [:]
+    /// 测试用：这个符号的轴心是否已经算过（含「算过但为 nil」）。
+    static func hasCachedRotationAnchor(_ name: String, weight: Font.Weight = .regular) -> Bool {
+        let key = Key(name: name, weight: nsFontWeight(weight).rawValue)
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        return anchorCache[key] != nil
+    }
+
+    nonisolated(unsafe) private static var anchorCache: [Key: UnitPoint?] = [:]
 
     /// 墨迹像素的圆心（图像坐标，左上原点，pt）：先对全部墨迹做最小二乘圆拟合（Kåsa），再只留离拟合圆
     /// 不远的像素（环上的笔画）重拟合几轮，把箭头这类不在环上的部分剔掉。
