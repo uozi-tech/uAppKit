@@ -9,13 +9,20 @@ import SwiftUI
 ///
 /// 通过 `@Environment(\.isEnabled)` 响应 `.disabled()`：整体降透明 ~0.45 且不响应点击。
 /// 纯展示组件，只读 `UD` token + `Bool` 绑定，不依赖任何 domain model。
+///
+/// 辅助功能：对外表现为系统开关（`accessibilityRepresentation` 里放一个 `Toggle`），VoiceOver
+/// 读出开 / 关状态，按下即拨动。`label` 是开关的名字；不传时由调用处的 `.accessibilityLabel(_:)`
+/// 命名（行内已有文字标题时两者择一即可）。
 public struct UDToggle: View {
     @Binding var isOn: Bool
     /// ON 态轨道填充色（默认 `UD.accent`）。AI 介入开关传 `UD.aiAccent` 显紫。
     var tint: Color
+    /// 辅助功能里的开关名字，不显示在界面上。
+    var label: Text?
 
-    public init(_ isOn: Binding<Bool>, tint: Color = UD.accentDefault) {
+    public init(_ isOn: Binding<Bool>, label: Text? = nil, tint: Color = UD.accentDefault) {
         self._isOn = isOn
+        self.label = label
         self.tint = tint
     }
 
@@ -36,6 +43,9 @@ public struct UDToggle: View {
         .buttonStyle(.udPlain)
         .opacity(isEnabled ? 1 : 0.45)
         .allowsHitTesting(isEnabled)
+        .accessibilityRepresentation {
+            Toggle(isOn: $isOn) { label ?? Text(verbatim: "") }
+        }
     }
 
     // MARK: - 轨道
