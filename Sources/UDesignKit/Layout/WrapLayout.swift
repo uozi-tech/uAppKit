@@ -26,12 +26,21 @@ public struct WrapLayout: Layout {
         var height: CGFloat = 0
     }
 
+    /// 子视图的尺寸：放得下就按理想尺寸；理想宽度超过整行宽时按行宽重新提议，
+    /// 让长文本在行内折行 / 截断，而不是按理想宽度画出容器（居中时还会被切掉左半）。
+    private func itemSize(_ subview: LayoutSubview, maxWidth: CGFloat) -> CGSize {
+        let ideal = subview.sizeThatFits(.unspecified)
+        guard maxWidth.isFinite, ideal.width > maxWidth else { return ideal }
+        let fitted = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+        return CGSize(width: min(fitted.width, maxWidth), height: fitted.height)
+    }
+
     /// 按 maxWidth 贪心地把子视图打包成若干行。
     private func rows(maxWidth: CGFloat, _ subviews: Subviews) -> [Row] {
         var rows: [Row] = []
         var cur = Row()
         for i in subviews.indices {
-            let s = subviews[i].sizeThatFits(.unspecified)
+            let s = itemSize(subviews[i], maxWidth: maxWidth)
             let prospective = cur.indices.isEmpty ? s.width : cur.width + spacing + s.width
             if !cur.indices.isEmpty, prospective > maxWidth {
                 rows.append(cur)
@@ -65,7 +74,7 @@ public struct WrapLayout: Layout {
                 ? bounds.minX + (bounds.width - row.width) / 2
                 : bounds.minX
             for i in row.indices {
-                let s = subviews[i].sizeThatFits(.unspecified)
+                let s = itemSize(subviews[i], maxWidth: bounds.width)
                 subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(s))
                 x += s.width + spacing
             }
