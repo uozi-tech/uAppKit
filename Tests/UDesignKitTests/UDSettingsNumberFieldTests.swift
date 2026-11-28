@@ -2,6 +2,7 @@ import XCTest
 @testable import UDesignKit
 
 /// 设置行整数输入框的钳值：提交时把草稿钳进 `minValue...maxValue`，钳后的值同时写回输入框。
+@MainActor
 final class UDSettingsNumberFieldTests: XCTestCase {
     func testClampKeepsValuesInRange() {
         XCTAssertEqual(UDSettingsNumberField.clamped(999, min: 1, max: 100), 100)

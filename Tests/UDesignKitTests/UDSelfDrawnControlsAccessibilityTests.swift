@@ -190,7 +190,7 @@ final class UDSelfDrawnControlsAccessibilityTests: XCTestCase {
             role($0) == NSAccessibility.Role.slider.rawValue && label($0) == "字号"
         }
         XCTAssertEqual(numberValue(node) ?? -1, 10, accuracy: 0.001)
-        (node as AnyObject).accessibilityPerformIncrement?()
+        _ = (node as AnyObject).accessibilityPerformIncrement?()
         XCTAssertTrue(waitUntil { number.value == 11 }, "AX 增加一档没有写回绑定：\(number.value)")
     }
 
