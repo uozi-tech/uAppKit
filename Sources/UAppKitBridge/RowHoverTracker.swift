@@ -221,9 +221,17 @@ public final class RowHoverState {
     /// 现在悬着的行。普通存储属性，写它不触发任何 SwiftUI 失效。
     public private(set) var hoveredID: AnyHashable?
 
-    /// 行 id → 观察盒。行第一次求 body 时按需建；`LazyVStack` 的行一经实例化就
-    /// 不释放，所以这张表最大只涨到「被滚到过的行数」，一行几十字节。
+    /// 行 id → 观察盒。行第一次求 body 时按需建，行**消失**时（`onDisappear`）摘掉 ——
+    /// 只留当前在场的行和正悬着的那一行。
+    ///
+    /// 以前只建不删，注释说「最多涨到被滚到过的行数」，但那只在行集不变时成立：进目录、
+    /// 过滤、排序都会换一批新 id，同一个 `RowHoverState` 活多久，旧 id 的盒子就攒多久。
     private var boxes: [AnyHashable: RowHoverBox] = [:]
+    /// 每个盒子当前有几个在场的行在用（`attach` / `detach` 记账）。
+    private var attachCounts: [AnyHashable: Int] = [:]
+
+    /// 表里现有多少个盒子。给测试断言「摘得掉」用。
+    var boxCount: Int { boxes.count }
 
     public nonisolated init(isEnabled: Bool? = nil) {
         self.isEnabled = isEnabled ?? Self.isEnabledByDefault
@@ -237,10 +245,35 @@ public final class RowHoverState {
         return box
     }
 
+    /// 行出现：把它手里那个盒子登记回表里（被摘掉过就原样放回，保持身份不变 —— 行若没有
+    /// 重求 body，它的修饰器还攥着旧盒子），并把盒子对齐到现在的悬停行。
+    func attach(_ box: RowHoverBox, for id: AnyHashable) {
+        if boxes[id] == nil { boxes[id] = box }
+        attachCounts[id, default: 0] += 1
+        let hovered = hoveredID == id
+        if box.isHovered != hovered { box.isHovered = hovered }
+    }
+
+    /// 行消失：没人再用、也没在悬着的盒子从表里摘掉。
+    func detach(_ box: RowHoverBox, for id: AnyHashable) {
+        let remaining = max(0, (attachCounts[id] ?? 0) - 1)
+        guard remaining == 0 else {
+            attachCounts[id] = remaining
+            return
+        }
+        attachCounts[id] = nil
+        // 悬着的那一行留着：`setHovered` 挪走时还要靠它把亮态灭掉。
+        if hoveredID != id, boxes[id] === box { boxes[id] = nil }
+    }
+
     /// 把悬停挪到 `id`（nil = 谁都不悬）。只翻前后两个盒子。
     public func setHovered(_ id: AnyHashable?) {
         guard hoveredID != id else { return }
-        if let old = hoveredID, let box = boxes[old], box.isHovered { box.isHovered = false }
+        if let old = hoveredID, let box = boxes[old] {
+            if box.isHovered { box.isHovered = false }
+            // 悬着时消失的行（`detach` 特意留下的那一个）这会儿可以摘了。
+            if attachCounts[old] == nil { boxes[old] = nil }
+        }
         hoveredID = id
         if let id {
             // 没建过盒子的行（还没求过 body）不必现建：等它求 body 时会从
@@ -482,8 +515,8 @@ public struct RowHoverModifier: ViewModifier {
 
     public func body(content: Content) -> some View {
         if let state, state.isEnabled {
-            content.modifier(TrackedRowHoverModifier(box: state.box(for: id),
-                                                     initialValue: state.hoveredID == id,
+            content.modifier(TrackedRowHoverModifier(state: state, id: id,
+                                                     box: state.box(for: id),
                                                      action: action))
         } else {
             // 没有跟踪器（或被探针关掉）时退回逐行 `.onHover` + 滚动闸门 ——
@@ -494,8 +527,9 @@ public struct RowHoverModifier: ViewModifier {
 }
 
 private struct TrackedRowHoverModifier: ViewModifier {
+    let state: RowHoverState
+    let id: AnyHashable
     let box: RowHoverBox
-    let initialValue: Bool
     let action: (Bool) -> Void
 
     func body(content: Content) -> some View {
@@ -510,16 +544,14 @@ private struct TrackedRowHoverModifier: ViewModifier {
             action(hovering)
         }
         .onAppear {
-            // 行是滚出来才建的，建的时候光标可能已经压在它上面了。
-            // 两种补法：盒子还没建过（`setHovered` 不为没求过 body 的行现建盒子）
-            // 就翻盒子（`onChange` 会接住）；盒子已经是 true 而行是新的一份
-            // `@State`，就直接把值交给它。
-            if box.isHovered {
-                action(true)
-            } else if initialValue {
-                box.isHovered = true
-            }
+            // 行是滚出来才建的，建的时候光标可能已经压在它上面了。`attach` 把盒子对齐到
+            // 现在的悬停行：盒子由 false 翻 true 时 `onChange` 会接住；盒子本来就是 true
+            // 而行是新的一份 `@State`，`onChange` 不会发，就直接把值交给它。
+            let wasHovered = box.isHovered
+            state.attach(box, for: id)
+            if wasHovered, box.isHovered { action(true) }
         }
+        .onDisappear { state.detach(box, for: id) }
     }
 }
 

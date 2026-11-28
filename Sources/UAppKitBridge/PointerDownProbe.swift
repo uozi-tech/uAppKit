@@ -65,7 +65,13 @@ public final class PointerDownProbeView: NSView {
 
     private var monitor: Any?
 
-    /// 当前是否正在旁观事件。跟随"在不在窗口里"。
+    /// 是否旁观按下。`false` 时连监视器都不装：本地监视器是进程级的，窗口里每一次按下都要把
+    /// 所有装着的监视器跑一遍，暂时不需要回调的探针（保活下的后台面板）不该占一份。
+    public var isEnabled = true {
+        didSet { if isEnabled != oldValue { updateMonitor() } }
+    }
+
+    /// 当前是否正在旁观事件。跟随"在不在窗口里"与 `isEnabled`。
     public var isObserving: Bool { monitor != nil }
 
     /// 对命中测试完全透明——AppKit 内容照常拿到自己的 `mouseDown`。
@@ -73,7 +79,11 @@ public final class PointerDownProbeView: NSView {
 
     public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil {
+        updateMonitor()
+    }
+
+    private func updateMonitor() {
+        if window == nil || !isEnabled {
             removeMonitor()
         } else if monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
@@ -95,15 +105,18 @@ public final class PointerDownProbeView: NSView {
 }
 
 private struct PointerDownProbe: NSViewRepresentable {
+    let isEnabled: Bool
     let action: () -> Void
 
     func makeNSView(context: Context) -> PointerDownProbeView {
         let view = PointerDownProbeView()
+        view.isEnabled = isEnabled
         view.onPointerDown = action
         return view
     }
 
     func updateNSView(_ nsView: PointerDownProbeView, context: Context) {
+        nsView.isEnabled = isEnabled
         nsView.onPointerDown = action
     }
 
@@ -122,8 +135,11 @@ extension View {
     ///
     /// 多个区域重叠时（例如同一组里前台与后台标签的矩形完全重合），每个探针都会
     /// 各响应一次——由调用方在闭包里按"当前是否可见/在前台"过滤。
-    public func onPointerDown(perform action: @escaping () -> Void) -> some View {
-        background(PointerDownProbe(action: action))
+    ///
+    /// `isEnabled` 为 false 时不装 NSEvent 监视器、也不回调（视图身份不变，翻回 true 即恢复）。
+    /// 给「一直挂着、但只有一份该响应」的场合用，例如保活的后台面板。
+    public func onPointerDown(isEnabled: Bool = true, perform action: @escaping () -> Void) -> some View {
+        background(PointerDownProbe(isEnabled: isEnabled, action: action))
     }
 }
 

@@ -246,6 +246,26 @@ final class PointerDownProbeViewTests: XCTestCase {
         probe.removeFromSuperview()
         XCTAssertFalse(probe.isObserving, "离开窗口必须摘掉监视器")
     }
+
+    /// `isEnabled = false` 的探针连监视器都不装（保活的后台面板用）；翻回来就重新装上。
+    func testDisabledProbeInstallsNoMonitor() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 200),
+                              styleMask: [.titled], backing: .buffered, defer: true)
+        let probe = PointerDownProbeView(frame: NSRect(x: 0, y: 0, width: 100, height: 100))
+        probe.isEnabled = false
+        window.contentView?.addSubview(probe)
+        XCTAssertFalse(probe.isObserving, "关掉的探针不该占一份进程级监视器")
+
+        probe.isEnabled = true
+        XCTAssertTrue(probe.isObserving)
+
+        probe.isEnabled = false
+        XCTAssertFalse(probe.isObserving)
+
+        probe.isEnabled = true
+        probe.removeFromSuperview()
+        XCTAssertFalse(probe.isObserving, "离开窗口照样摘掉")
+    }
 }
 
 #endif

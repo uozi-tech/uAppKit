@@ -100,6 +100,68 @@ final class RowHoverStateTests: XCTestCase {
         XCTAssertTrue(state.box(for: "a") === state.box(for: "a"))
         XCTAssertFalse(state.box(for: "a") === state.box(for: "b"))
     }
+
+    /// 行消失就把它的盒子摘掉：进目录 / 过滤换一批 id 之后，旧 id 的盒子不该一直攒着。
+    func testBoxesOfVanishedRowsArePruned() {
+        let state = RowHoverState(isEnabled: true)
+        for id in 0..<50 {
+            state.attach(state.box(for: id), for: id)
+        }
+        XCTAssertEqual(state.boxCount, 50)
+
+        // 换了一批行：旧的全部消失、新的出现。
+        for id in 0..<50 { state.detach(state.box(for: id), for: id) }
+        for id in 100..<110 { state.attach(state.box(for: id), for: id) }
+        XCTAssertEqual(state.boxCount, 10, "旧行的盒子没摘掉")
+    }
+
+    /// 正悬着的那一行消失时盒子先留着（挪走悬停时还要靠它灭掉亮态），挪走之后再摘。
+    func testHoveredRowKeepsItsBoxUntilHoverMovesAway() {
+        let state = RowHoverState(isEnabled: true)
+        let a = state.box(for: "a")
+        state.attach(a, for: "a")
+        state.setHovered("a")
+        XCTAssertTrue(a.isHovered)
+
+        state.detach(a, for: "a")
+        XCTAssertEqual(state.boxCount, 1, "悬着的行刚消失，盒子要留着")
+
+        state.setHovered("b")
+        XCTAssertFalse(a.isHovered, "挪走悬停要把它灭掉")
+        XCTAssertEqual(state.boxCount, 0)
+    }
+
+    /// 行没重求 body 就又出现了（`LazyVStack` 复用同一份修饰器）：它手里攥的还是旧盒子。
+    /// `attach` 得把**那个**盒子放回表里，并对齐到现在的悬停行，否则这一行再也亮不起来。
+    func testReattachingRestoresTheSameBoxAndSyncsHover() {
+        let state = RowHoverState(isEnabled: true)
+        let a = state.box(for: "a")
+        state.attach(a, for: "a")
+        state.detach(a, for: "a")
+        XCTAssertEqual(state.boxCount, 0)
+
+        state.setHovered("a")              // 表里没有 a 的盒子，什么都不翻
+        XCTAssertFalse(a.isHovered)
+
+        state.attach(a, for: "a")
+        XCTAssertTrue(state.box(for: "a") === a, "重新出现的行要拿回自己那个盒子")
+        XCTAssertTrue(a.isHovered, "出现时要对齐到现在的悬停行")
+
+        state.setHovered(nil)
+        XCTAssertFalse(a.isHovered)
+    }
+
+    /// 同一个 id 同时有两处在场（计数到 0 之前不摘）。
+    func testBoxStaysWhileAnyRowStillUsesIt() {
+        let state = RowHoverState(isEnabled: true)
+        let a = state.box(for: "a")
+        state.attach(a, for: "a")
+        state.attach(a, for: "a")
+        state.detach(a, for: "a")
+        XCTAssertEqual(state.boxCount, 1)
+        state.detach(a, for: "a")
+        XCTAssertEqual(state.boxCount, 0)
+    }
 }
 
 /// 追踪层本身：一块追踪区、按落点算行、滚动期间不更新、停下补算一次。
