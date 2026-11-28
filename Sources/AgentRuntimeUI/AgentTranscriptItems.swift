@@ -89,10 +89,22 @@ public enum AgentTranscriptItems {
 }
 
 extension AgentRuntimeSession {
-    /// 当前会话的面板行。
+    /// 当前会话的面板行。按 `transcriptRevision` 缓存：只有消息、展示身份、展示别名或正在跑的
+    /// 工具变了才重新折叠；流式文字、状态行这些高频变化直接命中缓存。
     public var transcriptItems: [AgentTranscriptItem] {
-        AgentTranscriptItems.make(messages: messages, messageIDs: messageIDs,
-                                  displayOverrides: userDisplayOverrides, runningToolCallID: runningToolCallID)
+        // 命中缓存也要读一遍这几个被观察的属性：调用方视图靠这次读取订阅它们的变化。
+        let messages = messages
+        let messageIDs = messageIDs
+        let overrides = userDisplayOverrides
+        let running = runningToolCallID
+        if let cache = transcriptCache, cache.revision == transcriptRevision,
+           let items = cache.value as? [AgentTranscriptItem] {
+            return items
+        }
+        let items = AgentTranscriptItems.make(messages: messages, messageIDs: messageIDs,
+                                              displayOverrides: overrides, runningToolCallID: running)
+        transcriptCache = (transcriptRevision, items)
+        return items
     }
 
     /// 状态行文案；空闲 / 正在吐字时为 nil（吐字由流式气泡自己表现）。

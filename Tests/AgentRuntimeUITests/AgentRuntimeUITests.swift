@@ -75,6 +75,37 @@ final class AgentRuntimeUITests: XCTestCase {
         XCTAssertFalse(code.contains { $0.contains(".udShadow(") }, "历史下拉的内容不要再自带 udShadow")
     }
 
+    /// 面板行按会话的修订号缓存：消息不变就原样返回，变了才重新折叠。
+    func testTranscriptItemsAreCachedUntilDisplayInputsChange() {
+        let session = AgentRuntimeSession(
+            provider: PanelProvider(), model: "m", tools: AgentToolRegistry<Int>(),
+            environment: .fixed(systemPrompt: "", toolContext: 0), approvalGate: AutoDenyApprovalGate())
+        session.restore(messages: [.user("expanded"), .assistant(content: "好", toolCalls: [])],
+                        displayOverrides: [0: "/x"])
+        let first = session.transcriptItems
+        XCTAssertEqual(first.map(\.kind), [.user(text: "/x"), .assistant(text: "好", toolCalls: [])])
+        XCTAssertEqual(session.transcriptCache?.revision, session.transcriptRevision, "算过一次就记下")
+        XCTAssertEqual(session.transcriptItems, first)
+
+        session.restore(messages: [.user("新的")])
+        XCTAssertNotEqual(session.transcriptCache?.revision, session.transcriptRevision, "消息变了，缓存作废")
+        XCTAssertEqual(session.transcriptItems.map(\.kind), [.user(text: "新的")])
+        XCTAssertEqual(session.transcriptCache?.revision, session.transcriptRevision)
+    }
+
+    /// 只能盯源文本：没选模型时发送不清草稿；流式文字只在独立的末尾视图里读。
+    func testPanelSourceGuardsForDraftAndFooter() throws {
+        let file = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/AgentRuntimeUI/UDAgentPanel.swift")
+        let panel = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(panel.contains("if session.canSubmit { draft = \"\" }"), "没选模型时草稿要留着")
+        let footerStart = try XCTUnwrap(panel.range(of: "struct UDAgentPanelFooter"))
+        let panelBody = panel[..<footerStart.lowerBound]
+        XCTAssertFalse(panelBody.contains("streamingText"), "UDAgentPanel 本体不读流式文字")
+        XCTAssertTrue(panel[footerStart.lowerBound...].contains("session.streamingText"))
+    }
+
     #if os(macOS)
     private var windows: [NSWindow] = []
 

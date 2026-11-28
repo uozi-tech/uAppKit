@@ -1,6 +1,7 @@
 #if os(macOS)
 import AgentKit
 import AgentRuntime
+import SwiftData
 import SwiftUI
 import UDesignKit
 
@@ -38,7 +39,7 @@ public struct UDAgentHistoryMenu: View {
                 .font(.system(size: 12))
                 .foregroundStyle(open ? UD.text : UD.text3)
                 .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(open ? UD.uw06 : Color.clear))
+                .background(open ? UD.uw06 : Color.clear, in: RoundedRectangle(cornerRadius: UD.Radius.sm))
                 .accessibilityLabel(String(localized: "历史对话", bundle: ModuleBundle.bundle))
         } content: {
             HistoryList(store: store, scopeID: scopeID, newTitle: newTitle, emptyTitle: emptyTitle,
@@ -56,12 +57,26 @@ private struct HistoryList: View {
     let onNew: () -> Void
     let onDelete: (ChatSession) -> Void
 
+    /// 一行要显示的东西，打开浮层时取一次：`preview` 要扫一遍该会话的全部消息，
+    /// 不能留在 `body` 里每次求值都算。
+    struct Entry: Identifiable {
+        let session: ChatSession
+        let id: PersistentIdentifier
+        let preview: String
+
+        @MainActor init(_ session: ChatSession) {
+            self.session = session
+            id = session.persistentModelID
+            preview = session.preview
+        }
+    }
+
     @Environment(\.udMenuDismiss) private var dismiss
-    @State private var sessions: [ChatSession] = []
+    @State private var entries: [Entry] = []
 
     var body: some View {
         VStack(spacing: 0) {
-            if sessions.isEmpty {
+            if entries.isEmpty {
                 Text(emptyTitle)
                     .font(UD.font(12))
                     .foregroundStyle(UD.text3)
@@ -70,8 +85,8 @@ private struct HistoryList: View {
             } else {
                 ScrollView {
                     VStack(spacing: 1) {
-                        ForEach(sessions, id: \.persistentModelID) { session in
-                            row(session)
+                        ForEach(entries) { entry in
+                            row(entry)
                         }
                     }
                     .padding(4)
@@ -99,13 +114,14 @@ private struct HistoryList: View {
         .frame(width: 290)
         .background(UD.overlay)
         .clipShape(RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1))
+        .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(UD.border, lineWidth: 1) }
         // 不自带落影：`.anchoredPanel` 已给内容套了 `udShadow(.md)`。再叠一层时外层阴影连内层阴影一起投，
         // 拖到浮层下方 24pt 透明边之外被窗口裁成一条硬边灰块（uGit 助手面板「历史对话」下方的空白）。
-        .onAppear { sessions = store.sessions(scopeID: scopeID, limit: 100) }
+        .onAppear { entries = store.sessions(scopeID: scopeID, limit: 100).map(Entry.init) }
     }
 
-    private func row(_ session: ChatSession) -> some View {
+    private func row(_ entry: Entry) -> some View {
+        let session = entry.session
         let isActive = session.id == store.currentSession?.id
         return HStack(spacing: 6) {
             Button {
@@ -123,8 +139,8 @@ private struct HistoryList: View {
                             .font(UD.font(10))
                             .foregroundStyle(UD.text3)
                     }
-                    if !session.preview.isEmpty {
-                        Text(session.preview)
+                    if !entry.preview.isEmpty {
+                        Text(entry.preview)
                             .font(UD.font(11))
                             .foregroundStyle(UD.text3)
                             .lineLimit(1)
@@ -137,8 +153,7 @@ private struct HistoryList: View {
             .accessibilityAddTraits(isActive ? [.isButton, .isSelected] : .isButton)
 
             Button {
-                onDelete(session)
-                sessions.removeAll { $0.id == session.id }
+                delete(entry)
             } label: {
                 Image(systemName: "trash").font(.system(size: 10)).foregroundStyle(UD.text4)
                     .frame(width: 20, height: 20)
@@ -149,7 +164,14 @@ private struct HistoryList: View {
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 8)
-        .background(RoundedRectangle(cornerRadius: UD.Radius.sm).fill(isActive ? UD.accentSoft : Color.clear))
+        .background(isActive ? UD.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: UD.Radius.sm))
+    }
+
+    /// 按删之前取好的 `persistentModelID` 摘行：删掉之后不再读这个模型对象的任何属性。
+    private func delete(_ entry: Entry) {
+        let id = entry.id
+        onDelete(entry.session)
+        entries.removeAll { $0.id == id }
     }
 }
 #endif

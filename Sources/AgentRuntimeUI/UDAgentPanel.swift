@@ -94,9 +94,13 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
         VStack(spacing: 0) {
             header()
             UDAgentTranscript(rows: items, resetToken: items.first?.id) { item in
-                row(item)
+                // 固定包一层：行内 `switch` 的分支不进 ForEach 元素的结构身份，LazyVStack 才走快路径。
+                VStack(alignment: .leading, spacing: 0) {
+                    row(item)
+                }
             } footer: {
-                footer
+                // 独立成视图：流式文字（每 50ms）与状态行只让这一小块重算，不带着整个面板重折消息流。
+                UDAgentPanelFooter(session: session, approvals: approvals, message: message)
             } empty: {
                 UDAgentEmptyState(
                     systemImage: text.emptySystemImage,
@@ -138,7 +142,7 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 11).fill(UD.accentTint))
+                    .background(UD.accentTint, in: RoundedRectangle(cornerRadius: 11))
             }
         case .assistant(let content, let calls):
             VStack(alignment: .leading, spacing: 8) {
@@ -148,39 +152,6 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
             .frame(maxWidth: .infinity, alignment: .leading)
         case .orphanToolResult(_, let content, let isError):
             UDAgentToolTrace(name: String(localized: "结果", bundle: ModuleBundle.bundle, comment: "没有对应工具调用的工具结果的标题"), arguments: "", result: content, status: isError ? .failed : .done)
-        }
-    }
-
-    @ViewBuilder
-    private var footer: some View {
-        if let streaming = session.streamingText, !streaming.isEmpty {
-            message(streaming, true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        if let pending = approvals.pending {
-            let request = pending.request
-            UDAgentApprovalCard(
-                toolName: request.toolName, reason: request.reason, note: request.policyNote,
-                detail: request.displayText, isDestructive: !request.allowsSessionGrant,
-                onDeny: { approvals.decide(.denied, for: pending.id) },
-                onAllow: { approvals.decide(.granted, for: pending.id) },
-                onAllowForSession: request.allowsSessionGrant
-                    ? { approvals.decide(.grantedForSession, for: pending.id) } : nil)
-            .id(pending.id)
-        } else if let line = session.statusLine {
-            switch line {
-            case .busy(let label):
-                HStack(spacing: 7) {
-                    ProgressView().controlSize(.small)
-                    Text(label).font(UD.font(11.5)).foregroundStyle(UD.text3)
-                }
-            case .error(let message):
-                Text(message)
-                    .font(UD.font(11.5))
-                    .foregroundStyle(UD.danger)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
         }
     }
 
@@ -235,7 +206,9 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
     }
 
     private func send(_ prompt: String, display: String?, delivery: AgentQueuedMessage.Delivery) {
-        draft = ""
+        // 还没选模型时这条消息发不出去：草稿留在输入框里（选好模型再按 ↩ 即可），
+        // 错误照旧由会话的状态行给出。
+        if session.canSubmit { draft = "" }
         let session = session
         Task { await session.submit(prompt, displayAs: display, delivery: delivery) }
     }
@@ -296,6 +269,48 @@ public struct UDAgentPanel<Context: Sendable, Message: View, ToolCard: View, Hea
     private func accept(_ command: SlashCommand) {
         draft = "/\(command.trigger) "
         inputFocused = true
+    }
+}
+
+// MARK: - 消息流末尾
+
+/// 消息流末尾：正在吐的回复、审批卡、状态行。独立成视图，会话的流式文字、状态与待审批
+/// 只有它读，流式刷新不会让 `UDAgentPanel.body` 重新求值。
+struct UDAgentPanelFooter<Context: Sendable, Message: View>: View {
+    let session: AgentRuntimeSession<Context>
+    let approvals: AgentApprovalQueue
+    let message: (String, Bool) -> Message
+
+    var body: some View {
+        if let streaming = session.streamingText, !streaming.isEmpty {
+            message(streaming, true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        if let pending = approvals.pending {
+            let request = pending.request
+            UDAgentApprovalCard(
+                toolName: request.toolName, reason: request.reason, note: request.policyNote,
+                detail: request.displayText, isDestructive: !request.allowsSessionGrant,
+                onDeny: { approvals.decide(.denied, for: pending.id) },
+                onAllow: { approvals.decide(.granted, for: pending.id) },
+                onAllowForSession: request.allowsSessionGrant
+                    ? { approvals.decide(.grantedForSession, for: pending.id) } : nil)
+            .id(pending.id)
+        } else if let line = session.statusLine {
+            switch line {
+            case .busy(let label):
+                HStack(spacing: 7) {
+                    ProgressView().controlSize(.small)
+                    Text(label).font(UD.font(11.5)).foregroundStyle(UD.text3)
+                }
+            case .error(let message):
+                Text(message)
+                    .font(UD.font(11.5))
+                    .foregroundStyle(UD.danger)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 }
 
